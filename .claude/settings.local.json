@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node -v)",
+      "Bash(npm -v)",
+      "Bash(npm install *)",
+      "Bash(npx tsc *)",
+      "Bash(echo \"EXIT: $?\")",
+      "Bash(curl -s -H \"Authorization: Bearer dev-secret-change-me\" \"http://localhost:3000/api/cron/fx\")",
+      "Bash(curl -s \"https://www.nrb.org.np/api/forex/v1/rates?from=2026-07-08&to=2026-07-12&per_page=100&page=1\")",
+      "Bash(curl -s \"https://www.nrb.org.np/api/forex/v1/rates?from=2026-07-07&to=2026-07-12&per_page=100\" -H \"Accept: application/json\")",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(type\\(d['data']\\), type\\(d['data'].get\\('payload'\\)\\)\\)\")"
+    ]
+  }
+}
