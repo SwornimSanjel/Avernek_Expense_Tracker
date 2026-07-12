@@ -12,3 +12,6 @@
 
 [functions."fx-refresh"]
   schedule = "0 4 * * *"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
