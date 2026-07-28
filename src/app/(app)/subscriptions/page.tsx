@@ -5,6 +5,7 @@ import RecurringRow from "@/components/RecurringRow";
 import { npr, usd } from "@/lib/format";
 import type { AppUser, Category, Recurring, Vendor } from "@/lib/types";
 import { differenceInCalendarDays, parseISO } from "date-fns";
+import { isAppOwner } from "@/lib/authz";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +14,7 @@ export default async function SubscriptionsPage() {
   const {
     data: { user },
   } = await supabase.auth.getUser();
+  const canManage = isAppOwner(user?.email);
 
   const [
     { data: recs },
@@ -118,23 +120,25 @@ export default async function SubscriptionsPage() {
                 </div>
                 <div className="text-xs muted">/{r.cycle}</div>
               </div>
-              <RecurringRow
-                id={r.id}
-                isActive={r.is_active}
-                amount={Number(r.amount)}
-                currency={r.currency}
-                cycle={r.cycle}
-                nextRenewalDate={r.next_renewal_date}
-                paidByUserId={r.paid_by_user_id}
-                users={users}
-                shares={(r.recurring_shares ?? []).map((share) => ({
-                  userId: share.user_id,
-                  amount: Number(share.amount),
-                }))}
-                recurring={r}
-                categories={categories}
-                vendors={vendors}
-              />
+              {canManage && (
+                <RecurringRow
+                  id={r.id}
+                  isActive={r.is_active}
+                  amount={Number(r.amount)}
+                  currency={r.currency}
+                  cycle={r.cycle}
+                  nextRenewalDate={r.next_renewal_date}
+                  paidByUserId={r.paid_by_user_id}
+                  users={users}
+                  shares={(r.recurring_shares ?? []).map((share) => ({
+                    userId: share.user_id,
+                    amount: Number(share.amount),
+                  }))}
+                  recurring={r}
+                  categories={categories}
+                  vendors={vendors}
+                />
+              )}
             </div>
           );
         })}

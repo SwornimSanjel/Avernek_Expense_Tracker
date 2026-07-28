@@ -4,6 +4,27 @@ import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { LogoWord } from "@/components/Logo";
 
+function authErrorMessage(error: unknown) {
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === "object" &&
+          error !== null &&
+          "message" in error &&
+          typeof error.message === "string"
+        ? error.message
+        : "";
+
+  if (
+    message.toLowerCase().includes("failed to fetch") ||
+    message.toLowerCase().includes("network")
+  ) {
+    return "The sign-in service is unreachable. Ask the administrator to check the Supabase project URL and redeploy the site.";
+  }
+
+  return message || "Sign-in failed. Please try again.";
+}
+
 export default function LoginPage() {
   const supabase = createClient();
   const [email, setEmail] = useState("");
@@ -13,24 +34,36 @@ export default function LoginPage() {
 
   async function signInWithGoogle() {
     setError(null);
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: { redirectTo: `${location.origin}/auth/callback` },
-    });
-    if (error) setError(error.message);
+    setLoading(true);
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: { redirectTo: `${location.origin}/auth/callback` },
+      });
+      if (error) setError(authErrorMessage(error));
+    } catch (error) {
+      setError(authErrorMessage(error));
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function signInWithEmail(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
     setError(null);
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: { emailRedirectTo: `${location.origin}/auth/callback` },
-    });
-    setLoading(false);
-    if (error) setError(error.message);
-    else setSent(true);
+    try {
+      const { error } = await supabase.auth.signInWithOtp({
+        email,
+        options: { emailRedirectTo: `${location.origin}/auth/callback` },
+      });
+      if (error) setError(authErrorMessage(error));
+      else setSent(true);
+    } catch (error) {
+      setError(authErrorMessage(error));
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -53,7 +86,7 @@ export default function LoginPage() {
               type="email"
               required
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(event) => setEmail(event.target.value)}
               placeholder="you@avernek.com"
               className="input"
             />
@@ -69,8 +102,12 @@ export default function LoginPage() {
           <div className="h-px flex-1" style={{ background: "var(--line)" }} />
         </div>
 
-        <button onClick={signInWithGoogle} className="btn w-full">
-          Continue with Google
+        <button
+          onClick={signInWithGoogle}
+          disabled={loading}
+          className="btn w-full"
+        >
+          {loading ? "Connecting…" : "Continue with Google"}
         </button>
 
         {error && (

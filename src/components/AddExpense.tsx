@@ -198,7 +198,7 @@ export default function AddExpense({
               {users.map((u) => (
                 <option key={u.id} value={u.id}>
                   {u.name}
-                  {!u.is_core_member ? " (guest)" : ""}
+                  {!u.is_core_member ? " (manual split)" : ""}
                 </option>
               ))}
             </select>

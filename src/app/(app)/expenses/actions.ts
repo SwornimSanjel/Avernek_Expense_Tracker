@@ -10,6 +10,7 @@ import {
   toExpenseShareRows,
   validateShareTotal,
 } from "@/lib/shares";
+import { assertCanManageExpenses } from "@/lib/authz";
 
 function n(v: FormDataEntryValue | null): number | null {
   if (v == null || v === "") return null;
@@ -90,6 +91,7 @@ export async function updateExpense(formData: FormData) {
       data: { user },
     } = await supabase.auth.getUser();
     if (!user) throw new Error("Not signed in");
+    assertCanManageExpenses(user.email);
 
     const id = String(formData.get("expense_id") ?? "");
     if (!id) throw new Error("Expense not found");
@@ -154,6 +156,12 @@ export async function updateExpense(formData: FormData) {
 
 export async function toggleReimbursed(id: string, value: boolean) {
   const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not signed in");
+  assertCanManageExpenses(user.email);
+
   const { error } = await supabase
     .from("expenses")
     .update({ is_reimbursed: value })
@@ -165,6 +173,12 @@ export async function toggleReimbursed(id: string, value: boolean) {
 
 export async function deleteExpense(id: string) {
   const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not signed in");
+  assertCanManageExpenses(user.email);
+
   const { error } = await supabase.from("expenses").delete().eq("id", id);
   if (error) throw new Error(error.message);
   revalidatePath("/expenses");
@@ -174,6 +188,12 @@ export async function deleteExpense(id: string) {
 /** Retry FX for a pending USD expense (used by the "needs review" flow). */
 export async function retryConversion(id: string) {
   const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not signed in");
+  assertCanManageExpenses(user.email);
+
   const { data: exp } = await supabase
     .from("expenses")
     .select("id, amount, currency, expense_date")

@@ -13,8 +13,9 @@ vendors with frozen, historically-accurate exchange rates from **Nepal Rastra Ba
   3. *Manual rate* → `manual_estimate`; if nothing is available → `pending`
 - **Subscriptions** — recurring costs with default per-person shares; "Mark paid" can override
   the billing month, payer, amount, and split before logging the real expense.
-- **Who owes whom** — exact named shares can include any member or guest. Older expenses without
-  allocations still split equally between core members. Suggested transfers + reimbursements.
+- **Investment contributions** — exact named shares attribute each cost to contributors without
+  creating personal debts or reimbursements. Older expenses without allocations still split
+  equally between default-split participants.
 - **Dashboard** — total to date, this month, projected next month, current USD rate,
   spend by category, 6-month trend.
 - **Filters + CSV export.**
@@ -48,6 +49,11 @@ after people sign in — re-run it later).
   `https://YOUR-PROJECT.supabase.co/auth/v1/callback` as an authorized redirect URI in Google
   Cloud. For local dev, also add `http://localhost:3000/auth/callback` under
   **Authentication → URL Configuration → Redirect URLs**.
+- Signed-in team members may view the tracker and add expenses. Only
+  `xettrikenzon@gmail.com` may modify/delete existing records or protected settings. People may
+  also exist only as participant rows in `public.users`, so they can be selected as payers and
+  in expense splits without Auth accounts. Run
+  `supabase/migrations/20260728_team_access_owner_controls.sql` after the base schema.
 
 ### 5. Receipt uploads (optional, for later)
 Create a public Storage bucket named `receipts` (**Storage → New bucket**). The add-expense

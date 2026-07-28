@@ -16,8 +16,13 @@ export default function TeamToggle({
       disabled={busy}
       onClick={() => start(() => setCoreMember(id, !isCore))}
       className={isCore ? "btn btn-primary !h-8 !px-3 text-xs" : "btn !h-8 !px-3 text-xs"}
+      title={
+        isCore
+          ? "Included when an older expense has no exact split"
+          : "Used only when explicitly selected in a split"
+      }
     >
-      {isCore ? "Core member" : "Guest"}
+      {isCore ? "Default split" : "Manual only"}
     </button>
   );
 }

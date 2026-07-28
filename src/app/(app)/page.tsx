@@ -3,7 +3,8 @@ import { createClient } from "@/lib/supabase/server";
 import { getCachedUsdSellRate } from "@/lib/fx";
 import { FxBadge } from "@/components/ui";
 import { npr, usd, rateLabel } from "@/lib/format";
-import type { Category, Expense, Recurring, Vendor } from "@/lib/types";
+import type { AppUser, Category, Expense, Recurring, Vendor } from "@/lib/types";
+import { computeIndividualSpending } from "@/lib/individual";
 import { format, startOfMonth, addMonths } from "date-fns";
 
 export const dynamic = "force-dynamic";
@@ -25,24 +26,36 @@ export default async function Dashboard() {
 
   const [
     { data: exp },
+    { data: shareRows },
     { data: cats },
     { data: vends },
     { data: recs },
+    { data: team },
     { data: me },
     currentRate,
   ] = await Promise.all([
     supabase.from("expenses").select("*").order("expense_date", { ascending: false }),
+    supabase.from("expense_shares").select("*"),
     supabase.from("categories").select("*"),
     supabase.from("vendors").select("*"),
     supabase.from("recurring").select("*").eq("is_active", true),
+    supabase.from("users").select("*").order("name"),
     supabase.from("users").select("name").eq("id", user!.id).single(),
     getCachedUsdSellRate(supabase),
   ]);
 
-  const expenses = (exp ?? []) as Expense[];
+  const expenses = (exp ?? []).map((expense) => ({
+    ...expense,
+    expense_shares: (shareRows ?? []).filter(
+      (share) => share.expense_id === expense.id
+    ),
+  })) as Expense[];
   const categories = (cats ?? []) as Category[];
   const vendors = (vends ?? []) as Vendor[];
   const recurring = (recs ?? []) as Recurring[];
+  const users = (team ?? []) as AppUser[];
+  const individualSpending = computeIndividualSpending(users, expenses);
+  const assignedTotal = individualSpending.reduce((sum, row) => sum + row.assigned, 0);
   const firstName = (me?.name ?? "there").split(" ")[0];
 
   const withNpr = expenses.filter((e) => e.amount_npr != null);
@@ -190,6 +203,39 @@ export default async function Dashboard() {
           </Link>
         </div>
       )}
+
+      <div className="card p-5 mt-4">
+        <div className="flex items-center justify-between gap-3 mb-3">
+          <div>
+            <h2 className="font-semibold">Individual spending</h2>
+            <p className="text-xs muted">All-time assigned share and cash paid</p>
+          </div>
+          <Link href="/expenses" className="text-sm muted hover:underline">
+            View details →
+          </Link>
+        </div>
+        <div className="divide-y" style={{ borderColor: "var(--line)" }}>
+          {individualSpending.map(({ member, assigned, paid }, index) => (
+            <Link
+              key={member.id}
+              href={`/expenses?person=${member.id}&basis=share`}
+              className="flex items-center gap-3 py-3 hover:opacity-80"
+              style={{ borderColor: "var(--line)" }}
+            >
+              <span className="pill !px-2 !py-0.5 tnum">#{index + 1}</span>
+              <span className="min-w-0 flex-1 font-medium truncate">{member.name}</span>
+              <span className="text-right">
+                <span className="block tnum font-semibold">{npr(assigned)}</span>
+                <span className="block text-xs muted tnum">paid {npr(paid)}</span>
+              </span>
+            </Link>
+          ))}
+          <div className="flex items-center justify-between pt-3 text-sm font-semibold">
+            <span>Total assigned</span>
+            <span className="tnum">{npr(assignedTotal)}</span>
+          </div>
+        </div>
+      </div>
 
       {/* Charts */}
       <div className="grid lg:grid-cols-2 gap-4 mt-6">

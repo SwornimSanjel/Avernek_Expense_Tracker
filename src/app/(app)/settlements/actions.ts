@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { assertAppOwner } from "@/lib/authz";
 
 export async function recordSettlement(formData: FormData) {
   const supabase = await createClient();
@@ -22,6 +23,10 @@ export async function recordSettlement(formData: FormData) {
 
 export async function updateSettlement(formData: FormData) {
   const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  assertAppOwner(user?.email);
   const id = String(formData.get("settlement_id") ?? "");
   const from = String(formData.get("from_user_id") ?? "");
   const to = String(formData.get("to_user_id") ?? "");
@@ -47,6 +52,10 @@ export async function updateSettlement(formData: FormData) {
 
 export async function deleteSettlement(id: string) {
   const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  assertAppOwner(user?.email);
   const { error } = await supabase.from("settlements").delete().eq("id", id);
   if (error) return { error: error.message };
   revalidatePath("/settlements");

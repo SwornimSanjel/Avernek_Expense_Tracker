@@ -28,8 +28,10 @@ from (values
   ('Meta Ads',         'Ad Spend',         'USD'),
   ('Petrol',           'Travel',           'NPR'),
   ('Ride fare',        'Travel',           'NPR'),
-  ('Stationery',       'Office Supplies',  'NPR'),
-  ('Mobile Recharge',  'Phone / Recharge', 'NPR')
+  ('Stationery',             'Office Supplies',  'NPR'),
+  ('Mobile Recharge',        'Phone / Recharge', 'NPR'),
+  ('Cold Calling Recharge',  'Phone / Recharge', 'NPR'),
+  ('Sales Calling Recharge', 'Phone / Recharge', 'NPR')
 ) as v(name, cat, cur)
 join public.categories c on c.name = v.cat
 on conflict (name) do nothing;

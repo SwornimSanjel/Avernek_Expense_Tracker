@@ -6,6 +6,18 @@ import { NextResponse, type NextRequest } from "next/server";
  * unauthenticated users are redirected to /login (except the login/auth routes).
  */
 export async function middleware(request: NextRequest) {
+  const path = request.nextUrl.pathname;
+  const isPublic =
+    path.startsWith("/login") ||
+    path.startsWith("/auth") ||
+    path.startsWith("/api/cron");
+
+  // Public routes do not need a session refresh. In particular, keeping /login
+  // independent lets it render a useful error when the auth service is offline.
+  if (isPublic) {
+    return NextResponse.next({ request });
+  }
+
   let response = NextResponse.next({ request });
 
   const supabase = createServerClient(
@@ -31,19 +43,12 @@ export async function middleware(request: NextRequest) {
     }
   );
 
-  // getSession() reads the cookie locally — no network round-trip per navigation.
-  // (Pages that need verified identity still call getUser() themselves.)
+  // Verify the identity with Supabase rather than trusting cookie contents.
   const {
-    data: { session },
-  } = await supabase.auth.getSession();
+    data: { user },
+  } = await supabase.auth.getUser();
 
-  const path = request.nextUrl.pathname;
-  const isPublic =
-    path.startsWith("/login") ||
-    path.startsWith("/auth") ||
-    path.startsWith("/api/cron");
-
-  if (!session && !isPublic) {
+  if (!user) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);

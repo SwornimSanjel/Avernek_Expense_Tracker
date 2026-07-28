@@ -12,6 +12,7 @@ import {
   validateShareTotal,
 } from "@/lib/shares";
 import type { ShareInput } from "@/lib/shares";
+import { assertAppOwner } from "@/lib/authz";
 
 function n(v: FormDataEntryValue | null): number {
   const x = Number(v);
@@ -72,6 +73,10 @@ export async function addRecurring(formData: FormData) {
 
 export async function toggleActive(id: string, value: boolean) {
   const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  assertAppOwner(user?.email);
   await supabase.from("recurring").update({ is_active: value }).eq("id", id);
   revalidatePath("/subscriptions");
   revalidatePath("/");
@@ -80,6 +85,10 @@ export async function toggleActive(id: string, value: boolean) {
 export async function updateRecurring(formData: FormData) {
   try {
     const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    assertAppOwner(user?.email);
     const id = String(formData.get("recurring_id") ?? "");
     const amount = n(formData.get("amount"));
     const shares = readShareInputs(formData);
@@ -130,6 +139,10 @@ export async function updateRecurring(formData: FormData) {
 
 export async function deleteRecurring(id: string) {
   const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  assertAppOwner(user?.email);
   await supabase.from("recurring").delete().eq("id", id);
   revalidatePath("/subscriptions");
 }
@@ -143,6 +156,7 @@ export async function logRenewalPaid(formData: FormData) {
   const {
     data: { user },
   } = await supabase.auth.getUser();
+  assertAppOwner(user?.email);
   const id = String(formData.get("recurring_id") ?? "");
   const { data: r } = await supabase
     .from("recurring")

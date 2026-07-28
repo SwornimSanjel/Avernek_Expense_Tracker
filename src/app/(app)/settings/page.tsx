@@ -4,6 +4,7 @@ import { npr } from "@/lib/format";
 import type { AppUser, Category } from "@/lib/types";
 import { addCategory, updateMyName } from "./actions";
 import TeamToggle from "@/components/TeamToggle";
+import { isAppOwner } from "@/lib/authz";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +20,7 @@ export default async function SettingsPage() {
   const categories = (cats ?? []) as Category[];
   const users = (team ?? []) as AppUser[];
   const me = users.find((u) => u.id === user!.id);
+  const canManage = isAppOwner(user?.email);
 
   return (
     <>
@@ -31,15 +33,19 @@ export default async function SettingsPage() {
           <p className="text-xs muted mb-3">
             Shown everywhere instead of your email.
           </p>
-          <form action={updateMyName} className="flex gap-2">
-            <input
-              name="name"
-              defaultValue={me?.name ?? ""}
-              placeholder="e.g. Swornim Sanjel"
-              className="input flex-1"
-            />
-            <button className="btn btn-primary">Save</button>
-          </form>
+          {canManage ? (
+            <form action={updateMyName} className="flex gap-2">
+              <input
+                name="name"
+                defaultValue={me?.name ?? ""}
+                placeholder="e.g. Swornim Sanjel"
+                className="input flex-1"
+              />
+              <button className="btn btn-primary">Save</button>
+            </form>
+          ) : (
+            <div className="input flex items-center">{me?.name ?? "Team member"}</div>
+          )}
           <p className="text-xs muted mt-2">Signed in as {me?.email}</p>
         </div>
 
@@ -55,7 +61,13 @@ export default async function SettingsPage() {
                     {u.email.endsWith("@local.expense") ? "participant only" : u.email}
                   </div>
                 </div>
-                <TeamToggle id={u.id} isCore={u.is_core_member} />
+                {canManage ? (
+                  <TeamToggle id={u.id} isCore={u.is_core_member} />
+                ) : (
+                  <span className="pill">
+                    {u.is_core_member ? "Default split" : "Manual only"}
+                  </span>
+                )}
               </div>
             ))}
             {users.length === 0 && (
@@ -63,8 +75,9 @@ export default async function SettingsPage() {
             )}
           </div>
           <p className="text-xs muted mt-3">
-            Participants do not need login accounts. Exact named shares override the
-            core/guest fallback.
+            These are expense participants, not login permissions. “Default split”
+            is used only for older expenses without exact shares; named splits always
+            override it.
           </p>
         </div>
 
@@ -83,21 +96,23 @@ export default async function SettingsPage() {
               </div>
             ))}
           </div>
-          <form action={addCategory} className="flex gap-2 mt-4">
-            <input
-              name="name"
-              required
-              placeholder="New category"
-              className="input flex-1"
-            />
-            <input
-              name="monthly_budget"
-              inputMode="decimal"
-              placeholder="Budget"
-              className="input tnum !w-28"
-            />
-            <button className="btn btn-primary">Add</button>
-          </form>
+          {canManage && (
+            <form action={addCategory} className="flex gap-2 mt-4">
+              <input
+                name="name"
+                required
+                placeholder="New category"
+                className="input flex-1"
+              />
+              <input
+                name="monthly_budget"
+                inputMode="decimal"
+                placeholder="Budget"
+                className="input tnum !w-28"
+              />
+              <button className="btn btn-primary">Add</button>
+            </form>
+          )}
         </div>
       </div>
     </>

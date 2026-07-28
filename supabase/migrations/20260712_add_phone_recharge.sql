@@ -6,9 +6,14 @@ values ('Phone / Recharge', '#0f766e')
 on conflict (name) do nothing;
 
 insert into public.vendors (name, category_id, default_currency)
-select 'Mobile Recharge', id, 'NPR'
-from public.categories
-where name = 'Phone / Recharge'
+select purpose.name, category.id, 'NPR'
+from public.categories category
+cross join (values
+  ('Mobile Recharge'),
+  ('Cold Calling Recharge'),
+  ('Sales Calling Recharge')
+) as purpose(name)
+where category.name = 'Phone / Recharge'
 on conflict (name) do update
 set category_id = excluded.category_id,
     default_currency = excluded.default_currency;

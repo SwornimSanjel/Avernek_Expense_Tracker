@@ -4,6 +4,12 @@ import AddExpense from "@/components/AddExpense";
 import { npr, usd } from "@/lib/format";
 import type { AppUser, Category, Expense, Vendor } from "@/lib/types";
 import ExpenseRowActions from "@/components/ExpenseRowActions";
+import {
+  assignedShareNpr,
+  assignedShareOriginal,
+  computeIndividualSpending,
+} from "@/lib/individual";
+import { canManageExpenses } from "@/lib/authz";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +22,7 @@ export default async function ExpensesPage({
     person?: string;
     basis?: "share" | "paid";
     month?: string;
+    vendor?: string;
   }>;
 }) {
   const sp = await searchParams;
@@ -23,6 +30,7 @@ export default async function ExpensesPage({
   const {
     data: { user },
   } = await supabase.auth.getUser();
+  const canManage = canManageExpenses(user?.email);
 
   const [{ data: cats }, { data: vends }, { data: team }] = await Promise.all([
     supabase.from("categories").select("*").order("name"),
@@ -36,6 +44,7 @@ export default async function ExpensesPage({
     .order("expense_date", { ascending: false })
     .limit(1000);
   if (sp.cat) query = query.eq("category_id", sp.cat);
+  if (sp.vendor) query = query.eq("vendor_id", sp.vendor);
   if (/^\d{4}-\d{2}$/.test(sp.month ?? "")) {
     query = query.eq("billing_month", `${sp.month}-01`);
   }
@@ -56,45 +65,17 @@ export default async function ExpensesPage({
       (share) => share.expense_id === expense.id
     ),
   })) as Expense[];
-  const coreCount = Math.max(users.filter((member) => member.is_core_member).length, 1);
   const selectedPersonId = sp.person ?? sp.payer ?? "";
   const basis = sp.basis ?? (sp.payer ? "paid" : "share");
   const selectedPerson = users.find((member) => member.id === selectedPersonId) ?? null;
 
-  const assignedNpr = (expense: Expense, member: AppUser) => {
-    if (expense.amount_npr == null) return 0;
-    if (expense.expense_shares?.length) {
-      return Number(
-        expense.expense_shares.find((share) => share.user_id === member.id)?.amount_npr ?? 0
-      );
-    }
-    return member.is_core_member ? Number(expense.amount_npr) / coreCount : 0;
-  };
-  const assignedOriginal = (expense: Expense, member: AppUser) => {
-    if (expense.expense_shares?.length) {
-      return Number(
-        expense.expense_shares.find((share) => share.user_id === member.id)?.amount ?? 0
-      );
-    }
-    return member.is_core_member ? Number(expense.amount) / coreCount : 0;
-  };
-  const totals = users
-    .map((member) => ({
-      member,
-      assigned: sourceRows.reduce((sum, expense) => sum + assignedNpr(expense, member), 0),
-      paid: sourceRows.reduce(
-        (sum, expense) =>
-          sum + (expense.paid_by_user_id === member.id ? Number(expense.amount_npr ?? 0) : 0),
-        0
-      ),
-    }))
-    .sort((a, b) => b.assigned - a.assigned || b.paid - a.paid);
+  const totals = computeIndividualSpending(users, sourceRows);
   const rows = !selectedPerson
     ? sourceRows
     : sourceRows.filter((expense) =>
         basis === "paid"
           ? expense.paid_by_user_id === selectedPerson.id
-          : assignedNpr(expense, selectedPerson) > 0
+          : assignedShareNpr(expense, selectedPerson, users) > 0
       );
 
   const catName = (id: string | null) =>
@@ -140,7 +121,7 @@ export default async function ExpensesPage({
           <div>
             <h2 className="text-sm font-semibold">Individual totals</h2>
             <p className="text-xs muted">
-              {sp.cat || sp.month ? "For the selected category/month" : "All time"} · assigned share vs cash paid
+              {sp.cat || sp.vendor || sp.month ? "For the selected filters" : "All time"} · assigned share vs cash paid
             </p>
           </div>
         </div>
@@ -148,7 +129,7 @@ export default async function ExpensesPage({
           {totals.map(({ member, assigned, paid }, index) => (
             <a
               key={member.id}
-              href={`/expenses?person=${member.id}&basis=share${sp.cat ? `&cat=${sp.cat}` : ""}${sp.month ? `&month=${sp.month}` : ""}`}
+              href={`/expenses?person=${member.id}&basis=share${sp.cat ? `&cat=${sp.cat}` : ""}${sp.vendor ? `&vendor=${sp.vendor}` : ""}${sp.month ? `&month=${sp.month}` : ""}`}
               className="card p-3 hover:opacity-80"
               style={{
                 borderColor:
@@ -178,6 +159,12 @@ export default async function ExpensesPage({
             </option>
           ))}
         </select>
+        <select name="vendor" defaultValue={sp.vendor ?? ""} className="input !w-auto !h-10">
+          <option value="">All vendors/types</option>
+          {vendors.map((vendor) => (
+            <option key={vendor.id} value={vendor.id}>{vendor.name}</option>
+          ))}
+        </select>
         <select
           name="person"
           defaultValue={selectedPersonId}
@@ -202,7 +189,7 @@ export default async function ExpensesPage({
           className="input !w-auto !h-10"
         />
         <button className="btn !h-10">Filter</button>
-        {(selectedPersonId || sp.cat || sp.month) && (
+        {(selectedPersonId || sp.cat || sp.vendor || sp.month) && (
           <a href="/expenses" className="btn !h-10">Clear</a>
         )}
         <a href="/api/export" className="btn !h-10">
@@ -218,9 +205,13 @@ export default async function ExpensesPage({
         )}
         {rows.map((e) => {
           const selectedShareNpr =
-            selectedPerson && basis === "share" ? assignedNpr(e, selectedPerson) : null;
+            selectedPerson && basis === "share"
+              ? assignedShareNpr(e, selectedPerson, users)
+              : null;
           const selectedShareOriginal =
-            selectedPerson && basis === "share" ? assignedOriginal(e, selectedPerson) : null;
+            selectedPerson && basis === "share"
+              ? assignedShareOriginal(e, selectedPerson, users)
+              : null;
           return (
           <div
             key={e.id}
@@ -270,14 +261,16 @@ export default async function ExpensesPage({
                 <div className="tnum text-xs muted">{usd(e.amount)}</div>
               ) : null}
             </div>
-            <ExpenseRowActions
-              expense={e}
-              isReimbursed={e.is_reimbursed}
-              pending={e.conversion_status === "pending"}
-              categories={categories}
-              vendors={vendors}
-              users={users}
-            />
+            {canManage && (
+              <ExpenseRowActions
+                expense={e}
+                isReimbursed={e.is_reimbursed}
+                pending={e.conversion_status === "pending"}
+                categories={categories}
+                vendors={vendors}
+                users={users}
+              />
+            )}
           </div>
           );
         })}
