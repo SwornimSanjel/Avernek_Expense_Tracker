@@ -3,7 +3,7 @@ export function LogoMark({ size = 28 }: { size?: number }) {
     <span
       aria-label="Avernek"
       role="img"
-      className="relative inline-block shrink-0 overflow-hidden bg-white"
+      className="relative inline-block shrink-0 overflow-hidden"
       style={{ width: size, height: size, borderRadius: Math.max(6, size * 0.22) }}
     >
       <img
@@ -23,7 +23,7 @@ export function LogoWord({ compact = false }: { compact?: boolean }) {
       <LogoMark />
       {!compact && (
         <span className="font-bold tracking-tight text-lg leading-none">
-          <span style={{ color: "var(--accent)" }}>A</span>vernek
+          <span style={{ color: "#8b45ff" }}>A</span>vernek
         </span>
       )}
     </span>
