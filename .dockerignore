@@ -1,0 +1,26 @@
+# Keep the build context small and keep secrets out of it entirely.
+# The .env is passed to the build as a BuildKit secret, never copied.
+.env
+.env.local
+.env*.local
+
+.git
+.gitignore
+node_modules
+.next
+.next-dev
+out
+*.tsbuildinfo
+next-env.d.ts
+
+Dockerfile
+.dockerignore
+docker-compose.yml
+Jenkinsfile
+
+README.md
+.DS_Store
+.claude
+netlify
+netlify.toml
+vercel.json

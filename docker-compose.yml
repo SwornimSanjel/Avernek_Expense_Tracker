@@ -1,0 +1,73 @@
+# Runtime topology for the self-hosted deployment.
+#
+# Jenkins copies this file, docker/fx-cron.sh and the .env into DEPLOY_DIR and
+# runs `docker compose up -d`. IMAGE is passed in the shell environment so a
+# manual `docker compose up -d` on the host still works via the :latest default.
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      secrets:
+        - envfile
+      labels:
+        git.commit: ${GIT_COMMIT:-local}
+        jenkins.build: ${BUILD_NUMBER:-local}
+    image: ${IMAGE:-avernek-expense-tracker:latest}
+    container_name: avernek-expense-tracker
+    restart: unless-stopped
+    # PID 1 that reaps zombies and forwards SIGTERM, so deploys stop cleanly.
+    init: true
+    # Server-only values (SUPABASE_SERVICE_ROLE_KEY, CRON_SECRET) arrive here.
+    # NEXT_PUBLIC_* were already baked into the client bundle at build time.
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+    ports:
+      # Bind to loopback and let a reverse proxy terminate TLS in front of it.
+      # Change to "${APP_PORT:-3000}:3000" to expose it directly.
+      - "127.0.0.1:${APP_PORT:-3000}:3000"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  # Replaces the Netlify Scheduled Function: hits the protected /api/cron/fx
+  # route daily so the NRB rate logic keeps a single source of truth.
+  fx-cron:
+    image: alpine:3.21
+    container_name: avernek-fx-cron
+    restart: unless-stopped
+    init: true
+    depends_on:
+      web:
+        condition: service_healthy
+    env_file:
+      - .env
+    volumes:
+      - ./docker/fx-cron.sh:/usr/local/bin/fx-cron.sh:ro
+    command: ["sh", "/usr/local/bin/fx-cron.sh"]
+    logging:
+      driver: json-file
+      options:
+        max-size: "1m"
+        max-file: "3"
+
+secrets:
+  # `docker compose up --build` now supplies the secret required by the
+  # Dockerfile. Jenkins and local Compose both use .env by default.
+  envfile:
+    file: ${ENV_FILE:-.env}

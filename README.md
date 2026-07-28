@@ -85,6 +85,68 @@ re-run the final `update ... is_core_member` block (or just flip them on the **S
 
 For Netlify deploy previews, optionally allow `https://**--YOUR-SITE.netlify.app/**` in Supabase.
 
+## Deploy (self-hosted: Docker + Jenkins)
+
+An alternative to Netlify that runs the app on your own server. Netlify keeps working
+unchanged — the standalone output is gated behind `DOCKER_BUILD=1`.
+
+### Files
+| File | Purpose |
+| --- | --- |
+| [`Dockerfile`](Dockerfile) | 3-stage build: `deps` → `builder` → `runner` (Next standalone server, non-root, no source or devDependencies in the final image) |
+| [`docker-compose.yml`](docker-compose.yml) | Runs the app plus an `fx-cron` sidecar that replaces the Netlify Scheduled Function |
+| [`docker/fx-cron.sh`](docker/fx-cron.sh) | busybox crond job that calls `/api/cron/fx` daily at 04:00 UTC |
+| [`Jenkinsfile`](Jenkinsfile) | Extract `.env` → build → deploy → smoke test → auto-rollback |
+
+### How the secrets flow
+`NEXT_PUBLIC_*` values are inlined into the client bundle by `next build`, so they must
+exist **at build time**; `SUPABASE_SERVICE_ROLE_KEY` and `CRON_SECRET` are server-only and
+are injected **at runtime**. Both come from the same `.env`:
+
+- **Build time** — the `.env` is mounted as a BuildKit secret at `/app/.env.production.local`
+  for the single `RUN npm run build` command. It exists on a tmpfs for that command only and
+  never lands in an image layer.
+- **Runtime** — compose reads the `.env` sitting in the deploy directory (mode `0600`).
+
+The `.env` is never copied into the build context ([`.dockerignore`](.dockerignore)), never
+committed, and the workspace copy is deleted in the pipeline's `post { always }` block.
+
+### Jenkins one-time setup
+1. **Credential** — *Manage Jenkins → Credentials → Add → Kind: Secret file*. Upload your
+   filled-in `.env` with ID **`avernek-expense-tracker-env`**.
+2. **Deploy directory** — on the Jenkins host:
+   ```bash
+   sudo mkdir -p /opt/avernek-expense-tracker
+   sudo chown jenkins:jenkins /opt/avernek-expense-tracker
+   ```
+3. **Docker access** — `sudo usermod -aG docker jenkins && sudo systemctl restart jenkins`.
+   The agent also needs `git` and `curl`.
+4. **Job** — new *Pipeline* job → *Pipeline script from SCM* → this repo, script path
+   `Jenkinsfile`. Add a GitHub webhook (or poll SCM) to deploy on every push to `main`.
+
+### What a build does
+`Checkout → Extract .env → Build image → Deploy → Smoke test → Prune`. The pipeline tags each
+image `avernek-expense-tracker:<BUILD_NUMBER>` plus `:latest`, records the previously running
+image, and if `/api/health` does not answer within ~60s it redeploys the previous tag and fails
+the build. The last 5 numbered images are kept on the host for manual rollbacks.
+
+### Networking
+Compose publishes to `127.0.0.1:3000` only — put nginx/Caddy in front for TLS, then set that
+public URL as the Supabase **Site URL** and add `https://YOUR-DOMAIN/auth/callback` to the
+redirect list. To expose the port directly instead, drop the `127.0.0.1:` prefix in
+`docker-compose.yml`.
+
+### Run it locally without Jenkins
+```bash
+cp .env.local .env
+docker compose up --build -d
+docker compose ps
+curl localhost:3000/api/health
+```
+
+> Values in `.env` containing a literal `$` need it doubled (`$$`) — compose treats `$` as
+> variable interpolation when reading that file.
+
 ## The money rules (why the code looks the way it does)
 - Every monetary column is Postgres `numeric` — **never float**.
 - A historical expense **freezes** its rate. `amount_npr` never changes because today's rate moved.

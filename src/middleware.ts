@@ -10,7 +10,9 @@ export async function middleware(request: NextRequest) {
   const isPublic =
     path.startsWith("/login") ||
     path.startsWith("/auth") ||
-    path.startsWith("/api/cron");
+    path.startsWith("/api/cron") ||
+    // Container healthcheck / deploy smoke test. Must answer without a session.
+    path === "/api/health";
 
   // Public routes do not need a session refresh. In particular, keeping /login
   // independent lets it render a useful error when the auth service is offline.
