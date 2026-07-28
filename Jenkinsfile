@@ -1,44 +1,57 @@
-// CI/CD for the Avernek Expense Tracker.
+// CI/CD pipeline for the Avernek Expense Tracker.
 //
-// Flow: pull the .env out of a Jenkins "Secret file" credential -> build the
-// multi-stage image (the .env is passed as a BuildKit secret, never baked into
-// a layer) -> roll it out with docker compose on this host -> smoke test ->
-// roll back automatically if the new container does not come up healthy.
+// Flow:
+//   Checkout
+//   -> extract .env from Jenkins credentials
+//   -> build versioned Docker image
+//   -> deploy through Docker Compose
+//   -> smoke test
+//   -> automatically restore the previous release if deployment fails
+//   -> prune old images
 //
-// One-time setup on the Jenkins host:
-//   1. Jenkins -> Credentials -> Add -> Kind "Secret file", upload your .env,
-//      ID: avernek-expense-tracker-env
-//   2. sudo mkdir -p /opt/avernek-expense-tracker
-//      sudo chown jenkins:jenkins /opt/avernek-expense-tracker
-//   3. sudo usermod -aG docker jenkins && sudo systemctl restart jenkins
-//   4. Agent needs: docker (with compose v2), git, curl.
+// One-time Jenkins host requirements:
+//   1. Add Jenkins credential:
+//        Kind: Secret file
+//        ID: avernek-expense-tracker-env
+//        File: production .env
 //
-// `next build` type-checks the project, so a TS error fails the Build stage.
+//   2. Allow Jenkins to access Docker:
+//        sudo usermod -aG docker jenkins
+//        sudo systemctl restart jenkins
+//
+//   3. Install:
+//        docker with Compose v2
+//        git
+//        curl
+//
+// Deployment files are stored inside JENKINS_HOME, so Jenkins creates and
+// manages the deployment directory without root permissions.
+//
+// `next build` type-checks the application. TypeScript errors fail the build.
 
 pipeline {
   agent any
 
   options {
     timestamps()
-    // Two deploys racing on the same compose project corrupts the rollout.
     disableConcurrentBuilds()
     timeout(time: 30, unit: 'MINUTES')
     buildDiscarder(logRotator(numToKeepStr: '20'))
   }
 
   environment {
-    APP_NAME       = 'avernek-expense-tracker'
-    DEPLOY_DIR     = '/opt/avernek-expense-tracker'
-    ENV_CREDENTIAL = 'avernek-expense-tracker-env'
+    APP_NAME = 'avernek-expense-tracker'
 
-    // Host port the container is published on (loopback only by default --
-    // see docker-compose.yml). Put a reverse proxy in front for TLS.
-    APP_PORT = '3000'
+    // Relative to JENKINS_HOME. Do not use /opt unless Jenkins is explicitly
+    // granted root-level permission to write there.
+    DEPLOY_SUBDIR = 'deployments/avernek-expense-tracker'
+
+    ENV_CREDENTIAL = 'avernek-expense-tracker-env'
+    APP_PORT        = '3000'
 
     IMAGE        = "avernek-expense-tracker:${env.BUILD_NUMBER}"
     IMAGE_LATEST = 'avernek-expense-tracker:latest'
 
-    // How many numbered images to keep on the host for rollbacks.
     KEEP_IMAGES = '5'
 
     DOCKER_BUILDKIT = '1'
@@ -49,33 +62,53 @@ pipeline {
     stage('Checkout') {
       steps {
         checkout scm
-        sh 'git --no-pager log -1 --pretty="Building %h  %s  (%an)"'
+
+        sh '''
+          #!/usr/bin/env bash
+          set -Eeuo pipefail
+
+          git --no-pager log -1 \
+            --pretty="Building %h  %s  (%an)"
+        '''
       }
     }
 
     stage('Extract .env') {
       steps {
-        // withCredentials drops the file in a temp path and masks it in logs.
-        // We copy it into the workspace at 0600 for the build, and the post
-        // block deletes it whatever happens.
-        withCredentials([file(credentialsId: env.ENV_CREDENTIAL, variable: 'ENV_FILE')]) {
+        withCredentials([
+          file(
+            credentialsId: env.ENV_CREDENTIAL,
+            variable: 'ENV_FILE'
+          )
+        ]) {
           sh '''
-            set -eu
+            #!/usr/bin/env bash
+            set -Eeuo pipefail
+
             install -m 600 "$ENV_FILE" .env
-            # A .env uploaded from Windows carries CRLF, and the \r ends up
-            # inside the secret values themselves.
+
+            # Remove Windows CRLF characters.
             sed -i 's/\r$//' .env
 
-            # Fail early with a clear message rather than shipping a container
-            # that 500s on the first request.
-            for key in NEXT_PUBLIC_SUPABASE_URL NEXT_PUBLIC_SUPABASE_ANON_KEY \
-                       SUPABASE_SERVICE_ROLE_KEY CRON_SECRET; do
+            required_keys=(
+              NEXT_PUBLIC_SUPABASE_URL
+              NEXT_PUBLIC_SUPABASE_ANON_KEY
+              SUPABASE_SERVICE_ROLE_KEY
+              CRON_SECRET
+            )
+
+            for key in "${required_keys[@]}"; do
               if ! grep -qE "^${key}=.+" .env; then
-                echo "ERROR: ${key} is missing or empty in the ${ENV_CREDENTIAL:-secret} .env"
+                echo "ERROR: ${key} is missing or empty in the Jenkins .env credential."
                 exit 1
               fi
             done
-            echo "Extracted .env with $(grep -cE '^[A-Z_]+=' .env) variables."
+
+            variable_count="$(
+              grep -cE '^[A-Za-z_][A-Za-z0-9_]*=' .env || true
+            )"
+
+            echo "Extracted .env with ${variable_count} variables."
           '''
         }
       }
@@ -84,13 +117,19 @@ pipeline {
     stage('Build image') {
       steps {
         sh '''
-          set -eu
-          # Build through Compose so CI exercises the same definition used by
-          # `docker compose up --build -d` locally. The numbered IMAGE value is
-          # consumed by docker-compose.yml; keep :latest as a convenience tag.
+          #!/usr/bin/env bash
+          set -Eeuo pipefail
+
+          echo "Building image: $IMAGE"
+
           docker compose build web
-          docker tag "$IMAGE" "$IMAGE_LATEST"
-          docker image inspect "$IMAGE" --format 'Built {{.RepoTags}}  size {{.Size}} bytes'
+
+          docker image tag \
+            "$IMAGE" \
+            "$IMAGE_LATEST"
+
+          docker image inspect "$IMAGE" \
+            --format 'Built {{join .RepoTags ", "}} — {{.Size}} bytes'
         '''
       }
     }
@@ -98,38 +137,121 @@ pipeline {
     stage('Deploy') {
       steps {
         sh '''
-          set -eu
-          mkdir -p "$DEPLOY_DIR/docker"
+          #!/usr/bin/env bash
+          set -Eeuo pipefail
 
-          # Record what is running now so a failed smoke test can roll back.
-          # The build number comes from the image label set below, which is
-          # more reliable than .Config.Image (Docker may store a digest there).
-          # A stale .previous-image would roll back to a pruned tag, so the file
-          # is removed unless we can confirm the target image still exists.
-          PREV_BUILD="$(docker inspect --format '{{index .Config.Labels "jenkins.build"}}' "$APP_NAME" 2>/dev/null || true)"
-          if [ -n "$PREV_BUILD" ] && [ "$PREV_BUILD" != "$BUILD_NUMBER" ] \
-             && docker image inspect "$APP_NAME:$PREV_BUILD" >/dev/null 2>&1; then
-            echo "$APP_NAME:$PREV_BUILD" > "$DEPLOY_DIR/.previous-image"
-            echo "Current release: $APP_NAME:$PREV_BUILD (rollback target)"
-          else
-            rm -f "$DEPLOY_DIR/.previous-image"
-            echo "No rollback target: first deploy, or the previous image was pruned."
+          : "${JENKINS_HOME:?JENKINS_HOME is not defined}"
+
+          DEPLOY_DIR="${JENKINS_HOME}/${DEPLOY_SUBDIR}"
+
+          echo "Deployment directory: $DEPLOY_DIR"
+
+          # Jenkins owns JENKINS_HOME, so this requires no sudo.
+          mkdir -p \
+            "$DEPLOY_DIR/docker"
+
+          # Remove any marker left by an interrupted older build.
+          rm -f "$DEPLOY_DIR/.deployment-attempted"
+
+          # ----------------------------------------------------------
+          # Save the currently deployed configuration for rollback.
+          # ----------------------------------------------------------
+
+          ROLLBACK_TMP="$DEPLOY_DIR/.rollback.tmp"
+          ROLLBACK_DIR="$DEPLOY_DIR/.rollback"
+
+          rm -rf "$ROLLBACK_TMP"
+          mkdir -p "$ROLLBACK_TMP/docker"
+
+          if [[ -f "$DEPLOY_DIR/docker-compose.yml" ]]; then
+            install -m 644 \
+              "$DEPLOY_DIR/docker-compose.yml" \
+              "$ROLLBACK_TMP/docker-compose.yml"
           fi
 
-          install -m 644 docker-compose.yml "$DEPLOY_DIR/docker-compose.yml"
-          install -m 755 docker/fx-cron.sh  "$DEPLOY_DIR/docker/fx-cron.sh"
-          # 0600: this file holds the service-role key.
-          install -m 600 .env               "$DEPLOY_DIR/.env"
+          if [[ -f "$DEPLOY_DIR/.env" ]]; then
+            install -m 600 \
+              "$DEPLOY_DIR/.env" \
+              "$ROLLBACK_TMP/.env"
+          fi
 
-          # Explicit -f/--project-directory so the deploy never depends on the
-          # Jenkins workspace, and so ./docker/fx-cron.sh and .env resolve
-          # against DEPLOY_DIR. IMAGE and APP_PORT are already exported, and the
-          # shell environment beats the .env file for compose interpolation.
+          if [[ -f "$DEPLOY_DIR/docker/fx-cron.sh" ]]; then
+            install -m 755 \
+              "$DEPLOY_DIR/docker/fx-cron.sh" \
+              "$ROLLBACK_TMP/docker/fx-cron.sh"
+          fi
+
+          rm -rf "$ROLLBACK_DIR"
+          mv "$ROLLBACK_TMP" "$ROLLBACK_DIR"
+
+          # ----------------------------------------------------------
+          # Determine the currently deployed image.
+          # ----------------------------------------------------------
+
+          CURRENT_IMAGE=""
+
+          CURRENT_CONTAINER="$(
+            docker ps -aq \
+              --filter "label=com.docker.compose.project=$APP_NAME" \
+              --filter "label=com.docker.compose.service=web" \
+              | head -n 1
+          )"
+
+          if [[ -n "$CURRENT_CONTAINER" ]]; then
+            CURRENT_IMAGE="$(
+              docker inspect \
+                --format '{{.Config.Image}}' \
+                "$CURRENT_CONTAINER"
+            )"
+          elif [[ -s "$DEPLOY_DIR/.current-image" ]]; then
+            CURRENT_IMAGE="$(
+              cat "$DEPLOY_DIR/.current-image"
+            )"
+          fi
+
+          if [[ -n "$CURRENT_IMAGE" ]] \
+             && [[ "$CURRENT_IMAGE" != "$IMAGE" ]] \
+             && docker image inspect "$CURRENT_IMAGE" >/dev/null 2>&1; then
+
+            printf '%s\n' "$CURRENT_IMAGE" \
+              > "$DEPLOY_DIR/.previous-image"
+
+            echo "Current release:  $CURRENT_IMAGE"
+            echo "Rollback target:  $CURRENT_IMAGE"
+          else
+            rm -f "$DEPLOY_DIR/.previous-image"
+            echo "No valid rollback image found."
+          fi
+
+          # ----------------------------------------------------------
+          # Install the new release configuration.
+          # ----------------------------------------------------------
+
+          install -m 644 \
+            docker-compose.yml \
+            "$DEPLOY_DIR/docker-compose.yml"
+
+          install -m 755 \
+            docker/fx-cron.sh \
+            "$DEPLOY_DIR/docker/fx-cron.sh"
+
+          install -m 600 \
+            .env \
+            "$DEPLOY_DIR/.env"
+
           dc() {
-            docker compose -f "$DEPLOY_DIR/docker-compose.yml" \
-                           --project-directory "$DEPLOY_DIR" \
-                           -p "$APP_NAME" "$@"
+            docker compose \
+              -f "$DEPLOY_DIR/docker-compose.yml" \
+              --project-directory "$DEPLOY_DIR" \
+              -p "$APP_NAME" \
+              "$@"
           }
+
+          # The global `post unsuccessful` block checks this marker before
+          # attempting a rollback.
+          touch "$DEPLOY_DIR/.deployment-attempted"
+
+          echo "Deploying $IMAGE"
 
           dc up -d --remove-orphans
           dc ps
@@ -140,76 +262,213 @@ pipeline {
     stage('Smoke test') {
       steps {
         sh '''
-          set -eu
-          echo "Waiting for /api/health on port $APP_PORT ..."
+          #!/usr/bin/env bash
+          set -Eeuo pipefail
+
+          DEPLOY_DIR="${JENKINS_HOME}/${DEPLOY_SUBDIR}"
+
+          dc() {
+            docker compose \
+              -f "$DEPLOY_DIR/docker-compose.yml" \
+              --project-directory "$DEPLOY_DIR" \
+              -p "$APP_NAME" \
+              "$@"
+          }
+
+          HEALTH_URL="http://127.0.0.1:${APP_PORT}/api/health"
+
+          echo "Waiting for $HEALTH_URL ..."
+
           for attempt in $(seq 1 30); do
-            if curl -fsS "http://127.0.0.1:${APP_PORT}/api/health" >/dev/null 2>&1; then
-              echo "Healthy after ${attempt} attempt(s)."
-              curl -fsS "http://127.0.0.1:${APP_PORT}/api/health"; echo
+            if curl -fsS "$HEALTH_URL" >/dev/null 2>&1; then
+              echo "Application became healthy after ${attempt} attempt(s)."
+
+              curl -fsS "$HEALTH_URL"
+              echo
+
+              # Record the successful release atomically.
+              printf '%s\n' "$IMAGE" \
+                > "$DEPLOY_DIR/.current-image.tmp"
+
+              mv \
+                "$DEPLOY_DIR/.current-image.tmp" \
+                "$DEPLOY_DIR/.current-image"
+
+              rm -f "$DEPLOY_DIR/.deployment-attempted"
+
+              echo "Release confirmed: $IMAGE"
               exit 0
             fi
+
             sleep 2
           done
 
-          echo "Health check never passed. Last 80 log lines:"
-          docker logs --tail 80 "$APP_NAME" 2>&1 || true
+          echo "ERROR: Health check did not pass within 60 seconds."
+          echo "Last 80 container log lines:"
+
+          dc logs --tail 80 web || true
+
           exit 1
         '''
-      }
-      post {
-        failure {
-          sh '''
-            set -eu
-            if [ ! -f "$DEPLOY_DIR/.previous-image" ]; then
-              echo "No previous release recorded -- leaving the failed container up for inspection."
-              exit 0
-            fi
-            PREVIOUS="$(cat "$DEPLOY_DIR/.previous-image")"
-            echo "Rolling back to $PREVIOUS"
-
-            dc() {
-              docker compose -f "$DEPLOY_DIR/docker-compose.yml" \
-                             --project-directory "$DEPLOY_DIR" \
-                             -p "$APP_NAME" "$@"
-            }
-
-            export IMAGE="$PREVIOUS"
-            dc up -d --remove-orphans
-            dc ps
-          '''
-        }
       }
     }
 
     stage('Prune old images') {
       steps {
         sh '''
-          set -eu
-          # Keep the newest $KEEP_IMAGES numbered tags so rollbacks stay possible.
-          docker images "$APP_NAME" --format '{{.Tag}}' \
-            | grep -E '^[0-9]+$' \
-            | sort -rn \
-            | tail -n +$((KEEP_IMAGES + 1)) \
-            | while read -r tag; do
-                echo "Removing $APP_NAME:$tag"
-                docker rmi "$APP_NAME:$tag" >/dev/null 2>&1 || true
-              done
+          #!/usr/bin/env bash
+          set -Eeuo pipefail
+
+          DEPLOY_DIR="${JENKINS_HOME}/${DEPLOY_SUBDIR}"
+
+          CURRENT_IMAGE=""
+          PREVIOUS_IMAGE=""
+
+          if [[ -s "$DEPLOY_DIR/.current-image" ]]; then
+            CURRENT_IMAGE="$(cat "$DEPLOY_DIR/.current-image")"
+          fi
+
+          if [[ -s "$DEPLOY_DIR/.previous-image" ]]; then
+            PREVIOUS_IMAGE="$(cat "$DEPLOY_DIR/.previous-image")"
+          fi
+
+          mapfile -t NUMBERED_TAGS < <(
+            docker images "$APP_NAME" \
+              --format '{{.Tag}}' \
+              | grep -E '^[0-9]+$' \
+              | sort -rn \
+              || true
+          )
+
+          for ((index = KEEP_IMAGES; index < ${#NUMBERED_TAGS[@]}; index++)); do
+            tag="${NUMBERED_TAGS[$index]}"
+            candidate="$APP_NAME:$tag"
+
+            if [[ "$candidate" == "$CURRENT_IMAGE" ]] \
+               || [[ "$candidate" == "$PREVIOUS_IMAGE" ]]; then
+              echo "Keeping rollback-related image: $candidate"
+              continue
+            fi
+
+            echo "Removing old image: $candidate"
+            docker image rm "$candidate" >/dev/null 2>&1 || true
+          done
+
           docker image prune -f >/dev/null
+
+          echo "Retained application images:"
+          docker images "$APP_NAME" \
+            --format '  {{.Repository}}:{{.Tag}}  {{.Size}}'
         '''
       }
     }
   }
 
   post {
-    always {
-      // The workspace copy of the secret must not outlive the build.
-      sh 'rm -f .env'
+
+    unsuccessful {
+      sh '''
+        #!/usr/bin/env bash
+        set -Eeuo pipefail
+
+        DEPLOY_DIR="${JENKINS_HOME}/${DEPLOY_SUBDIR}"
+        ATTEMPT_MARKER="$DEPLOY_DIR/.deployment-attempted"
+
+        # The failure happened before deployment started.
+        if [[ ! -f "$ATTEMPT_MARKER" ]]; then
+          echo "Deployment was not started; rollback is unnecessary."
+          exit 0
+        fi
+
+        if [[ ! -s "$DEPLOY_DIR/.previous-image" ]]; then
+          echo "No previous image exists."
+          echo "Leaving the failed deployment available for inspection."
+
+          rm -f "$ATTEMPT_MARKER"
+          exit 0
+        fi
+
+        PREVIOUS_IMAGE="$(
+          cat "$DEPLOY_DIR/.previous-image"
+        )"
+
+        if ! docker image inspect "$PREVIOUS_IMAGE" >/dev/null 2>&1; then
+          echo "ERROR: Rollback image no longer exists: $PREVIOUS_IMAGE"
+          exit 1
+        fi
+
+        ROLLBACK_DIR="$DEPLOY_DIR/.rollback"
+
+        if [[ ! -f "$ROLLBACK_DIR/docker-compose.yml" ]] \
+           || [[ ! -f "$ROLLBACK_DIR/.env" ]]; then
+          echo "ERROR: Previous deployment configuration is unavailable."
+          echo "Cannot safely roll back using only the previous image."
+          exit 1
+        fi
+
+        echo "Restoring previous configuration."
+
+        install -m 644 \
+          "$ROLLBACK_DIR/docker-compose.yml" \
+          "$DEPLOY_DIR/docker-compose.yml"
+
+        install -m 600 \
+          "$ROLLBACK_DIR/.env" \
+          "$DEPLOY_DIR/.env"
+
+        rm -f "$DEPLOY_DIR/docker/fx-cron.sh"
+
+        if [[ -f "$ROLLBACK_DIR/docker/fx-cron.sh" ]]; then
+          install -m 755 \
+            "$ROLLBACK_DIR/docker/fx-cron.sh" \
+            "$DEPLOY_DIR/docker/fx-cron.sh"
+        fi
+
+        dc() {
+          docker compose \
+            -f "$DEPLOY_DIR/docker-compose.yml" \
+            --project-directory "$DEPLOY_DIR" \
+            -p "$APP_NAME" \
+            "$@"
+        }
+
+        echo "Rolling back to $PREVIOUS_IMAGE"
+
+        export IMAGE="$PREVIOUS_IMAGE"
+
+        dc up -d --remove-orphans
+        dc ps
+
+        printf '%s\n' "$PREVIOUS_IMAGE" \
+          > "$DEPLOY_DIR/.current-image.tmp"
+
+        mv \
+          "$DEPLOY_DIR/.current-image.tmp" \
+          "$DEPLOY_DIR/.current-image"
+
+        rm -f "$ATTEMPT_MARKER"
+
+        echo "Rollback completed: $PREVIOUS_IMAGE"
+      '''
     }
+
+    always {
+      sh '''
+        #!/usr/bin/env bash
+        rm -f .env
+      '''
+    }
+
     success {
       echo "Deployed ${env.IMAGE} -> http://127.0.0.1:${env.APP_PORT}"
     }
+
     failure {
-      echo "Build ${env.BUILD_NUMBER} failed. If the rollback ran, the previous release is live."
+      echo "Build ${env.BUILD_NUMBER} failed. Check the rollback output above."
+    }
+
+    aborted {
+      echo "Build ${env.BUILD_NUMBER} was aborted."
     }
   }
 }
