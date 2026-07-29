@@ -68,6 +68,12 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 
+# seed-admin.mjs runs as `docker compose exec web node scripts/seed-admin.mjs`
+# from the Jenkins "Migrate & seed" stage. It needs `pg`, which the standalone
+# trace already includes because src/lib/db.ts imports it, and node:crypto,
+# which is built in. Nothing else from the source tree is required.
+COPY --from=builder --chown=nextjs:nodejs /app/scripts/seed-admin.mjs ./scripts/
+
 USER nextjs
 EXPOSE 3000
 

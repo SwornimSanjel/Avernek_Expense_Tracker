@@ -5,6 +5,7 @@
 //   -> extract .env from Jenkins credentials
 //   -> build versioned Docker image
 //   -> deploy through Docker Compose
+//   -> apply schema + migrations, seed the administrator
 //   -> smoke test
 //   -> automatically restore the previous release if deployment fails
 //   -> prune old images
@@ -262,6 +263,121 @@ pipeline {
 
           dc up -d --remove-orphans
           dc ps
+        '''
+      }
+    }
+
+    stage('Migrate & seed') {
+      steps {
+        sh '''#!/usr/bin/env bash
+          set -Eeuo pipefail
+
+          DEPLOY_DIR="${JENKINS_HOME}/${DEPLOY_SUBDIR}"
+
+          dc() {
+            docker compose \
+              -f "$DEPLOY_DIR/docker-compose.yml" \
+              --project-directory "$DEPLOY_DIR" \
+              -p "$APP_NAME" \
+              "$@"
+          }
+
+          # Read from the workspace .env, which is the same file installed into
+          # DEPLOY_DIR by the Deploy stage.
+          env_value() {
+            grep -E "^$1=" .env | head -n 1 | cut -d= -f2-
+          }
+
+          DB_USER="$(env_value POSTGRES_USER)"
+          DB_NAME="$(env_value POSTGRES_DB)"
+
+          : "${DB_USER:?POSTGRES_USER is missing from .env}"
+          : "${DB_NAME:?POSTGRES_DB is missing from .env}"
+
+          psql_db() {
+            dc exec -T db \
+              psql -v ON_ERROR_STOP=1 -U "$DB_USER" -d "$DB_NAME" "$@"
+          }
+
+          # ----------------------------------------------------------
+          # Wait for Postgres to accept connections.
+          # ----------------------------------------------------------
+
+          echo "Waiting for Postgres ..."
+
+          for attempt in $(seq 1 30); do
+            if dc exec -T db \
+                 pg_isready -U "$DB_USER" -d "$DB_NAME" >/dev/null 2>&1; then
+              echo "Postgres ready after ${attempt} attempt(s)."
+              break
+            fi
+
+            if [[ "$attempt" -eq 30 ]]; then
+              echo "ERROR: Postgres did not become ready within 60 seconds."
+              dc logs --tail 40 db || true
+              exit 1
+            fi
+
+            sleep 2
+          done
+
+          # ----------------------------------------------------------
+          # Baseline schema. Fully guarded with "if not exists" /
+          # "create or replace", so re-running it is a no-op.
+          # ----------------------------------------------------------
+
+          echo "Applying db/schema.sql"
+          psql_db -q < db/schema.sql
+
+          # ----------------------------------------------------------
+          # Migrations, each applied exactly once and recorded in a
+          # ledger. Ordering is the filename's date prefix; the glob
+          # is already sorted.
+          # ----------------------------------------------------------
+
+          psql_db -q -c "
+            create table if not exists public.schema_migrations (
+              filename   text primary key,
+              applied_at timestamptz not null default now()
+            );
+          "
+
+          for file in db/migrations/*.sql; do
+            name="$(basename "$file")"
+
+            applied="$(
+              psql_db -tAc \
+                "select 1 from public.schema_migrations
+                  where filename = '$name'" \
+                | tr -d '[:space:]'
+            )"
+
+            if [[ -n "$applied" ]]; then
+              echo "  already applied: $name"
+              continue
+            fi
+
+            echo "  applying:        $name"
+
+            # -1 wraps the file in a single transaction, so a failure
+            # halfway through leaves nothing behind.
+            psql_db -q -1 < "$file"
+
+            psql_db -q -c \
+              "insert into public.schema_migrations (filename)
+               values ('$name')"
+          done
+
+          # ----------------------------------------------------------
+          # Administrator. Idempotent: re-running resets the password
+          # to whatever ADMIN_PASSWORD currently says.
+          # ----------------------------------------------------------
+
+          echo "Seeding administrator"
+
+          dc exec -T web node scripts/seed-admin.mjs
+
+          echo "Database is up to date."
         '''
       }
     }

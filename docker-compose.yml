@@ -5,6 +5,34 @@
 # manual `docker compose up -d` on the host still works via the :latest default.
 
 services:
+  # The application's own Postgres. Deliberately publishes no host port: only
+  # services on this compose network reach it, so `db` in DATABASE_URL is the
+  # only valid hostname. Nothing else on the host can see port 5432 here, which
+  # is why it does not collide with the n8n Postgres already running.
+  db:
+    image: postgres:16-alpine
+    container_name: avernek-postgres
+    restart: unless-stopped
+    init: true
+    # POSTGRES_USER/PASSWORD/DB come from .env and must agree with DATABASE_URL.
+    # They are read only on FIRST start, when the data directory is initialised;
+    # changing them later does not rename the role or database.
+    env_file:
+      - .env
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   web:
     build:
       context: .
@@ -23,6 +51,9 @@ services:
       - .env
     environment:
       NODE_ENV: production
+    depends_on:
+      db:
+        condition: service_healthy
     ports:
       # Bind to loopback and let a reverse proxy terminate TLS in front of it.
       # Change to "${APP_PORT:-3001}:3000" to expose it directly.
@@ -67,6 +98,11 @@ services:
       options:
         max-size: "1m"
         max-file: "3"
+
+volumes:
+  # Survives `docker compose down` and every redeploy. Removing this volume
+  # destroys the database.
+  pgdata:
 
 # No `secrets:` block any more — the build needs nothing, and runtime values
 # come from env_file.
