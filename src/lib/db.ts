@@ -1,4 +1,4 @@
-import { Pool, type QueryResultRow } from "pg";
+import { Pool, types, type QueryResultRow } from "pg";
 
 /**
  * Direct Postgres access. No PostgREST, no Supabase, no network hop to a third
@@ -8,6 +8,39 @@ import { Pool, type QueryResultRow } from "pg";
  * edge runtime. Middleware verifies the signed session cookie instead, which is
  * why sign-in state costs zero queries per request.
  */
+
+/**
+ * Dates and timestamps come back as strings, which is the contract every type
+ * in lib/types.ts declares (`expense_date: string`) and the one PostgREST used
+ * to provide.
+ *
+ * `pg` otherwise hydrates them into Date objects, which broke three ways at
+ * once and only one of them was loud:
+ *
+ *   1. `{e.expense_date}` in JSX threw "Objects are not valid as a React child".
+ *   2. `String(row.rate_date).slice(0, 10)` silently produced "Tue Jul 14"
+ *      instead of "2026-07-14", corrupting the stored FX rate date.
+ *   3. `e.expense_date >= "2026-07-01"` compared a Date against a string, which
+ *      JS evaluates numerically as NaN — always false. Every dashboard total
+ *      and month bar silently read zero.
+ *
+ * Registered at module scope so they are in place before getPool() ever runs.
+ * setTypeParser is process-global, which is what we want: every query in the
+ * app goes through this module.
+ */
+
+// DATE — already "YYYY-MM-DD" on the wire. Handing it back untouched is what
+// keeps `<input type="date">` defaultValues and string range filters working.
+types.setTypeParser(1082, (value) => value);
+
+// TIMESTAMP WITHOUT TIME ZONE. The schema has no such column today; registered
+// so one added later cannot reintroduce the bug.
+types.setTypeParser(1114, (value) => value);
+
+// TIMESTAMPTZ — normalised to ISO-8601 UTC ("2026-07-29T09:44:26.787Z") rather
+// than passed through, because Postgres emits "2026-07-29 09:44:26.78718+00",
+// which is not what any consumer of a timestamp string expects.
+types.setTypeParser(1184, (value) => new Date(value).toISOString());
 
 function createPool(): Pool {
   const connectionString = process.env.DATABASE_URL?.trim();
