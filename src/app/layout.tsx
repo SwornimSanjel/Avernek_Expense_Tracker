@@ -4,6 +4,9 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Avernek Expense Tracker",
   description: "Internal spend tracker for Avernek Technologies.",
+  icons: {
+    icon: "/avernek-logo.jpg",
+  },
 };
 
 // Applies the saved theme before paint to avoid a flash.

@@ -11,7 +11,7 @@ const initialState: MemberState = { error: null, ok: null };
 export default function SetPasswordForm({
   members,
 }: {
-  members: { id: string; name: string; can_sign_in: boolean }[];
+  members: { id: string; name: string; email: string; can_sign_in: boolean }[];
 }) {
   const [state, formAction, pending] = useActionState(
     setMemberPassword,
@@ -29,10 +29,16 @@ export default function SetPasswordForm({
         <option value="" disabled>
           Choose a member…
         </option>
+        {/*
+          The email is the label, not the name. Two people can share a display
+          name — "Pragyan" the participant and "pragyanmaharjan6k" the Gmail
+          account — and the email is what you actually type to sign in, so
+          choosing by name alone sets the password on the wrong row.
+        */}
         {members.map((member) => (
           <option key={member.id} value={member.id}>
-            {member.name}
-            {member.can_sign_in ? "" : " — no login yet"}
+            {member.email} — {member.name}
+            {member.can_sign_in ? "" : " (no login yet)"}
           </option>
         ))}
       </select>

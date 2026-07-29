@@ -102,6 +102,7 @@ export default async function SettingsPage() {
                 members={users.map((u) => ({
                   id: u.id,
                   name: u.name,
+                  email: u.email,
                   can_sign_in: u.can_sign_in,
                 }))}
               />
