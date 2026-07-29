@@ -54,7 +54,10 @@ pipeline {
     DEPLOY_SUBDIR = 'deployments/avernek-expense-tracker'
 
     ENV_CREDENTIAL = 'avernek-expense-tracker-env'
-    APP_PORT        = '3000'
+
+    // Host-side published port only; the container still listens on 3000
+    // internally. Change this if the host port is already taken.
+    APP_PORT        = '3001'
 
     IMAGE        = "avernek-expense-tracker:${env.BUILD_NUMBER}"
     IMAGE_LATEST = 'avernek-expense-tracker:latest'

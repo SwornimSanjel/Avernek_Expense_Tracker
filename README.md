@@ -131,17 +131,22 @@ image, and if `/api/health` does not answer within ~60s it redeploys the previou
 the build. The last 5 numbered images are kept on the host for manual rollbacks.
 
 ### Networking
-Compose publishes to `127.0.0.1:3000` only — put nginx/Caddy in front for TLS, then set that
+Compose publishes to `127.0.0.1:3001` only — put nginx/Caddy in front for TLS, then set that
 public URL as the Supabase **Site URL** and add `https://YOUR-DOMAIN/auth/callback` to the
 redirect list. To expose the port directly instead, drop the `127.0.0.1:` prefix in
 `docker-compose.yml`.
+
+The published host port comes from `APP_PORT` (default `3001`, set in the `Jenkinsfile`). The
+container itself always listens on 3000 — that is internal to the compose network, so leave the
+right-hand side of the port mapping, the Dockerfile and `docker/fx-cron.sh` alone. Note that
+local `npm run dev` still uses 3000.
 
 ### Run it locally without Jenkins
 ```bash
 cp .env.local .env
 docker compose up --build -d
 docker compose ps
-curl localhost:3000/api/health
+curl localhost:3001/api/health
 ```
 
 > Values in `.env` containing a literal `$` need it doubled (`$$`) — compose treats `$` as

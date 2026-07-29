@@ -27,8 +27,12 @@ services:
       NODE_ENV: production
     ports:
       # Bind to loopback and let a reverse proxy terminate TLS in front of it.
-      # Change to "${APP_PORT:-3000}:3000" to expose it directly.
-      - "127.0.0.1:${APP_PORT:-3000}:3000"
+      # Change to "${APP_PORT:-3001}:3000" to expose it directly.
+      #
+      # Only the left (host) side is configurable: the container always listens
+      # on 3000, which is private to the compose network and never conflicts
+      # with anything on the host.
+      - "127.0.0.1:${APP_PORT:-3001}:3000"
     healthcheck:
       test:
         - CMD
