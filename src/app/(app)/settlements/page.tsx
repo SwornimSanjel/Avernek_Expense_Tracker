@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 
 export default async function SettlementsPage() {
   const [team, exp, shareRows] = await Promise.all([
-    query<AppUser>(`select * from public.users order by name`),
+    query<AppUser>(`select id, name, email, is_core_member, is_admin from public.users order by name`),
     query<Expense>(`select * from public.expenses`),
     query<{ expense_id: string }>(`select * from public.expense_shares`),
   ]);

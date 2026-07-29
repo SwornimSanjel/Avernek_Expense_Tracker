@@ -33,7 +33,7 @@ export default async function ExpensesPage({
   const [cats, vends, team] = await Promise.all([
     query<Category>(`select * from public.categories order by name`),
     query<Vendor>(`select * from public.vendors order by name`),
-    query<AppUser>(`select * from public.users order by name`),
+    query<AppUser>(`select id, name, email, is_core_member, is_admin from public.users order by name`),
   ]);
 
   // Filters are optional, so the WHERE clause is assembled from whichever

@@ -16,7 +16,7 @@ export async function GET() {
     ),
     query<Category>(`select * from public.categories`),
     query<Vendor>(`select * from public.vendors`),
-    query<AppUser>(`select * from public.users`),
+    query<AppUser>(`select id, name, email, is_core_member, is_admin from public.users`),
   ]);
 
   const categories = cats as Category[];

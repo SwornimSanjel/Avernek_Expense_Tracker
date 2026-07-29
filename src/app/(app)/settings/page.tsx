@@ -2,9 +2,11 @@ import { query } from "@/lib/db";
 import { requireSession } from "@/lib/auth/server";
 import { PageHeader } from "@/components/ui";
 import { npr } from "@/lib/format";
-import type { AppUser, Category } from "@/lib/types";
+import type { Category, TeamMember } from "@/lib/types";
 import { addCategory, updateMyName } from "./actions";
 import TeamToggle from "@/components/TeamToggle";
+import AddMemberForm from "@/components/AddMemberForm";
+import SetPasswordForm from "@/components/SetPasswordForm";
 import { isAppOwner } from "@/lib/authz";
 
 export const dynamic = "force-dynamic";
@@ -13,10 +15,16 @@ export default async function SettingsPage() {
   const session = await requireSession();
   const [cats, team] = await Promise.all([
     query<Category>(`select * from public.categories order by name`),
-    query<AppUser>(`select * from public.users order by name`),
+    // Never select password_hash: these rows are handed to client components.
+    query<TeamMember>(
+      `select id, name, email, is_core_member, is_admin,
+              (password_hash is not null) as can_sign_in
+         from public.users
+        order by name`
+    ),
   ]);
   const categories = cats as Category[];
-  const users = team as AppUser[];
+  const users = team as TeamMember[];
   const me = users.find((u) => u.id === session.sub);
   const canManage = isAppOwner(session);
 
@@ -54,9 +62,12 @@ export default async function SettingsPage() {
             {users.map((u) => (
               <div key={u.id} className="flex items-center gap-3 py-1">
                 <div className="flex-1 min-w-0">
-                  <div className="font-medium truncate">{u.name}</div>
+                  <div className="font-medium truncate">
+                    {u.name}
+                    {u.is_admin && <span className="pill ml-2">Admin</span>}
+                  </div>
                   <div className="text-xs muted truncate">
-                    {u.email.endsWith("@local.expense") ? "participant only" : u.email}
+                    {u.can_sign_in ? u.email : `${u.email} · no login`}
                   </div>
                 </div>
                 {canManage ? (
@@ -73,11 +84,30 @@ export default async function SettingsPage() {
             )}
           </div>
           <p className="text-xs muted mt-3">
-            These are expense participants, not login permissions. “Default split”
-            is used only for older expenses without exact shares; named splits always
-            override it.
+            “Default split” is used only for older expenses without exact shares;
+            named splits always override it.
           </p>
         </div>
+
+        {canManage && (
+          <>
+            <div className="card p-5">
+              <h2 className="font-semibold mb-3">Add member</h2>
+              <AddMemberForm />
+            </div>
+
+            <div className="card p-5">
+              <h2 className="font-semibold mb-3">Set a password</h2>
+              <SetPasswordForm
+                members={users.map((u) => ({
+                  id: u.id,
+                  name: u.name,
+                  can_sign_in: u.can_sign_in,
+                }))}
+              />
+            </div>
+          </>
+        )}
 
         {/* Categories */}
         <div className="card p-5 lg:col-span-2">

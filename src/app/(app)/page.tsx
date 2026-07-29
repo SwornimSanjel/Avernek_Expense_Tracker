@@ -31,7 +31,7 @@ export default async function Dashboard() {
       query<Category>(`select * from public.categories`),
       query<Vendor>(`select * from public.vendors`),
       query<Recurring>(`select * from public.recurring where is_active = true`),
-      query<AppUser>(`select * from public.users order by name`),
+      query<AppUser>(`select id, name, email, is_core_member, is_admin from public.users order by name`),
       one<{ name: string }>(`select name from public.users where id = $1`, [
         session.sub,
       ]),

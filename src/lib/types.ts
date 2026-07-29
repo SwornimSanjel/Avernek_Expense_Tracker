@@ -13,6 +13,16 @@ export interface AppUser {
   name: string;
   email: string;
   is_core_member: boolean;
+  is_admin: boolean;
+}
+
+/**
+ * The team list on /settings. `can_sign_in` is computed in SQL as
+ * `password_hash is not null` — never select password_hash itself. These rows
+ * reach client components, so anything in this shape is shipped to the browser.
+ */
+export interface TeamMember extends AppUser {
+  can_sign_in: boolean;
 }
 
 export interface Category {

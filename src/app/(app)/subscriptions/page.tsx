@@ -24,7 +24,7 @@ export default async function SubscriptionsPage() {
     query<{ recurring_id: string }>(`select * from public.recurring_shares`),
     query<Category>(`select * from public.categories order by name`),
     query<Vendor>(`select * from public.vendors order by name`),
-    query<AppUser>(`select * from public.users order by name`),
+    query<AppUser>(`select id, name, email, is_core_member, is_admin from public.users order by name`),
   ]);
 
   const recurring = recs.map((recurring) => ({
