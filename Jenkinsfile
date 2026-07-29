@@ -99,9 +99,10 @@ pipeline {
             sed -i 's/\\r$//' .env
 
             required_keys=(
-              NEXT_PUBLIC_SUPABASE_URL
-              NEXT_PUBLIC_SUPABASE_ANON_KEY
-              SUPABASE_SERVICE_ROLE_KEY
+              DATABASE_URL
+              SESSION_SECRET
+              ADMIN_EMAIL
+              ADMIN_PASSWORD
               CRON_SECRET
             )
 

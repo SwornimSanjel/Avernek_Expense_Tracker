@@ -1,29 +1,30 @@
-import { createClient } from "@/lib/supabase/server";
+import { query } from "@/lib/db";
+import { getSession } from "@/lib/auth/server";
 import type { AppUser, Category, Expense, Vendor } from "@/lib/types";
 
 // GET /api/export -> expenses.csv
 export async function GET() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return new Response("Unauthorized", { status: 401 });
+  const session = await getSession();
+  if (!session) return new Response("Unauthorized", { status: 401 });
 
-  const [{ data: exp }, { data: shareRows }, { data: cats }, { data: vends }, { data: team }] =
-    await Promise.all([
-      supabase.from("expenses").select("*").order("expense_date", { ascending: false }),
-      supabase.from("expense_shares").select("*"),
-      supabase.from("categories").select("*"),
-      supabase.from("vendors").select("*"),
-      supabase.from("users").select("*"),
-    ]);
+  const [exp, shareRows, cats, vends, team] = await Promise.all([
+    query<Expense>(
+      `select * from public.expenses order by expense_date desc`
+    ),
+    query<{ expense_id: string; user_id: string; amount: number }>(
+      `select * from public.expense_shares`
+    ),
+    query<Category>(`select * from public.categories`),
+    query<Vendor>(`select * from public.vendors`),
+    query<AppUser>(`select * from public.users`),
+  ]);
 
-  const categories = (cats ?? []) as Category[];
-  const vendors = (vends ?? []) as Vendor[];
-  const users = (team ?? []) as AppUser[];
-  const rows = (exp ?? []).map((expense) => ({
+  const categories = cats as Category[];
+  const vendors = vends as Vendor[];
+  const users = team as AppUser[];
+  const rows = exp.map((expense) => ({
     ...expense,
-    expense_shares: (shareRows ?? []).filter(
+    expense_shares: shareRows.filter(
       (share) => share.expense_id === expense.id
     ),
   })) as Expense[];

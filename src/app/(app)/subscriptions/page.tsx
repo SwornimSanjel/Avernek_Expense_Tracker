@@ -1,4 +1,5 @@
-import { createClient } from "@/lib/supabase/server";
+import { query } from "@/lib/db";
+import { requireSession } from "@/lib/auth/server";
 import { PageHeader } from "@/components/ui";
 import AddRecurring from "@/components/AddRecurring";
 import RecurringRow from "@/components/RecurringRow";
@@ -10,35 +11,30 @@ import { isAppOwner } from "@/lib/authz";
 export const dynamic = "force-dynamic";
 
 export default async function SubscriptionsPage() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  const canManage = isAppOwner(user?.email);
+  const session = await requireSession();
+  const canManage = isAppOwner(session);
 
-  const [
-    { data: recs },
-    { data: shareRows, error: shareError },
-    { data: cats },
-    { data: vends },
-    { data: team },
-  ] =
-    await Promise.all([
-      supabase.from("recurring").select("*").order("next_renewal_date"),
-      supabase.from("recurring_shares").select("*"),
-      supabase.from("categories").select("*").order("name"),
-      supabase.from("vendors").select("*").order("name"),
-      supabase.from("users").select("*").order("name"),
-    ]);
+  // A failed share query used to surface as `error`; a throw here is caught by
+  // the route's error boundary instead, so the page never renders subscriptions
+  // with silently missing splits.
+  const shareError = null;
 
-  const recurring = (recs ?? []).map((recurring) => ({
+  const [recs, shareRows, cats, vends, team] = await Promise.all([
+    query<Recurring>(`select * from public.recurring order by next_renewal_date`),
+    query<{ recurring_id: string }>(`select * from public.recurring_shares`),
+    query<Category>(`select * from public.categories order by name`),
+    query<Vendor>(`select * from public.vendors order by name`),
+    query<AppUser>(`select * from public.users order by name`),
+  ]);
+
+  const recurring = recs.map((recurring) => ({
     ...recurring,
-    recurring_shares: (shareRows ?? []).filter(
+    recurring_shares: shareRows.filter(
       (share) => share.recurring_id === recurring.id
     ),
   })) as Recurring[];
-  const categories = (cats ?? []) as Category[];
-  const vendors = (vends ?? []) as Vendor[];
+  const categories = cats as Category[];
+  const vendors = vends as Vendor[];
   const users = (team ?? []) as AppUser[];
 
   const vName = (id: string | null) => vendors.find((v) => v.id === id)?.name ?? "";
@@ -55,7 +51,7 @@ export default async function SubscriptionsPage() {
             categories={categories}
             vendors={vendors}
             users={users}
-            meId={user!.id}
+            meId={session.sub}
           />
         }
       />

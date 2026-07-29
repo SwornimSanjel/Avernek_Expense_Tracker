@@ -7,13 +7,15 @@
 # `runner` ships only Next's standalone server -- no source, no npm, no
 # devDependencies. Final image is a few hundred MB instead of ~1.5 GB.
 #
-# The .env never lands in a layer. It is mounted as a BuildKit secret for the
-# single RUN that needs it, because NEXT_PUBLIC_* values are inlined into the
-# client bundle at build time and so must exist while `next build` runs.
-# Server-only values (SUPABASE_SERVICE_ROLE_KEY, CRON_SECRET) are injected at
-# runtime by docker compose instead.
+# The build needs NO secrets at all. Every value the app reads -- DATABASE_URL,
+# SESSION_SECRET, ADMIN_* , CRON_SECRET -- is server-side and read at runtime,
+# so nothing is compiled into the image.
 #
-#   DOCKER_BUILDKIT=1 docker build --secret id=envfile,src=.env -t avernek-expense-tracker .
+# That is a deliberate property: there are no NEXT_PUBLIC_* variables left, so
+# changing configuration no longer requires a rebuild. Edit the environment and
+# restart, and the change is live.
+#
+#   docker build -t avernek-expense-tracker .
 
 ##############################################################################
 # Stage 1 - dependencies
@@ -42,10 +44,7 @@ ENV DOCKER_BUILD=1
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-# `next build` reads .env.production.local first, so the mounted secret wins
-# over anything else. The mount is a tmpfs that exists only for this command.
-RUN --mount=type=secret,id=envfile,target=/app/.env.production.local \
-    npm run build
+RUN npm run build
 
 ##############################################################################
 # Stage 3 - runtime

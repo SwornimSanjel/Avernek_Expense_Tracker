@@ -11,10 +11,9 @@
   },
   "dependencies": {
     "@netlify/plugin-nextjs": "^5.15.12",
-    "@supabase/ssr": "^0.5.2",
-    "@supabase/supabase-js": "^2.45.4",
     "date-fns": "^3.6.0",
     "next": "15.1.11",
+    "pg": "^8.22.0",
     "react": "19.0.0",
     "react-dom": "19.0.0",
     "recharts": "^2.13.3"
@@ -22,6 +21,7 @@
   "devDependencies": {
     "@tailwindcss/postcss": "^4.0.0",
     "@types/node": "^20",
+    "@types/pg": "^8.20.0",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "tailwindcss": "^4.0.0",

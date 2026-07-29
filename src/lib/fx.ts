@@ -16,6 +16,7 @@
  */
 
 import { format, subDays, parseISO } from "date-fns";
+import { exec, one } from "@/lib/db";
 
 const NRB_BASE = "https://www.nrb.org.np/api/forex/v1";
 const LOOKBACK_DAYS = 7; // window to search back for the most recent rate on/before a date
@@ -27,8 +28,11 @@ export interface UsdRate {
   source: "nrb";
 }
 
-interface MinimalSupabase {
-  from: (table: string) => any;
+/** Shape of a cached fx_rates row. */
+interface FxRateRow {
+  rate_date: string;
+  buy_rate: string | number | null;
+  sell_rate: string | number | null;
 }
 
 // -----------------------------------------------------------------------------
@@ -88,41 +92,52 @@ function num(v: unknown): number | null {
 // -----------------------------------------------------------------------------
 
 export async function cacheNrbUsd(
-  supabase: MinimalSupabase,
   rows: { date: string; buy: number | null; sell: number | null }[]
 ) {
   if (rows.length === 0) return;
-  await supabase.from("fx_rates").upsert(
-    rows.map((r) => ({
-      rate_date: r.date,
-      base_currency: "USD",
-      quote_currency: "NPR",
-      buy_rate: r.buy,
-      sell_rate: r.sell,
-      source: "nrb",
-    })),
-    { onConflict: "rate_date,base_currency,quote_currency", ignoreDuplicates: true }
+
+  // One multi-row insert rather than a statement per row. `do nothing` keeps
+  // the immutability rule: a historical rate already stored is never rewritten.
+  const params: unknown[] = [];
+  const tuples = rows.map((row, index) => {
+    const offset = index * 4;
+    params.push(row.date, row.buy, row.sell, "nrb");
+    return `($${offset + 1}, 'USD', 'NPR', $${offset + 2}, $${offset + 3}, $${offset + 4})`;
+  });
+
+  await exec(
+    `insert into public.fx_rates
+       (rate_date, base_currency, quote_currency, buy_rate, sell_rate, source)
+     values ${tuples.join(", ")}
+     on conflict (rate_date, base_currency, quote_currency) do nothing`,
+    params
   );
 }
 
-async function cachedUsdOnOrBefore(
-  supabase: MinimalSupabase,
-  date: string
-): Promise<UsdRate | null> {
+async function cachedUsdOnOrBefore(date: string): Promise<UsdRate | null> {
   const floor = format(subDays(parseISO(date), LOOKBACK_DAYS), "yyyy-MM-dd");
-  const { data } = await supabase
-    .from("fx_rates")
-    .select("rate_date, buy_rate, sell_rate")
-    .eq("base_currency", "USD")
-    .eq("quote_currency", "NPR")
-    .lte("rate_date", date)
-    .gte("rate_date", floor)
-    .not("sell_rate", "is", null)
-    .order("rate_date", { ascending: false })
-    .limit(1);
-  const row = data?.[0];
+
+  const row = await one<FxRateRow>(
+    `select rate_date, buy_rate, sell_rate
+       from public.fx_rates
+      where base_currency = 'USD'
+        and quote_currency = 'NPR'
+        and rate_date <= $1
+        and rate_date >= $2
+        and sell_rate is not null
+      order by rate_date desc
+      limit 1`,
+    [date, floor]
+  );
+
   if (!row) return null;
-  return { rate: Number(row.sell_rate), buy: row.buy_rate, rateDate: row.rate_date, source: "nrb" };
+
+  return {
+    rate: Number(row.sell_rate),
+    buy: row.buy_rate == null ? null : Number(row.buy_rate),
+    rateDate: String(row.rate_date).slice(0, 10),
+    source: "nrb",
+  };
 }
 
 // -----------------------------------------------------------------------------
@@ -131,18 +146,17 @@ async function cachedUsdOnOrBefore(
 // -----------------------------------------------------------------------------
 
 export async function getUsdSellRateForDate(
-  supabase: MinimalSupabase,
   date: string
 ): Promise<UsdRate | null> {
   // 1. Cache (fast, and immutable for the past).
-  const cached = await cachedUsdOnOrBefore(supabase, date);
+  const cached = await cachedUsdOnOrBefore(date);
   if (cached) return cached;
 
   // 2. Ask NRB for a small window ENDING on the expense date, then cache + reselect.
   try {
     const from = format(subDays(parseISO(date), LOOKBACK_DAYS), "yyyy-MM-dd");
     const rows = await fetchNrbUsd(from, date);
-    await cacheNrbUsd(supabase, rows);
+    await cacheNrbUsd(rows);
     const usable = rows
       .filter((r) => r.sell != null && r.date <= date)
       .sort((a, b) => (a.date < b.date ? 1 : -1));
@@ -157,34 +171,32 @@ export async function getUsdSellRateForDate(
 }
 
 /** Latest known USD sell rate (for "current rate" display and planned-expense estimates). */
-export async function getCurrentUsdSellRate(
-  supabase: MinimalSupabase
-): Promise<UsdRate | null> {
+export async function getCurrentUsdSellRate(): Promise<UsdRate | null> {
   const today = format(new Date(), "yyyy-MM-dd");
-  return getUsdSellRateForDate(supabase, today);
+  return getUsdSellRateForDate(today);
 }
 
 /**
  * CACHE-ONLY current rate for dashboards: reads the newest cached row and never
  * calls NRB. Keeps page loads fast; the daily cron keeps the cache fresh.
  */
-export async function getCachedUsdSellRate(
-  supabase: MinimalSupabase
-): Promise<UsdRate | null> {
-  const { data } = await supabase
-    .from("fx_rates")
-    .select("rate_date, buy_rate, sell_rate")
-    .eq("base_currency", "USD")
-    .eq("quote_currency", "NPR")
-    .not("sell_rate", "is", null)
-    .order("rate_date", { ascending: false })
-    .limit(1);
-  const row = data?.[0];
+export async function getCachedUsdSellRate(): Promise<UsdRate | null> {
+  const row = await one<FxRateRow>(
+    `select rate_date, buy_rate, sell_rate
+       from public.fx_rates
+      where base_currency = 'USD'
+        and quote_currency = 'NPR'
+        and sell_rate is not null
+      order by rate_date desc
+      limit 1`
+  );
+
   if (!row) return null;
+
   return {
     rate: Number(row.sell_rate),
-    buy: row.buy_rate,
-    rateDate: row.rate_date,
+    buy: row.buy_rate == null ? null : Number(row.buy_rate),
+    rateDate: String(row.rate_date).slice(0, 10),
     source: "nrb",
   };
 }

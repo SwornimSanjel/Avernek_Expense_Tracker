@@ -10,23 +10,22 @@ import { NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 
 /**
- * Which Supabase project THIS BUILD talks to.
+ * Which database this container is pointed at — host and name only, never the
+ * credentials. Reported so "is it talking to the right database?" is answerable
+ * without shelling into the container.
  *
- * Reported because NEXT_PUBLIC_* is compiled into the bundle, so .env can say
- * one thing while the running container says another — and the only visible
- * symptom is sign-ins going somewhere unexpected. Host only: no keys.
- *
- * Read straight from the environment rather than through lib/supabase/config,
- * which throws on bad input. Liveness must not depend on configuration being
- * correct, or a typo turns into a Docker restart loop.
+ * Parsed defensively rather than through lib/db, which throws on bad input:
+ * liveness must not depend on configuration being correct, or a typo in
+ * DATABASE_URL turns into a Docker restart loop.
  */
-function supabaseTarget(): string {
-  const raw = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+function databaseTarget(): string {
+  const raw = process.env.DATABASE_URL?.trim();
   if (!raw) return "UNSET";
   try {
-    return new URL(raw).host;
+    const url = new URL(raw);
+    return `${url.host}${url.pathname}`;
   } catch {
-    return `INVALID(${raw})`;
+    return "INVALID";
   }
 }
 
@@ -34,7 +33,7 @@ export function GET() {
   return NextResponse.json({
     ok: true,
     service: "avernek-expense-tracker",
-    supabase: supabaseTarget(),
+    database: databaseTarget(),
     time: new Date().toISOString(),
   });
 }

@@ -1,66 +1,47 @@
-import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
-import { SUPABASE_ANON_KEY, SUPABASE_URL } from "@/lib/supabase/config";
+import { SESSION_COOKIE, verifySession } from "@/lib/auth/session";
 
 /**
- * Refreshes the Supabase auth session on every request and gates the app:
- * unauthenticated users are redirected to /login (except the login/auth routes).
+ * Gates every request on the signed session cookie.
+ *
+ * Verification is a single HMAC check — no database query and no call to an
+ * external auth service — so this costs effectively nothing per request and
+ * cannot redirect anywhere off this site.
  */
 export async function middleware(request: NextRequest) {
   const path = request.nextUrl.pathname;
+
   const isPublic =
     path.startsWith("/login") ||
-    path.startsWith("/auth") ||
     path.startsWith("/api/cron") ||
-    // Container healthcheck / deploy smoke test. Must answer without a session.
+    // Container healthcheck and deploy smoke test. Must answer without a session.
     path === "/api/health";
 
-  // Public routes do not need a session refresh. In particular, keeping /login
-  // independent lets it render a useful error when the auth service is offline.
+  const session = await verifySession(request.cookies.get(SESSION_COOKIE)?.value);
+
   if (isPublic) {
-    return NextResponse.next({ request });
+    // No reason to show a sign-in form to someone already signed in.
+    if (session && path.startsWith("/login")) {
+      return NextResponse.redirect(new URL("/", request.url));
+    }
+    return NextResponse.next();
   }
 
-  let response = NextResponse.next({ request });
-
-  const supabase = createServerClient(
-    SUPABASE_URL,
-    SUPABASE_ANON_KEY,
-    {
-      cookies: {
-        getAll() {
-          return request.cookies.getAll();
-        },
-        setAll(
-          cookiesToSet: { name: string; value: string; options?: any }[]
-        ) {
-          cookiesToSet.forEach(({ name, value }) =>
-            request.cookies.set(name, value)
-          );
-          response = NextResponse.next({ request });
-          cookiesToSet.forEach(({ name, value, options }) =>
-            response.cookies.set(name, value, options)
-          );
-        },
-      },
-    }
-  );
-
-  // Verify the identity with Supabase rather than trusting cookie contents.
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
+  if (!session) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
+    url.search = "";
+    // Remember the destination so sign-in returns there instead of the dashboard.
+    if (path !== "/") url.searchParams.set("next", path);
     return NextResponse.redirect(url);
   }
 
-  return response;
+  return NextResponse.next();
 }
 
 export const config = {
-  // Run on everything except static assets.
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)"],
+  // Everything except static assets.
+  matcher: [
+    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+  ],
 };

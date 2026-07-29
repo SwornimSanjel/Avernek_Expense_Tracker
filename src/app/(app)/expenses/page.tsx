@@ -1,4 +1,5 @@
-import { createClient } from "@/lib/supabase/server";
+import { query } from "@/lib/db";
+import { requireSession } from "@/lib/auth/server";
 import { PageHeader, FxBadge } from "@/components/ui";
 import AddExpense from "@/components/AddExpense";
 import { npr, usd } from "@/lib/format";
@@ -26,42 +27,57 @@ export default async function ExpensesPage({
   }>;
 }) {
   const sp = await searchParams;
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  const canManage = canManageExpenses(user?.email);
+  const session = await requireSession();
+  const canManage = canManageExpenses(session);
 
-  const [{ data: cats }, { data: vends }, { data: team }] = await Promise.all([
-    supabase.from("categories").select("*").order("name"),
-    supabase.from("vendors").select("*").order("name"),
-    supabase.from("users").select("*").order("name"),
+  const [cats, vends, team] = await Promise.all([
+    query<Category>(`select * from public.categories order by name`),
+    query<Vendor>(`select * from public.vendors order by name`),
+    query<AppUser>(`select * from public.users order by name`),
   ]);
 
-  let query = supabase
-    .from("expenses")
-    .select("*")
-    .order("expense_date", { ascending: false })
-    .limit(1000);
-  if (sp.cat) query = query.eq("category_id", sp.cat);
-  if (sp.vendor) query = query.eq("vendor_id", sp.vendor);
-  if (/^\d{4}-\d{2}$/.test(sp.month ?? "")) {
-    query = query.eq("billing_month", `${sp.month}-01`);
+  // Filters are optional, so the WHERE clause is assembled from whichever
+  // search params are present. Values always go through $n placeholders —
+  // never interpolated — because they come straight from the query string.
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+
+  if (sp.cat) {
+    params.push(sp.cat);
+    conditions.push(`category_id = $${params.length}`);
   }
-  const [
-    { data: expenses },
-    { data: shareRows, error: shareError },
-  ] = await Promise.all([
-    query,
-    supabase.from("expense_shares").select("*"),
+  if (sp.vendor) {
+    params.push(sp.vendor);
+    conditions.push(`vendor_id = $${params.length}`);
+  }
+  if (/^\d{4}-\d{2}$/.test(sp.month ?? "")) {
+    params.push(`${sp.month}-01`);
+    conditions.push(`billing_month = $${params.length}`);
+  }
+
+  const where = conditions.length ? `where ${conditions.join(" and ")}` : "";
+
+  // A query failure now throws to the error boundary rather than rendering
+  // expenses with silently missing splits.
+  const shareError = null;
+
+  const [expenses, shareRows] = await Promise.all([
+    query<Expense>(
+      `select * from public.expenses
+       ${where}
+       order by expense_date desc
+       limit 1000`,
+      params
+    ),
+    query<{ expense_id: string }>(`select * from public.expense_shares`),
   ]);
 
-  const categories = (cats ?? []) as Category[];
-  const vendors = (vends ?? []) as Vendor[];
-  const users = (team ?? []) as AppUser[];
-  const sourceRows = (expenses ?? []).map((expense) => ({
+  const categories = cats as Category[];
+  const vendors = vends as Vendor[];
+  const users = team as AppUser[];
+  const sourceRows = expenses.map((expense) => ({
     ...expense,
-    expense_shares: (shareRows ?? []).filter(
+    expense_shares: shareRows.filter(
       (share) => share.expense_id === expense.id
     ),
   })) as Expense[];
@@ -101,7 +117,7 @@ export default async function ExpensesPage({
             categories={categories}
             vendors={vendors}
             users={users}
-            meId={user!.id}
+            meId={session.sub}
           />
         }
       />

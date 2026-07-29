@@ -31,13 +31,9 @@ create index if not exists recurring_shares_by_recurring
 alter table public.expense_shares enable row level security;
 alter table public.recurring_shares enable row level security;
 
-drop policy if exists expense_shares_rw on public.expense_shares;
-create policy expense_shares_rw on public.expense_shares
-  for all to authenticated using (true) with check (true);
-
-drop policy if exists recurring_shares_rw on public.recurring_shares;
-create policy recurring_shares_rw on public.recurring_shares
-  for all to authenticated using (true) with check (true);
-
 -- Make PostgREST notice the new tables immediately.
 notify pgrst, 'reload schema';
+
+-- RLS policies removed: they targeted the `authenticated` role, which exists
+-- only in Supabase and made this migration fail on a plain Postgres database.
+-- Access is enforced in application code now — see src/lib/auth/server.ts.

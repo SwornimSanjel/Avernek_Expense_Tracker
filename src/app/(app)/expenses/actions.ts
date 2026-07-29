@@ -1,7 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { createClient } from "@/lib/supabase/server";
+import { exec, insertRows, one, query, transaction, updateRow } from "@/lib/db";
+import { requireSession } from "@/lib/auth/server";
 import { getUsdSellRateForDate, resolveConversion } from "@/lib/fx";
 import type { Currency } from "@/lib/types";
 import {
@@ -19,11 +20,7 @@ function n(v: FormDataEntryValue | null): number | null {
 }
 
 export async function addExpense(formData: FormData) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) throw new Error("Not signed in");
+  const session = await requireSession();
 
   const amount = n(formData.get("amount")) ?? 0;
   const currency = (formData.get("currency") as Currency) ?? "NPR";
@@ -39,7 +36,7 @@ export async function addExpense(formData: FormData) {
   // (USD, and no exact charge / manual rate supplied).
   let nrbRate = null;
   if (currency === "USD" && actualNprCharged == null && manualRate == null) {
-    nrbRate = await getUsdSellRateForDate(supabase, expense_date);
+    nrbRate = await getUsdSellRateForDate(expense_date);
   }
 
   const conv = resolveConversion({
@@ -50,35 +47,49 @@ export async function addExpense(formData: FormData) {
     manualRate,
   });
 
-  const { data: expense, error } = await supabase
-    .from("expenses")
-    .insert({
-      amount,
-      currency,
-      expense_date,
-      billing_month: billingMonthDate(formData.get("billing_month")),
-      category_id: (formData.get("category_id") as string) || null,
-      vendor_id: (formData.get("vendor_id") as string) || null,
-      paid_by_user_id: (formData.get("paid_by_user_id") as string) || user.id,
-      client: (formData.get("client") as string) || null,
-      note: (formData.get("note") as string) || null,
-      receipt_url: (formData.get("receipt_url") as string) || null,
-      source: "manual",
-      created_by: user.id,
-      ...conv,
-    })
-    .select("id")
-    .single();
-  if (error) throw new Error(error.message);
+  // The expense and its shares must both land or neither: a saved expense with
+  // no shares silently breaks the split. Previously this was a delete-on-failure
+  // compensation, which left orphans if the delete itself failed.
+  await transaction(async (client) => {
+    const inserted = await client.query<{ id: string }>(
+      `insert into public.expenses
+         (amount, currency, expense_date, billing_month, category_id, vendor_id,
+          paid_by_user_id, client, note, receipt_url, source, created_by,
+          amount_npr, fx_rate_to_npr, fx_rate_date, fx_source, conversion_status,
+          actual_npr_charged)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'manual',$11,$12,$13,$14,$15,$16,$17)
+       returning id`,
+      [
+        amount,
+        currency,
+        expense_date,
+        billingMonthDate(formData.get("billing_month")),
+        (formData.get("category_id") as string) || null,
+        (formData.get("vendor_id") as string) || null,
+        (formData.get("paid_by_user_id") as string) || session.sub,
+        (formData.get("client") as string) || null,
+        (formData.get("note") as string) || null,
+        (formData.get("receipt_url") as string) || null,
+        session.sub,
+        conv.amount_npr,
+        conv.fx_rate_to_npr,
+        conv.fx_rate_date,
+        conv.fx_source,
+        conv.conversion_status,
+        conv.actual_npr_charged,
+      ]
+    );
 
-  if (shares.length > 0 && expense) {
-    const rows = toExpenseShareRows(expense.id, shares, amount, conv.amount_npr);
-    const { error: shareError } = await supabase.from("expense_shares").insert(rows);
-    if (shareError) {
-      await supabase.from("expenses").delete().eq("id", expense.id);
-      throw new Error(shareError.message);
+    const expenseId = inserted.rows[0].id;
+
+    if (shares.length > 0) {
+      await insertRows(
+        "public.expense_shares",
+        toExpenseShareRows(expenseId, shares, amount, conv.amount_npr),
+        client
+      );
     }
-  }
+  });
 
   revalidatePath("/expenses");
   revalidatePath("/");
@@ -86,15 +97,12 @@ export async function addExpense(formData: FormData) {
 
 export async function updateExpense(formData: FormData) {
   try {
-    const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) throw new Error("Not signed in");
-    assertCanManageExpenses(user.email);
+    const session = await requireSession();
+    assertCanManageExpenses(session);
 
     const id = String(formData.get("expense_id") ?? "");
     if (!id) throw new Error("Expense not found");
+
     const amount = n(formData.get("amount")) ?? 0;
     const currency = (formData.get("currency") as Currency) || "NPR";
     const expenseDate =
@@ -107,8 +115,9 @@ export async function updateExpense(formData: FormData) {
 
     let nrbRate = null;
     if (currency === "USD" && actualNprCharged == null && manualRate == null) {
-      nrbRate = await getUsdSellRateForDate(supabase, expenseDate);
+      nrbRate = await getUsdSellRateForDate(expenseDate);
     }
+
     const conv = resolveConversion({
       amount,
       currency,
@@ -117,122 +126,140 @@ export async function updateExpense(formData: FormData) {
       nrbRate,
     });
 
-    const { error } = await supabase
-      .from("expenses")
-      .update({
-        amount,
-        currency,
-        expense_date: expenseDate,
-        billing_month: billingMonthDate(formData.get("billing_month")),
-        category_id: String(formData.get("category_id") ?? "") || null,
-        vendor_id: String(formData.get("vendor_id") ?? "") || null,
-        paid_by_user_id: String(formData.get("paid_by_user_id") ?? "") || user.id,
-        client: String(formData.get("client") ?? "") || null,
-        note: String(formData.get("note") ?? "") || null,
-        ...conv,
-      })
-      .eq("id", id);
-    if (error) throw new Error(error.message);
+    // Replacing the shares is a delete-then-insert, so it must be atomic —
+    // otherwise a failure between the two leaves the expense with no split.
+    await transaction(async (client) => {
+      await updateRow(
+        "public.expenses",
+        {
+          amount,
+          currency,
+          expense_date: expenseDate,
+          billing_month: billingMonthDate(formData.get("billing_month")),
+          category_id: String(formData.get("category_id") ?? "") || null,
+          vendor_id: String(formData.get("vendor_id") ?? "") || null,
+          paid_by_user_id:
+            String(formData.get("paid_by_user_id") ?? "") || session.sub,
+          client: String(formData.get("client") ?? "") || null,
+          note: String(formData.get("note") ?? "") || null,
+          ...conv,
+        },
+        id,
+        client
+      );
 
-    const { error: clearError } = await supabase
-      .from("expense_shares")
-      .delete()
-      .eq("expense_id", id);
-    if (clearError) throw new Error(clearError.message);
-    if (shares.length > 0) {
-      const rows = toExpenseShareRows(id, shares, amount, conv.amount_npr);
-      const { error: shareError } = await supabase.from("expense_shares").insert(rows);
-      if (shareError) throw new Error(shareError.message);
-    }
+      await client.query(
+        `delete from public.expense_shares where expense_id = $1`,
+        [id]
+      );
+
+      if (shares.length > 0) {
+        await insertRows(
+          "public.expense_shares",
+          toExpenseShareRows(id, shares, amount, conv.amount_npr),
+          client
+        );
+      }
+    });
 
     revalidatePath("/expenses");
     revalidatePath("/settlements");
     revalidatePath("/");
     return { error: null };
   } catch (error) {
-    return { error: error instanceof Error ? error.message : "Could not update expense" };
+    return {
+      error: error instanceof Error ? error.message : "Could not update expense",
+    };
   }
 }
 
 export async function toggleReimbursed(id: string, value: boolean) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) throw new Error("Not signed in");
-  assertCanManageExpenses(user.email);
+  const session = await requireSession();
+  assertCanManageExpenses(session);
 
-  const { error } = await supabase
-    .from("expenses")
-    .update({ is_reimbursed: value })
-    .eq("id", id);
-  if (error) throw new Error(error.message);
+  await exec(`update public.expenses set is_reimbursed = $1 where id = $2`, [
+    value,
+    id,
+  ]);
+
   revalidatePath("/expenses");
   revalidatePath("/settlements");
 }
 
 export async function deleteExpense(id: string) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) throw new Error("Not signed in");
-  assertCanManageExpenses(user.email);
+  const session = await requireSession();
+  assertCanManageExpenses(session);
 
-  const { error } = await supabase.from("expenses").delete().eq("id", id);
-  if (error) throw new Error(error.message);
+  await exec(`delete from public.expenses where id = $1`, [id]);
+
   revalidatePath("/expenses");
   revalidatePath("/");
 }
 
 /** Retry FX for a pending USD expense (used by the "needs review" flow). */
 export async function retryConversion(id: string) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) throw new Error("Not signed in");
-  assertCanManageExpenses(user.email);
+  const session = await requireSession();
+  assertCanManageExpenses(session);
 
-  const { data: exp } = await supabase
-    .from("expenses")
-    .select("id, amount, currency, expense_date")
-    .eq("id", id)
-    .single();
+  const exp = await one<{
+    id: string;
+    amount: string | number;
+    currency: string;
+    expense_date: string;
+  }>(
+    `select id, amount, currency, expense_date
+       from public.expenses
+      where id = $1`,
+    [id]
+  );
+
   if (!exp || exp.currency !== "USD") return;
 
-  const nrbRate = await getUsdSellRateForDate(supabase, exp.expense_date);
+  const expenseDate = String(exp.expense_date).slice(0, 10);
+  const nrbRate = await getUsdSellRateForDate(expenseDate);
   const conv = resolveConversion({
     amount: Number(exp.amount),
     currency: "USD",
     nrbRate,
   });
-  await supabase.from("expenses").update(conv).eq("id", id);
-  const { data: shares } = await supabase
-    .from("expense_shares")
-    .select("id, amount")
-    .eq("expense_id", id)
-    .order("id");
-  if (shares?.length) {
+
+  const shares = await query<{ id: string; amount: string | number }>(
+    `select id, amount from public.expense_shares
+      where expense_id = $1
+      order by id`,
+    [id]
+  );
+
+  await transaction(async (client) => {
+    await updateRow("public.expenses", { ...conv }, id, client);
+
+    // Re-split the NPR total across the shares. The last share absorbs the
+    // rounding remainder so the parts still sum exactly to amount_npr.
     let allocated = 0;
-    for (let index = 0; index < shares.length; index++) {
+    for (let index = 0; index < shares.length; index += 1) {
       const share = shares[index];
       const amountNpr =
         conv.amount_npr == null
           ? null
           : Number(exp.amount) === 0
             ? 0
-          : index === shares.length - 1
-            ? Math.round((conv.amount_npr - allocated) * 100) / 100
-            : Math.round(((conv.amount_npr * Number(share.amount)) / Number(exp.amount)) * 100) /
-              100;
+            : index === shares.length - 1
+              ? Math.round((conv.amount_npr - allocated) * 100) / 100
+              : Math.round(
+                  ((conv.amount_npr * Number(share.amount)) /
+                    Number(exp.amount)) *
+                    100
+                ) / 100;
+
       if (amountNpr != null) allocated += amountNpr;
-      await supabase
-        .from("expense_shares")
-        .update({ amount_npr: amountNpr })
-        .eq("id", share.id);
+
+      await client.query(
+        `update public.expense_shares set amount_npr = $1 where id = $2`,
+        [amountNpr, share.id]
+      );
     }
-  }
+  });
+
   revalidatePath("/expenses");
   revalidatePath("/");
 }

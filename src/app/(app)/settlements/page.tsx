@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server";
+import { query } from "@/lib/db";
 import { PageHeader } from "@/components/ui";
 import { npr } from "@/lib/format";
 import type { AppUser, Expense } from "@/lib/types";
@@ -7,17 +7,16 @@ import { computeIndividualSpending } from "@/lib/individual";
 export const dynamic = "force-dynamic";
 
 export default async function SettlementsPage() {
-  const supabase = await createClient();
-  const [{ data: team }, { data: exp }, { data: shareRows }] = await Promise.all([
-    supabase.from("users").select("*").order("name"),
-    supabase.from("expenses").select("*"),
-    supabase.from("expense_shares").select("*"),
+  const [team, exp, shareRows] = await Promise.all([
+    query<AppUser>(`select * from public.users order by name`),
+    query<Expense>(`select * from public.expenses`),
+    query<{ expense_id: string }>(`select * from public.expense_shares`),
   ]);
 
-  const users = (team ?? []) as AppUser[];
-  const expenses = (exp ?? []).map((expense) => ({
+  const users = team as AppUser[];
+  const expenses = exp.map((expense) => ({
     ...expense,
-    expense_shares: (shareRows ?? []).filter(
+    expense_shares: shareRows.filter(
       (share) => share.expense_id === expense.id
     ),
   })) as Expense[];

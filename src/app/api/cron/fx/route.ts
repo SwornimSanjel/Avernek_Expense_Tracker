@@ -1,5 +1,4 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { createServiceClient } from "@/lib/supabase/server";
 import { fetchNrbUsd, cacheNrbUsd } from "@/lib/fx";
 import { format, subDays } from "date-fns";
 
@@ -23,8 +22,9 @@ export async function GET(request: NextRequest) {
 
   try {
     const rows = await fetchNrbUsd(from, to);
-    const supabase = createServiceClient();
-    await cacheNrbUsd(supabase, rows);
+    // Writes straight to Postgres — there is no RLS to bypass any more, so the
+    // service-role client this used to need is gone.
+    await cacheNrbUsd(rows);
     return NextResponse.json({ ok: true, cached: rows.length, from, to });
   } catch (err) {
     return NextResponse.json(

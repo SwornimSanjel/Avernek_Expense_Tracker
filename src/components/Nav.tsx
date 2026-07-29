@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
+import { usePathname } from "next/navigation";
+import { signOut } from "@/app/login/actions";
 import { LogoWord } from "@/components/Logo";
 import ThemeToggle from "@/components/ThemeToggle";
 
@@ -16,15 +16,9 @@ const items = [
 
 export default function Nav({ name }: { name: string }) {
   const path = usePathname();
-  const router = useRouter();
   const active = (href: string) =>
     href === "/" ? path === "/" : path.startsWith(href);
   const firstName = name.split(" ")[0];
-
-  async function signOut() {
-    await createClient().auth.signOut();
-    router.push("/login");
-  }
 
   return (
     <>
@@ -55,9 +49,13 @@ export default function Nav({ name }: { name: string }) {
         <div className="space-y-2 pt-3" style={{ borderTop: "1px solid var(--line)" }}>
           <ThemeToggle />
           <div className="px-1 text-sm muted truncate">Signed in as {firstName}</div>
-          <button onClick={signOut} className="px-1 text-sm muted hover:underline">
-            Sign out
-          </button>
+          {/* A form post, so signing out clears the cookie server-side rather
+              than relying on the browser to drop an httpOnly cookie. */}
+          <form action={signOut}>
+            <button type="submit" className="px-1 text-sm muted hover:underline">
+              Sign out
+            </button>
+          </form>
         </div>
       </aside>
 

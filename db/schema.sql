@@ -10,7 +10,8 @@ create extension if not exists "pgcrypto";
 
 -- -----------------------------------------------------------------------------
 -- users — people who can pay or share expenses. A participant does not need login.
--- Signed-in users are still auto-created by handle_new_user().
+-- Sign-in accounts live here too: password_hash and is_admin are added by
+-- db/migrations/20260729_local_auth.sql.
 -- -----------------------------------------------------------------------------
 create table if not exists public.users (
   id             uuid primary key default gen_random_uuid(),
@@ -163,117 +164,18 @@ create table if not exists public.settlements (
   created_at   timestamptz not null default now()
 );
 
--- =============================================================================
--- Auth trigger: create a public.users row whenever someone signs up.
--- =============================================================================
-create or replace function public.handle_new_user()
-returns trigger
-language plpgsql
-security definer set search_path = public
-as $$
-begin
-  insert into public.users (id, name, email, is_core_member)
-  values (
-    new.id,
-    coalesce(new.raw_user_meta_data ->> 'full_name', new.raw_user_meta_data ->> 'name', split_part(new.email, '@', 1)),
-    new.email,
-    false
-  )
-  on conflict (id) do nothing;
-  return new;
-end;
-$$;
-
-drop trigger if exists on_auth_user_created on auth.users;
-create trigger on_auth_user_created
-  after insert on auth.users
-  for each row execute function public.handle_new_user();
 
 -- =============================================================================
--- Row Level Security
--- Single internal workspace: any signed-in team member can read/write everything.
+-- Authentication and authorization
+--
+-- Nothing here. Sign-in used to run through Supabase Auth, which needed a
+-- handle_new_user() trigger on auth.users and a set of RLS policies calling
+-- auth.uid() / auth.jwt(). Those are gone: there is no auth schema and no
+-- `authenticated` role in a plain Postgres database, so creating them made a
+-- fresh install fail.
+--
+-- public.users is now the identity table (password_hash, is_admin -- added by
+-- db/migrations/20260729_local_auth.sql), and authorization is enforced in the
+-- application by requireSession() and requireAdmin() in src/lib/auth/server.ts.
 -- =============================================================================
-alter table public.users       enable row level security;
-alter table public.categories  enable row level security;
-alter table public.vendors     enable row level security;
-alter table public.fx_rates    enable row level security;
-alter table public.recurring   enable row level security;
-alter table public.expenses    enable row level security;
-alter table public.expense_shares enable row level security;
-alter table public.recurring_shares enable row level security;
-alter table public.settlements enable row level security;
 
--- Signed-in team members may view data and add tracking records. Only Swornim
--- may modify/delete existing rows or protected settings.
-do $$
-declare
-  target_table text;
-  existing_policy record;
-  owner_email constant text := 'xettrikenzon@gmail.com';
-begin
-  foreach target_table in array array[
-    'users',
-    'categories',
-    'vendors',
-    'fx_rates',
-    'recurring',
-    'expenses',
-    'expense_shares',
-    'recurring_shares',
-    'settlements'
-  ]
-  loop
-    for existing_policy in
-      select policyname
-      from pg_policies
-      where schemaname = 'public'
-        and tablename = target_table
-    loop
-      execute format(
-        'drop policy %I on public.%I',
-        existing_policy.policyname,
-        target_table
-      );
-    end loop;
-
-    execute format(
-      'create policy %I on public.%I
-         for select to authenticated using (true)',
-      target_table || '_team_read',
-      target_table
-    );
-
-    execute format(
-      'create policy %I on public.%I
-         for all to authenticated
-         using (lower(coalesce(auth.jwt() ->> ''email'', '''')) = %L)
-         with check (lower(coalesce(auth.jwt() ->> ''email'', '''')) = %L)',
-      target_table || '_owner_manage',
-      target_table,
-      owner_email,
-      owner_email
-    );
-  end loop;
-end $$;
-
-create policy expenses_team_add on public.expenses
-  for insert to authenticated
-  with check (created_by = auth.uid());
-
-create policy expense_shares_team_add on public.expense_shares
-  for insert to authenticated
-  with check (
-    exists (
-      select 1 from public.expenses
-      where expenses.id = expense_shares.expense_id
-        and expenses.created_by = auth.uid()
-    )
-  );
-
-create policy recurring_team_add on public.recurring
-  for insert to authenticated with check (true);
-
-create policy recurring_shares_team_add on public.recurring_shares
-  for insert to authenticated with check (true);
-
-notify pgrst, 'reload schema';

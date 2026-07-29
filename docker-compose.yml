@@ -9,8 +9,6 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      secrets:
-        - envfile
       labels:
         git.commit: ${GIT_COMMIT:-local}
         jenkins.build: ${BUILD_NUMBER:-local}
@@ -19,8 +17,8 @@ services:
     restart: unless-stopped
     # PID 1 that reaps zombies and forwards SIGTERM, so deploys stop cleanly.
     init: true
-    # Server-only values (SUPABASE_SERVICE_ROLE_KEY, CRON_SECRET) arrive here.
-    # NEXT_PUBLIC_* were already baked into the client bundle at build time.
+    # Every value the app needs arrives here at runtime: DATABASE_URL,
+    # SESSION_SECRET, ADMIN_*, CRON_SECRET. Nothing is baked into the image.
     env_file:
       - .env
     environment:
@@ -70,8 +68,5 @@ services:
         max-size: "1m"
         max-file: "3"
 
-secrets:
-  # `docker compose up --build` now supplies the secret required by the
-  # Dockerfile. Jenkins and local Compose both use .env by default.
-  envfile:
-    file: ${ENV_FILE:-.env}
+# No `secrets:` block any more — the build needs nothing, and runtime values
+# come from env_file.

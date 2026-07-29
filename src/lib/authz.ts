@@ -1,17 +1,28 @@
-export const APP_OWNER_EMAIL = "xettrikenzon@gmail.com";
+import type { Session } from "@/lib/auth/session";
 
-/** Team members may sign in, but only this account manages existing records. */
-export function isAppOwner(email: string | null | undefined): boolean {
-  return email?.trim().toLowerCase() === APP_OWNER_EMAIL;
+/**
+ * Who may change things.
+ *
+ * Team members can sign in and read everything; only administrators can edit,
+ * delete or change protected settings. The flag comes from users.is_admin,
+ * carried in the signed session cookie — it used to be a hardcoded email
+ * address, which meant changing the owner required a code change and a deploy.
+ *
+ * Since the RLS policies are gone, these checks are the whole authorization
+ * story. Every mutating server action must call assertAppOwner().
+ */
+
+export function isAppOwner(session: Session | null | undefined): boolean {
+  return session?.isAdmin === true;
 }
 
-export function canManageExpenses(email: string | null | undefined): boolean {
-  return isAppOwner(email);
-}
+export const canManageExpenses = isAppOwner;
 
-export function assertAppOwner(email: string | null | undefined): void {
-  if (!isAppOwner(email)) {
-    throw new Error("Only Swornim can edit, delete, or change protected settings.");
+export function assertAppOwner(session: Session | null | undefined): void {
+  if (!isAppOwner(session)) {
+    throw new Error(
+      "Only an administrator can edit, delete, or change protected settings."
+    );
   }
 }
 

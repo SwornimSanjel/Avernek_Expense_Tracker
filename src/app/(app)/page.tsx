@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { createClient } from "@/lib/supabase/server";
+import { one, query } from "@/lib/db";
+import { requireSession } from "@/lib/auth/server";
 import { getCachedUsdSellRate } from "@/lib/fx";
 import { FxBadge } from "@/components/ui";
 import { npr, usd, rateLabel } from "@/lib/format";
@@ -19,41 +20,34 @@ const SLICE = [
 ];
 
 export default async function Dashboard() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const session = await requireSession();
 
-  const [
-    { data: exp },
-    { data: shareRows },
-    { data: cats },
-    { data: vends },
-    { data: recs },
-    { data: team },
-    { data: me },
-    currentRate,
-  ] = await Promise.all([
-    supabase.from("expenses").select("*").order("expense_date", { ascending: false }),
-    supabase.from("expense_shares").select("*"),
-    supabase.from("categories").select("*"),
-    supabase.from("vendors").select("*"),
-    supabase.from("recurring").select("*").eq("is_active", true),
-    supabase.from("users").select("*").order("name"),
-    supabase.from("users").select("name").eq("id", user!.id).single(),
-    getCachedUsdSellRate(supabase),
-  ]);
+  const [exp, shareRows, cats, vends, recs, team, me, currentRate] =
+    await Promise.all([
+      query<Expense>(
+        `select * from public.expenses order by expense_date desc`
+      ),
+      query<{ expense_id: string }>(`select * from public.expense_shares`),
+      query<Category>(`select * from public.categories`),
+      query<Vendor>(`select * from public.vendors`),
+      query<Recurring>(`select * from public.recurring where is_active = true`),
+      query<AppUser>(`select * from public.users order by name`),
+      one<{ name: string }>(`select name from public.users where id = $1`, [
+        session.sub,
+      ]),
+      getCachedUsdSellRate(),
+    ]);
 
-  const expenses = (exp ?? []).map((expense) => ({
+  const expenses = exp.map((expense) => ({
     ...expense,
-    expense_shares: (shareRows ?? []).filter(
+    expense_shares: shareRows.filter(
       (share) => share.expense_id === expense.id
     ),
   })) as Expense[];
-  const categories = (cats ?? []) as Category[];
-  const vendors = (vends ?? []) as Vendor[];
-  const recurring = (recs ?? []) as Recurring[];
-  const users = (team ?? []) as AppUser[];
+  const categories = cats as Category[];
+  const vendors = vends as Vendor[];
+  const recurring = recs as Recurring[];
+  const users = team as AppUser[];
   const individualSpending = computeIndividualSpending(users, expenses);
   const assignedTotal = individualSpending.reduce((sum, row) => sum + row.assigned, 0);
   const firstName = (me?.name ?? "there").split(" ")[0];

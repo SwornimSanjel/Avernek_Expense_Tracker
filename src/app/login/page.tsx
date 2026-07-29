@@ -1,96 +1,22 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
+import { useActionState, useEffect, useState } from "react";
+import { signIn, type LoginState } from "./actions";
 import { LogoWord } from "@/components/Logo";
 
-function authErrorMessage(error: unknown) {
-  const message =
-    error instanceof Error
-      ? error.message
-      : typeof error === "object" &&
-          error !== null &&
-          "message" in error &&
-          typeof error.message === "string"
-        ? error.message
-        : "";
-
-  if (
-    message.toLowerCase().includes("failed to fetch") ||
-    message.toLowerCase().includes("network")
-  ) {
-    return "The sign-in service is unreachable. Ask the administrator to check the Supabase project URL and redeploy the site.";
-  }
-
-  return message || "Sign-in failed. Please try again.";
-}
+const initialState: LoginState = { error: null };
 
 export default function LoginPage() {
-  // Created once: the auth subscription below must not be torn down and
-  // resubscribed on every render.
-  const [supabase] = useState(createClient);
-  const router = useRouter();
-  const [email, setEmail] = useState("");
-  const [sent, setSent] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [state, formAction, pending] = useActionState(signIn, initialState);
 
-  // /auth/callback sends the reason here when sign-in fails, so the user sees
-  // something more useful than being quietly returned to this page.
-  // Read from location rather than useSearchParams() to avoid forcing a
-  // Suspense boundary around the whole page.
+  // Middleware puts the originally requested path in ?next= so sign-in returns
+  // there. Read from location rather than useSearchParams() to keep this page
+  // statically prerenderable without a Suspense boundary.
+  const [next, setNext] = useState("/");
   useEffect(() => {
-    const reason = new URLSearchParams(window.location.search).get("error");
-    if (reason) setError(reason);
+    const raw = new URLSearchParams(window.location.search).get("next");
+    if (raw && raw.startsWith("/") && !raw.startsWith("//")) setNext(raw);
   }, []);
-
-  // Normally /auth/callback lands the user on the dashboard. But a session can
-  // also show up client-side — the implicit flow returns tokens in the URL
-  // fragment, which never reaches the server — and an already-signed-in user
-  // can navigate here directly. Either way, move them along.
-  useEffect(() => {
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session) router.replace("/");
-    });
-    return () => subscription.unsubscribe();
-  }, [supabase, router]);
-
-  async function signInWithGoogle() {
-    setError(null);
-    setLoading(true);
-    try {
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: "google",
-        options: { redirectTo: `${location.origin}/auth/callback` },
-      });
-      if (error) setError(authErrorMessage(error));
-    } catch (error) {
-      setError(authErrorMessage(error));
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function signInWithEmail(e: React.FormEvent) {
-    e.preventDefault();
-    setLoading(true);
-    setError(null);
-    try {
-      const { error } = await supabase.auth.signInWithOtp({
-        email,
-        options: { emailRedirectTo: `${location.origin}/auth/callback` },
-      });
-      if (error) setError(authErrorMessage(error));
-      else setSent(true);
-    } catch (error) {
-      setError(authErrorMessage(error));
-    } finally {
-      setLoading(false);
-    }
-  }
 
   return (
     <main className="min-h-screen flex items-center justify-center px-4">
@@ -101,46 +27,47 @@ export default function LoginPage() {
           <p className="muted text-sm mt-1">Internal tool · team sign-in</p>
         </div>
 
-        {sent ? (
-          <p className="text-sm">
-            Check <span className="font-semibold">{email}</span> for a sign-in
-            link.
-          </p>
-        ) : (
-          <form onSubmit={signInWithEmail} className="space-y-3">
-            <input
-              type="email"
-              required
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              placeholder="you@avernek.com"
-              className="input"
-            />
-            <button type="submit" disabled={loading} className="btn btn-primary w-full">
-              {loading ? "Sending…" : "Email me a sign-in link"}
-            </button>
-          </form>
-        )}
+        <form action={formAction} className="space-y-3">
+          <input type="hidden" name="next" value={next} />
 
-        <div className="flex items-center gap-3 my-5 muted text-xs">
-          <div className="h-px flex-1" style={{ background: "var(--line)" }} />
-          OR
-          <div className="h-px flex-1" style={{ background: "var(--line)" }} />
-        </div>
+          <input
+            type="email"
+            name="email"
+            required
+            autoComplete="username"
+            autoFocus
+            placeholder="you@avernek.com"
+            className="input"
+          />
 
-        <button
-          onClick={signInWithGoogle}
-          disabled={loading}
-          className="btn w-full"
-        >
-          {loading ? "Connecting…" : "Continue with Google"}
-        </button>
+          <input
+            type="password"
+            name="password"
+            required
+            autoComplete="current-password"
+            placeholder="Password"
+            className="input"
+          />
 
-        {error && (
-          <p className="text-sm mt-3" style={{ color: "var(--red)" }}>
-            {error}
+          <button
+            type="submit"
+            disabled={pending}
+            className="btn btn-primary w-full"
+          >
+            {pending ? "Signing in…" : "Sign in"}
+          </button>
+        </form>
+
+        {state.error && (
+          <p className="text-sm mt-3" style={{ color: "var(--red)" }} role="alert">
+            {state.error}
           </p>
         )}
+
+        <p className="muted text-xs mt-6">
+          Accounts are created by an administrator. Ask them for access or a
+          password reset.
+        </p>
       </div>
     </main>
   );

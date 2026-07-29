@@ -1,4 +1,5 @@
-import { createClient } from "@/lib/supabase/server";
+import { query } from "@/lib/db";
+import { requireSession } from "@/lib/auth/server";
 import { PageHeader } from "@/components/ui";
 import { npr } from "@/lib/format";
 import type { AppUser, Category } from "@/lib/types";
@@ -9,18 +10,15 @@ import { isAppOwner } from "@/lib/authz";
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  const [{ data: cats }, { data: team }] = await Promise.all([
-    supabase.from("categories").select("*").order("name"),
-    supabase.from("users").select("*").order("name"),
+  const session = await requireSession();
+  const [cats, team] = await Promise.all([
+    query<Category>(`select * from public.categories order by name`),
+    query<AppUser>(`select * from public.users order by name`),
   ]);
-  const categories = (cats ?? []) as Category[];
-  const users = (team ?? []) as AppUser[];
-  const me = users.find((u) => u.id === user!.id);
-  const canManage = isAppOwner(user?.email);
+  const categories = cats as Category[];
+  const users = team as AppUser[];
+  const me = users.find((u) => u.id === session.sub);
+  const canManage = isAppOwner(session);
 
   return (
     <>
