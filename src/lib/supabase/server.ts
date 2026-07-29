@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
+import { SUPABASE_ANON_KEY, SUPABASE_URL } from "./config";
 
 /**
  * Supabase client for Server Components, Route Handlers, and Server Actions.
@@ -9,8 +10,8 @@ export async function createClient() {
   const cookieStore = await cookies();
 
   return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    SUPABASE_URL,
+    SUPABASE_ANON_KEY,
     {
       cookies: {
         getAll() {
@@ -38,9 +39,16 @@ export async function createClient() {
  */
 export function createServiceClient() {
   const { createClient } = require("@supabase/supabase-js");
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { persistSession: false } }
-  );
+
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+  if (!serviceRoleKey) {
+    // Server-only, so this is read at runtime rather than baked in — but an
+    // empty value here silently downgrades to anon and RLS then hides rows the
+    // cron job is supposed to see.
+    throw new Error("SUPABASE_SERVICE_ROLE_KEY is missing or empty.");
+  }
+
+  return createClient(SUPABASE_URL, serviceRoleKey, {
+    auth: { persistSession: false },
+  });
 }
