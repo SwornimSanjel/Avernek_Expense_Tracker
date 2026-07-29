@@ -28,6 +28,13 @@
 // manages the deployment directory without root permissions.
 //
 // `next build` type-checks the application. TypeScript errors fail the build.
+//
+// NOTE: every sh step keeps the bash shebang on the same line as the opening
+// triple quote. Jenkins honours a shebang only when it is the first byte of
+// the script; if the shebang is moved onto its own indented line, Jenkins
+// silently runs the script with /bin/sh -xe (dash on Debian/Ubuntu) and it
+// fails on `set -o pipefail`, `[[ ]]`, arrays and `mapfile`.
+// Do not re-indent those lines.
 
 pipeline {
   agent any
@@ -63,8 +70,7 @@ pipeline {
       steps {
         checkout scm
 
-        sh '''
-          #!/usr/bin/env bash
+        sh '''#!/usr/bin/env bash
           set -Eeuo pipefail
 
           git --no-pager log -1 \
@@ -81,14 +87,13 @@ pipeline {
             variable: 'ENV_FILE'
           )
         ]) {
-          sh '''
-            #!/usr/bin/env bash
+          sh '''#!/usr/bin/env bash
             set -Eeuo pipefail
 
             install -m 600 "$ENV_FILE" .env
 
             # Remove Windows CRLF characters.
-            sed -i 's/\r$//' .env
+            sed -i 's/\\r$//' .env
 
             required_keys=(
               NEXT_PUBLIC_SUPABASE_URL
@@ -116,8 +121,7 @@ pipeline {
 
     stage('Build image') {
       steps {
-        sh '''
-          #!/usr/bin/env bash
+        sh '''#!/usr/bin/env bash
           set -Eeuo pipefail
 
           echo "Building image: $IMAGE"
@@ -136,8 +140,7 @@ pipeline {
 
     stage('Deploy') {
       steps {
-        sh '''
-          #!/usr/bin/env bash
+        sh '''#!/usr/bin/env bash
           set -Eeuo pipefail
 
           : "${JENKINS_HOME:?JENKINS_HOME is not defined}"
@@ -213,7 +216,7 @@ pipeline {
              && [[ "$CURRENT_IMAGE" != "$IMAGE" ]] \
              && docker image inspect "$CURRENT_IMAGE" >/dev/null 2>&1; then
 
-            printf '%s\n' "$CURRENT_IMAGE" \
+            printf '%s\\n' "$CURRENT_IMAGE" \
               > "$DEPLOY_DIR/.previous-image"
 
             echo "Current release:  $CURRENT_IMAGE"
@@ -261,8 +264,7 @@ pipeline {
 
     stage('Smoke test') {
       steps {
-        sh '''
-          #!/usr/bin/env bash
+        sh '''#!/usr/bin/env bash
           set -Eeuo pipefail
 
           DEPLOY_DIR="${JENKINS_HOME}/${DEPLOY_SUBDIR}"
@@ -287,7 +289,7 @@ pipeline {
               echo
 
               # Record the successful release atomically.
-              printf '%s\n' "$IMAGE" \
+              printf '%s\\n' "$IMAGE" \
                 > "$DEPLOY_DIR/.current-image.tmp"
 
               mv \
@@ -315,8 +317,7 @@ pipeline {
 
     stage('Prune old images') {
       steps {
-        sh '''
-          #!/usr/bin/env bash
+        sh '''#!/usr/bin/env bash
           set -Eeuo pipefail
 
           DEPLOY_DIR="${JENKINS_HOME}/${DEPLOY_SUBDIR}"
@@ -367,8 +368,7 @@ pipeline {
   post {
 
     unsuccessful {
-      sh '''
-        #!/usr/bin/env bash
+      sh '''#!/usr/bin/env bash
         set -Eeuo pipefail
 
         DEPLOY_DIR="${JENKINS_HOME}/${DEPLOY_SUBDIR}"
@@ -439,7 +439,7 @@ pipeline {
         dc up -d --remove-orphans
         dc ps
 
-        printf '%s\n' "$PREVIOUS_IMAGE" \
+        printf '%s\\n' "$PREVIOUS_IMAGE" \
           > "$DEPLOY_DIR/.current-image.tmp"
 
         mv \
@@ -453,8 +453,7 @@ pipeline {
     }
 
     always {
-      sh '''
-        #!/usr/bin/env bash
+      sh '''#!/usr/bin/env bash
         rm -f .env
       '''
     }
