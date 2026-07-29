@@ -124,6 +124,19 @@ committed, and the workspace copy is deleted in the pipeline's `post { always }`
 4. **Job** — new *Pipeline* job → *Pipeline script from SCM* → this repo, script path
    `Jenkinsfile`. Add a GitHub webhook (or poll SCM) to deploy on every push to `main`.
 
+### Self-hosted Supabase (optional)
+`docker/supabase/` runs Postgres, Auth, PostgREST and the Studio admin panel on your own
+server, so the data and the backups are yours. Application code is unchanged — auth, RLS and
+every `.from()` query work as-is; only `NEXT_PUBLIC_SUPABASE_URL` moves. Full runbook,
+including migrating off Supabase cloud without orphaning anyone's expenses:
+**[docs/SELF-HOSTING.md](docs/SELF-HOSTING.md)**.
+
+```bash
+./scripts/db-backup.sh          # dump public + auth, prune old
+./scripts/db-restore-drill.sh   # prove the dump restores — non-destructive
+./scripts/db-restore.sh         # restore for real (confirms first, dumps first)
+```
+
 ### What a build does
 `Checkout → Extract .env → Build image → Deploy → Smoke test → Prune`. The pipeline tags each
 image `avernek-expense-tracker:<BUILD_NUMBER>` plus `:latest`, records the previously running

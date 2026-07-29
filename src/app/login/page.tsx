@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { LogoWord } from "@/components/Logo";
 
@@ -26,11 +27,36 @@ function authErrorMessage(error: unknown) {
 }
 
 export default function LoginPage() {
-  const supabase = createClient();
+  // Created once: the auth subscription below must not be torn down and
+  // resubscribed on every render.
+  const [supabase] = useState(createClient);
+  const router = useRouter();
   const [email, setEmail] = useState("");
   const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  // /auth/callback sends the reason here when sign-in fails, so the user sees
+  // something more useful than being quietly returned to this page.
+  // Read from location rather than useSearchParams() to avoid forcing a
+  // Suspense boundary around the whole page.
+  useEffect(() => {
+    const reason = new URLSearchParams(window.location.search).get("error");
+    if (reason) setError(reason);
+  }, []);
+
+  // Normally /auth/callback lands the user on the dashboard. But a session can
+  // also show up client-side — the implicit flow returns tokens in the URL
+  // fragment, which never reaches the server — and an already-signed-in user
+  // can navigate here directly. Either way, move them along.
+  useEffect(() => {
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session) router.replace("/");
+    });
+    return () => subscription.unsubscribe();
+  }, [supabase, router]);
 
   async function signInWithGoogle() {
     setError(null);

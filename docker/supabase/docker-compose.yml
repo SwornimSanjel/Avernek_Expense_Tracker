@@ -1,0 +1,207 @@
+# Self-hosted Supabase for the Avernek Expense Tracker.
+#
+# This is a deliberately reduced stack. The app uses Postgres, Auth and the
+# PostgREST data API and nothing else -- zero Storage, Realtime or RPC calls --
+# so Storage, Realtime, imgproxy, Functions, Analytics and the Kong gateway are
+# all omitted. Fewer containers, less to break, less to patch.
+#
+# Kong's job (routing /auth/v1/* and /rest/v1/* under one origin) is done by the
+# Caddy you already run. See docs/SELF-HOSTING.md for the Caddyfile block.
+#
+#   cd /opt/avernek-supabase
+#   docker compose up -d
+#
+# Everything binds to loopback: Caddy is the only way in from outside.
+
+name: avernek-supabase
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # Postgres. This is supabase/postgres rather than stock postgres because it
+  # ships the roles (anon, authenticated, service_role, authenticator,
+  # supabase_auth_admin) and extensions that Auth, PostgREST and the RLS
+  # policies in supabase/schema.sql all assume exist.
+  # ---------------------------------------------------------------------------
+  db:
+    image: supabase/postgres:17.6.1.157-mmlb
+    container_name: avernek-supabase-db
+    restart: unless-stopped
+    command:
+      - postgres
+      - -c
+      - config_file=/etc/postgresql/postgresql.conf
+    environment:
+      POSTGRES_HOST: /var/run/postgresql
+      POSTGRES_DB: postgres
+      POSTGRES_PORT: "5432"
+      PGPORT: "5432"
+      PGDATABASE: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      JWT_EXP: ${JWT_EXPIRY:-3600}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Run once, on an empty data directory only.
+      - ./init/00-roles.sql:/docker-entrypoint-initdb.d/init-scripts/00-roles.sql:ro
+      - ./init/01-auth-helpers.sql:/docker-entrypoint-initdb.d/init-scripts/01-auth-helpers.sql:ro
+    ports:
+      # Loopback only, and 5433 so it cannot collide with a host Postgres.
+      # This is what the backup/restore scripts connect to.
+      - "127.0.0.1:${SUPABASE_DB_PORT:-5433}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -h localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    logging: &logging
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  # ---------------------------------------------------------------------------
+  # GoTrue — the auth service. Magic links, Google OAuth, the auth schema.
+  # This is the piece plain Postgres cannot give you.
+  # ---------------------------------------------------------------------------
+  auth:
+    image: supabase/gotrue:v2.194.0
+    container_name: avernek-supabase-auth
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: "9999"
+      # Must be the public origin: it is what gets baked into emailed links.
+      API_EXTERNAL_URL: ${SUPABASE_PUBLIC_URL:?SUPABASE_PUBLIC_URL is required}
+
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${POSTGRES_PASSWORD}@db:5432/postgres
+
+      # The fallback for redirects that are not in the allow list -- the exact
+      # setting that was bouncing sign-ins to Netlify.
+      GOTRUE_SITE_URL: ${SITE_URL:?SITE_URL is required}
+      GOTRUE_URI_ALLOW_LIST: ${ADDITIONAL_REDIRECT_URLS:-}
+      GOTRUE_DISABLE_SIGNUP: ${DISABLE_SIGNUP:-false}
+
+      GOTRUE_JWT_SECRET: ${JWT_SECRET}
+      GOTRUE_JWT_EXP: ${JWT_EXPIRY:-3600}
+      GOTRUE_JWT_AUD: authenticated
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_JWT_ADMIN_ROLES: service_role
+
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
+      GOTRUE_MAILER_AUTOCONFIRM: ${MAILER_AUTOCONFIRM:-false}
+      # Caddy strips /auth/v1 before proxying, so these paths must keep it:
+      # the link in the email is public-facing.
+      GOTRUE_MAILER_URLPATHS_CONFIRMATION: /auth/v1/verify
+      GOTRUE_MAILER_URLPATHS_INVITE: /auth/v1/verify
+      GOTRUE_MAILER_URLPATHS_RECOVERY: /auth/v1/verify
+      GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE: /auth/v1/verify
+
+      # Hosted Supabase lent you a shared mailer. Self-hosted, magic links do
+      # not send at all until these point at a real SMTP provider.
+      GOTRUE_SMTP_HOST: ${SMTP_HOST:-}
+      GOTRUE_SMTP_PORT: ${SMTP_PORT:-587}
+      GOTRUE_SMTP_USER: ${SMTP_USER:-}
+      GOTRUE_SMTP_PASS: ${SMTP_PASS:-}
+      GOTRUE_SMTP_ADMIN_EMAIL: ${SMTP_ADMIN_EMAIL:-}
+      GOTRUE_SMTP_SENDER_NAME: ${SMTP_SENDER_NAME:-Avernek Expense Tracker}
+
+      GOTRUE_EXTERNAL_GOOGLE_ENABLED: ${GOOGLE_ENABLED:-false}
+      GOTRUE_EXTERNAL_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOTRUE_EXTERNAL_GOOGLE_SECRET: ${GOOGLE_SECRET:-}
+      GOTRUE_EXTERNAL_GOOGLE_REDIRECT_URI: ${SUPABASE_PUBLIC_URL}/auth/v1/callback
+    ports:
+      - "127.0.0.1:${SUPABASE_AUTH_PORT:-9999}:9999"
+    healthcheck:
+      test:
+        ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9999/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    logging: *logging
+
+  # ---------------------------------------------------------------------------
+  # PostgREST — turns the tables into the REST API that every .from("...") call
+  # in the app already speaks. It assumes the role named in the JWT, which is
+  # what makes the existing RLS policies apply unchanged.
+  # ---------------------------------------------------------------------------
+  rest:
+    image: postgrest/postgrest:v14.16
+    container_name: avernek-supabase-rest
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGRST_DB_URI: postgres://authenticator:${POSTGRES_PASSWORD}@db:5432/postgres
+      PGRST_DB_SCHEMAS: ${PGRST_DB_SCHEMAS:-public}
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_JWT_SECRET: ${JWT_SECRET}
+      PGRST_DB_USE_LEGACY_GUCS: "false"
+      PGRST_APP_SETTINGS_JWT_SECRET: ${JWT_SECRET}
+      PGRST_APP_SETTINGS_JWT_EXP: ${JWT_EXPIRY:-3600}
+    ports:
+      - "127.0.0.1:${SUPABASE_REST_PORT:-3005}:3000"
+    logging: *logging
+
+  # ---------------------------------------------------------------------------
+  # postgres-meta — the introspection API Studio drives the table editor with.
+  # Internal only; nothing outside the compose network needs it.
+  # ---------------------------------------------------------------------------
+  meta:
+    image: supabase/postgres-meta:v0.96.6
+    container_name: avernek-supabase-meta
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PG_META_PORT: "8080"
+      PG_META_DB_HOST: db
+      PG_META_DB_PORT: "5432"
+      PG_META_DB_NAME: postgres
+      PG_META_DB_USER: supabase_admin
+      PG_META_DB_PASSWORD: ${POSTGRES_PASSWORD}
+    logging: *logging
+
+  # ---------------------------------------------------------------------------
+  # Studio — the admin panel. Table editor, SQL editor, and the user list that
+  # replaces the hosted dashboard you lose by self-hosting.
+  #
+  # Studio has NO login of its own. Caddy puts basic auth in front of it; see
+  # docs/SELF-HOSTING.md. Never expose this port directly.
+  # ---------------------------------------------------------------------------
+  studio:
+    image: supabase/studio:2026.07.27-sha-cbb076d
+    container_name: avernek-supabase-studio
+    restart: unless-stopped
+    depends_on:
+      - meta
+      - rest
+    environment:
+      STUDIO_PG_META_URL: http://meta:8080
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      DEFAULT_ORGANIZATION_NAME: ${STUDIO_ORG_NAME:-Avernek}
+      DEFAULT_PROJECT_NAME: ${STUDIO_PROJECT_NAME:-Expense Tracker}
+      # Studio calls the same public routes the browser does, so it goes back
+      # out through Caddy rather than needing its own gateway.
+      SUPABASE_URL: ${SUPABASE_PUBLIC_URL}
+      SUPABASE_PUBLIC_URL: ${SUPABASE_PUBLIC_URL}
+      SUPABASE_ANON_KEY: ${ANON_KEY:?ANON_KEY is required}
+      SUPABASE_SERVICE_KEY: ${SERVICE_ROLE_KEY:?SERVICE_ROLE_KEY is required}
+      AUTH_JWT_SECRET: ${JWT_SECRET}
+      NEXT_PUBLIC_ENABLE_LOGS: "false"
+    ports:
+      - "127.0.0.1:${SUPABASE_STUDIO_PORT:-3006}:3000"
+    logging: *logging
+
+volumes:
+  pgdata:
+    name: avernek-supabase-pgdata
