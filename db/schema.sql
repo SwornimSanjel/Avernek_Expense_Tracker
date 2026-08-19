@@ -44,6 +44,20 @@ create table if not exists public.vendors (
   unique (name)
 );
 
+-- Company-owned money may sit in an official bank, a personal-custody account,
+-- a digital wallet, or cash. The holder is not the economic owner.
+create table if not exists public.money_accounts (
+  id          uuid primary key default gen_random_uuid(),
+  name        text not null,
+  kind        text not null check (kind in ('company_bank','personal_custody','digital_wallet','cash')),
+  currency    text not null check (currency in ('NPR','USD')),
+  holder_name text,
+  notes       text,
+  is_active   boolean not null default true,
+  created_at  timestamptz not null default now(),
+  unique (name, currency)
+);
+
 -- -----------------------------------------------------------------------------
 -- fx_rates — daily cache of Nepal Rastra Bank official rates.
 -- Historical rows are IMMUTABLE (see FX rule). One row per (date, currency pair).
@@ -108,6 +122,9 @@ create table if not exists public.expenses (
   category_id        uuid references public.categories (id) on delete set null,
   vendor_id          uuid references public.vendors (id) on delete set null,
   paid_by_user_id    uuid references public.users (id) on delete set null,
+  funding_source     text not null default 'personal'
+                       check (funding_source in ('personal','company_funds')),
+  money_account_id   uuid references public.money_accounts (id) on delete set null,
   client             text,
   note               text,
   receipt_url        text,
@@ -115,11 +132,18 @@ create table if not exists public.expenses (
   source             text not null default 'manual' check (source in ('manual','recurring')),
   recurring_id       uuid references public.recurring (id) on delete set null,
   created_by         uuid references public.users (id) on delete set null,
-  created_at         timestamptz not null default now()
+  created_at         timestamptz not null default now(),
+  constraint expenses_money_ledger_check check (
+    (funding_source = 'personal' and money_account_id is null)
+    or
+    (funding_source = 'company_funds' and money_account_id is not null)
+  )
 );
 create index if not exists expenses_by_date on public.expenses (expense_date desc);
 create index if not exists expenses_by_category on public.expenses (category_id);
 create index if not exists expenses_by_payer on public.expenses (paid_by_user_id);
+create index if not exists expenses_by_money_account
+  on public.expenses (money_account_id, expense_date desc);
 
 -- Existing projects need the column too (CREATE TABLE IF NOT EXISTS does not add it).
 alter table public.expenses add column if not exists billing_month date;
@@ -164,6 +188,81 @@ create table if not exists public.settlements (
   created_at   timestamptz not null default now()
 );
 
+-- Client agreements and money received. Ads-live is service day 1; recurring
+-- obligations begin every exact 30 days because the setup fee covers cycle one.
+create table if not exists public.income_agreements (
+  id                        uuid primary key default gen_random_uuid(),
+  client_name               text not null,
+  agreement_name            text,
+  service_type              text not null default 'full_track'
+                              check (service_type in ('ai_automation','marketing','full_track')),
+  contact_name              text,
+  agreement_date            date not null,
+  ads_live_date             date not null,
+  setup_amount              numeric(14,2) not null default 0 check (setup_amount >= 0),
+  recurring_amount          numeric(14,2) not null default 0 check (recurring_amount >= 0),
+  currency                  text not null default 'NPR' check (currency in ('NPR','USD')),
+  setup_payment_terms       text not null default 'full_upfront'
+                              check (setup_payment_terms in ('full_upfront','half_advance','custom')),
+  setup_advance_percent     numeric(5,2) not null default 50
+                              check (setup_advance_percent >= 0 and setup_advance_percent <= 100),
+  setup_due_date            date not null,
+  recurring_due_days_before integer not null default 0
+                              check (recurring_due_days_before >= 0 and recurring_due_days_before <= 30),
+  status                    text not null default 'active'
+                              check (status in ('active','paused','completed')),
+  service_end_date          date,
+  notes                     text,
+  created_by                uuid references public.users (id) on delete set null,
+  created_at                timestamptz not null default now(),
+  updated_at                timestamptz not null default now()
+);
+create index if not exists income_agreements_by_client
+  on public.income_agreements (client_name);
+create index if not exists income_agreements_by_status
+  on public.income_agreements (status);
+
+create table if not exists public.income_payments (
+  id                   uuid primary key default gen_random_uuid(),
+  agreement_id         uuid not null references public.income_agreements (id) on delete cascade,
+  payment_for          text not null check (payment_for in ('setup','recurring')),
+  billing_period_start date,
+  amount               numeric(14,2) not null check (amount > 0),
+  paid_on              date not null,
+  received_in          text not null check (received_in in ('company','personal')),
+  money_account_id     uuid references public.money_accounts (id) on delete set null,
+  account_name         text,
+  reference            text,
+  note                 text,
+  recorded_by          uuid references public.users (id) on delete set null,
+  created_at           timestamptz not null default now(),
+  constraint income_payment_period_check check (
+    (payment_for = 'setup' and billing_period_start is null)
+    or (payment_for = 'recurring' and billing_period_start is not null)
+  )
+);
+create index if not exists income_payments_by_agreement
+  on public.income_payments (agreement_id, paid_on desc);
+create index if not exists income_payments_by_period
+  on public.income_payments (agreement_id, billing_period_start);
+
+-- Moving money between accounts is not income or an expense. Both sides are
+-- stored so NPR -> USD exchanges preserve the remaining balance in each unit.
+create table if not exists public.money_transfers (
+  id              uuid primary key default gen_random_uuid(),
+  from_account_id uuid not null references public.money_accounts (id) on delete restrict,
+  to_account_id   uuid not null references public.money_accounts (id) on delete restrict,
+  from_amount     numeric(14,2) not null check (from_amount > 0),
+  to_amount       numeric(14,2) not null check (to_amount > 0),
+  transfer_date   date not null default current_date,
+  note            text,
+  created_by      uuid references public.users (id) on delete set null,
+  created_at      timestamptz not null default now(),
+  check (from_account_id <> to_account_id)
+);
+create index if not exists money_transfers_by_date
+  on public.money_transfers (transfer_date desc);
+
 
 -- =============================================================================
 -- Authentication and authorization
@@ -178,4 +277,3 @@ create table if not exists public.settlements (
 -- db/migrations/20260729_local_auth.sql), and authorization is enforced in the
 -- application by requireSession() and requireAdmin() in src/lib/auth/server.ts.
 -- =============================================================================
-

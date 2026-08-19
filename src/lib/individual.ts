@@ -11,6 +11,7 @@ export function assignedShareNpr(
   member: AppUser,
   users: AppUser[]
 ): number {
+  if (expense.funding_source === "company_funds") return 0;
   if (expense.amount_npr == null) return 0;
   if (expense.expense_shares?.length) {
     return Number(
@@ -26,6 +27,7 @@ export function assignedShareOriginal(
   member: AppUser,
   users: AppUser[]
 ): number {
+  if (expense.funding_source === "company_funds") return 0;
   if (expense.expense_shares?.length) {
     return Number(
       expense.expense_shares.find((share) => share.user_id === member.id)?.amount ?? 0
@@ -49,7 +51,10 @@ export function computeIndividualSpending(
       paid: expenses.reduce(
         (sum, expense) =>
           sum +
-          (expense.paid_by_user_id === member.id ? Number(expense.amount_npr ?? 0) : 0),
+          (expense.funding_source !== "company_funds" &&
+          expense.paid_by_user_id === member.id
+            ? Number(expense.amount_npr ?? 0)
+            : 0),
         0
       ),
     }))

@@ -1,12 +1,13 @@
 import { query } from "@/lib/db";
 import { requireSession } from "@/lib/auth/server";
-import { PageHeader } from "@/components/ui";
+import { EmptyState, PageHeader, StatTile } from "@/components/ui";
 import AddRecurring from "@/components/AddRecurring";
 import RecurringRow from "@/components/RecurringRow";
 import { npr, usd } from "@/lib/format";
 import type { AppUser, Category, Recurring, Vendor } from "@/lib/types";
 import { differenceInCalendarDays, parseISO } from "date-fns";
 import { isAppOwner } from "@/lib/authz";
+import Icon from "@/components/Icons";
 
 export const dynamic = "force-dynamic";
 
@@ -40,21 +41,32 @@ export default async function SubscriptionsPage() {
   const vName = (id: string | null) => vendors.find((v) => v.id === id)?.name ?? "";
   const uName = (id: string | null) =>
     users.find((u) => u.id === id)?.name.split(" ")[0] ?? "—";
+  const activeCount = recurring.filter((item) => item.is_active).length;
+  const dueSoonCount = recurring.filter((item) => {
+    const days = differenceInCalendarDays(parseISO(item.next_renewal_date), new Date());
+    return item.is_active && days >= 0 && days <= 7;
+  }).length;
 
   return (
     <>
       <PageHeader
+        eyebrow="Recurring operations"
         title="Subscriptions"
-        subtitle="Recurring costs that renew on their own."
-        action={
+        subtitle="Stay ahead of software, services, and every recurring company commitment."
+        action={canManage ? (
           <AddRecurring
             categories={categories}
             vendors={vendors}
             users={users}
             meId={session.sub}
           />
-        }
+        ) : undefined}
       />
+
+      <div className="grid grid-cols-2 gap-3 mb-4">
+        <StatTile label="Active plans" value={String(activeCount)} hint={`${recurring.length - activeCount} paused`} icon="subscription" tone="accent" />
+        <StatTile label="Due in 7 days" value={String(dueSoonCount)} hint="Upcoming renewals" icon="clock" tone={dueSoonCount ? "amber" : "green"} />
+      </div>
 
       {shareError && (
         <div
@@ -66,9 +78,9 @@ export default async function SubscriptionsPage() {
         </div>
       )}
 
-      <div className="card divide-y" style={{ borderColor: "var(--line)" }}>
+      <div className="card overflow-hidden divide-y" style={{ borderColor: "var(--line)" }}>
         {recurring.length === 0 && (
-          <div className="p-8 text-center muted">No subscriptions yet.</div>
+          <EmptyState title="No subscriptions yet" description="Add recurring software or service costs to see renewal timing here." icon="subscription" />
         )}
         {recurring.map((r) => {
           const days = differenceInCalendarDays(
@@ -79,11 +91,14 @@ export default async function SubscriptionsPage() {
           return (
             <div
               key={r.id}
-              className={`p-4 flex flex-wrap items-center gap-3 ${
+              className={`list-row p-4 md:px-5 flex flex-wrap items-center gap-3 ${
                 r.is_active ? "" : "opacity-50"
               }`}
               style={{ borderColor: "var(--line)" }}
             >
+              <div className="stat-icon !w-10 !h-10 shrink-0" style={{ color: soon ? "var(--amber)" : "#b8a0fb" }}>
+                <Icon name="subscription" size={17} />
+              </div>
               <div className="min-w-0 flex-1">
                 <div className="font-medium">
                   {r.name}

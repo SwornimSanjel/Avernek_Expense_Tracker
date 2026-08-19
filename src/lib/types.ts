@@ -7,6 +7,17 @@ export type ConversionStatus =
   | "pending";
 export type ExpenseSource = "manual" | "recurring";
 export type Cycle = "monthly" | "annual";
+export type IncomeAgreementStatus = "active" | "paused" | "completed";
+export type IncomeServiceType = "ai_automation" | "marketing" | "full_track";
+export type SetupPaymentTerms = "full_upfront" | "half_advance" | "custom";
+export type IncomePaymentFor = "setup" | "recurring";
+export type IncomeAccountType = "company" | "personal";
+export type ExpenseFundingSource = "personal" | "company_funds";
+export type MoneyAccountKind =
+  | "company_bank"
+  | "personal_custody"
+  | "digital_wallet"
+  | "cash";
 
 export interface AppUser {
   id: string;
@@ -65,6 +76,8 @@ export interface Expense {
   category_id: string | null;
   vendor_id: string | null;
   paid_by_user_id: string | null;
+  funding_source: ExpenseFundingSource;
+  money_account_id: string | null;
   client: string | null;
   note: string | null;
   receipt_url: string | null;
@@ -112,4 +125,66 @@ export interface Settlement {
   amount_npr: number;
   settled_on: string;
   note: string | null;
+}
+
+export interface IncomeAgreement {
+  id: string;
+  client_name: string;
+  agreement_name: string | null;
+  service_type: IncomeServiceType;
+  contact_name: string | null;
+  agreement_date: string;
+  ads_live_date: string;
+  setup_amount: number;
+  recurring_amount: number;
+  currency: Currency;
+  setup_payment_terms: SetupPaymentTerms;
+  setup_advance_percent: number;
+  setup_due_date: string;
+  recurring_due_days_before: number;
+  status: IncomeAgreementStatus;
+  service_end_date: string | null;
+  notes: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface IncomePayment {
+  id: string;
+  agreement_id: string;
+  payment_for: IncomePaymentFor;
+  billing_period_start: string | null;
+  amount: number;
+  paid_on: string;
+  received_in: IncomeAccountType;
+  money_account_id: string | null;
+  account_name: string | null;
+  reference: string | null;
+  note: string | null;
+  recorded_by: string | null;
+  created_at: string;
+}
+
+export interface MoneyAccount {
+  id: string;
+  name: string;
+  kind: MoneyAccountKind;
+  currency: Currency;
+  holder_name: string | null;
+  notes: string | null;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface MoneyTransfer {
+  id: string;
+  from_account_id: string;
+  to_account_id: string;
+  from_amount: number;
+  to_amount: number;
+  transfer_date: string;
+  note: string | null;
+  created_by: string | null;
+  created_at: string;
 }

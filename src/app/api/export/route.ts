@@ -1,13 +1,13 @@
 import { query } from "@/lib/db";
 import { getSession } from "@/lib/auth/server";
-import type { AppUser, Category, Expense, Vendor } from "@/lib/types";
+import type { AppUser, Category, Expense, MoneyAccount, Vendor } from "@/lib/types";
 
 // GET /api/export -> expenses.csv
 export async function GET() {
   const session = await getSession();
   if (!session) return new Response("Unauthorized", { status: 401 });
 
-  const [exp, shareRows, cats, vends, team] = await Promise.all([
+  const [exp, shareRows, cats, vends, team, accounts] = await Promise.all([
     query<Expense>(
       `select * from public.expenses order by expense_date desc`
     ),
@@ -17,6 +17,7 @@ export async function GET() {
     query<Category>(`select * from public.categories`),
     query<Vendor>(`select * from public.vendors`),
     query<AppUser>(`select id, name, email, is_core_member, is_admin from public.users`),
+    query<MoneyAccount>(`select * from public.money_accounts`),
   ]);
 
   const categories = cats as Category[];
@@ -40,6 +41,8 @@ export async function GET() {
     "vendor",
     "category",
     "paid_by",
+    "funding_source",
+    "money_account",
     "client",
     "amount",
     "currency",
@@ -68,6 +71,8 @@ export async function GET() {
         name(vendors, e.vendor_id),
         name(categories, e.category_id),
         name(users, e.paid_by_user_id),
+        e.funding_source,
+        name(accounts, e.money_account_id),
         e.client ?? "",
         e.amount,
         e.currency,

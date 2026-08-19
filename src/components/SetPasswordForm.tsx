@@ -56,8 +56,8 @@ export default function SetPasswordForm({
         {pending ? "Saving…" : "Set password"}
       </button>
 
-      {state.error && <p className="text-sm text-red-600">{state.error}</p>}
-      {state.ok && <p className="text-sm text-emerald-600">{state.ok}</p>}
+      {state.error && <p className="alert alert-error">{state.error}</p>}
+      {state.ok && <p className="alert" style={{ color: "var(--green)", borderColor: "rgb(70 216 144 / .2)" }}>{state.ok}</p>}
 
       <p className="text-xs muted">
         Also how an existing participant gets a login for the first time. This

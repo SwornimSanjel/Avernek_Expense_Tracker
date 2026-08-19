@@ -3,20 +3,31 @@
 import { useEffect, useState, useTransition } from "react";
 import { addExpense } from "@/app/(app)/expenses/actions";
 import { npr, rateLabel } from "@/lib/format";
-import type { AppUser, Category, Vendor } from "@/lib/types";
+import type {
+  AppUser,
+  Category,
+  ExpenseFundingSource,
+  MoneyAccount,
+  Vendor,
+} from "@/lib/types";
 import ShareAllocationFields from "./ShareAllocationFields";
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => {
+  const date = new Date();
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
+};
 
 export default function AddExpense({
   categories,
   vendors,
   users,
+  moneyAccounts,
   meId,
 }: {
   categories: Category[];
   vendors: Vendor[];
   users: AppUser[];
+  moneyAccounts: MoneyAccount[];
   meId: string;
 }) {
   const [open, setOpen] = useState(false);
@@ -27,6 +38,8 @@ export default function AddExpense({
   const [amount, setAmount] = useState("");
   const [showActual, setShowActual] = useState(false);
   const [actualNpr, setActualNpr] = useState("");
+  const [fundingSource, setFundingSource] = useState<ExpenseFundingSource>("personal");
+  const [moneyAccountId, setMoneyAccountId] = useState("");
   const [rate, setRate] = useState<{ rate: number; rateDate: string } | null>(null);
   const [rateLoading, setRateLoading] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -53,36 +66,49 @@ export default function AddExpense({
   const actual = Number(actualNpr) || 0;
   const estNpr = rate ? amt * rate.rate : null;
   const effectiveRate = actual > 0 && amt > 0 ? actual / amt : null;
+  const matchingAccounts = moneyAccounts.filter(
+    (account) =>
+      account.is_active &&
+      (account.currency === currency || (currency === "USD" && account.currency === "NPR"))
+  );
+  const selectedMoneyAccount = matchingAccounts.find((account) => account.id === moneyAccountId);
+  const isNprAccountPayingUsd =
+    currency === "USD" && selectedMoneyAccount?.currency === "NPR";
 
   function submit(formData: FormData) {
     startTransition(async () => {
-      await addExpense(formData);
-      setAmount("");
-      setActualNpr("");
-      setShowActual(false);
-      setBillingMonth(today().slice(0, 7));
-      setBillingMonthTouched(false);
-      setOpen(false);
+      try {
+        await addExpense(formData);
+        setAmount("");
+        setActualNpr("");
+        setShowActual(false);
+        setMoneyAccountId("");
+        setBillingMonth(today().slice(0, 7));
+        setBillingMonthTouched(false);
+        setOpen(false);
+      } catch (error) {
+        window.alert(error instanceof Error ? error.message : "Could not save expense");
+      }
     });
   }
 
   if (!open) {
     return (
       <button onClick={() => setOpen(true)} className="btn btn-primary">
-        + Add expense
+        <span className="text-base leading-none">＋</span> Add expense
       </button>
     );
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/50">
+    <div className="modal-backdrop">
       <form
         action={submit}
-        className="w-full md:max-w-lg card !rounded-b-none md:!rounded-2xl p-5 space-y-4 max-h-[92vh] overflow-y-auto"
+        className="modal-panel md:max-w-lg p-5 md:p-6 space-y-4"
       >
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-bold">Add expense</h2>
-          <button type="button" onClick={() => setOpen(false)} className="muted px-2">
+        <div className="modal-header">
+          <div><h2 className="text-lg font-bold">Add expense</h2><p className="text-xs muted mt-1">Choose founder investment or the exact company-money account that paid.</p></div>
+          <button type="button" onClick={() => setOpen(false)} className="icon-btn">
             ✕
           </button>
         </div>
@@ -93,7 +119,9 @@ export default function AddExpense({
             <label className="text-xs muted">Amount</label>
             <input
               name="amount"
-              inputMode="decimal"
+              type="number"
+              min="0.01"
+              step="0.01"
               autoFocus
               required
               value={amount}
@@ -107,7 +135,10 @@ export default function AddExpense({
             <select
               name="currency"
               value={currency}
-              onChange={(e) => setCurrency(e.target.value as "NPR" | "USD")}
+              onChange={(e) => {
+                setCurrency(e.target.value as "NPR" | "USD");
+                setMoneyAccountId("");
+              }}
               className="input !h-14 mt-1"
             >
               <option value="NPR">NPR</option>
@@ -150,11 +181,14 @@ export default function AddExpense({
             {showActual && (
               <div className="mt-2">
                 <label className="text-xs muted">
-                  Actual NPR charged (from your statement)
+                  Actual NPR charged (from your statement){isNprAccountPayingUsd ? " · required" : ""}
                 </label>
                 <input
                   name="actual_npr_charged"
-                  inputMode="decimal"
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  required={isNprAccountPayingUsd}
                   value={actualNpr}
                   onChange={(e) => setActualNpr(e.target.value)}
                   placeholder="e.g. 3140"
@@ -171,13 +205,74 @@ export default function AddExpense({
             {!rate && !showActual && (
               <input
                 name="manual_rate"
-                inputMode="decimal"
+                type="number"
+                min="0.01"
+                step="0.01"
                 placeholder="Manual rate (NPR per USD)"
                 className="input tnum mt-2"
               />
             )}
           </div>
         )}
+
+        <div className="card-soft p-3.5">
+          <div className="field-label mb-2">Which money paid for this?</div>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => setFundingSource("personal")}
+              className={`funding-choice ${fundingSource === "personal" ? "funding-choice-active" : ""}`}
+            >
+              <strong>Founder/team investment</strong>
+              <span>Pre-registration or own-pocket money</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setFundingSource("company_funds")}
+              className={`funding-choice ${fundingSource === "company_funds" ? "funding-choice-active" : ""}`}
+            >
+              <strong>Company operating money</strong>
+              <span>Client-earned money in either company-use account</span>
+            </button>
+          </div>
+          <input type="hidden" name="funding_source" value={fundingSource} />
+
+          {fundingSource === "company_funds" && (
+            <div className="mt-3">
+              <Field label="Paid from which company-money account?">
+                <select
+                  name="money_account_id"
+                  required
+                  className="input"
+                  value={moneyAccountId}
+                  onChange={(event) => {
+                    const nextId = event.target.value;
+                    setMoneyAccountId(nextId);
+                    const nextAccount = matchingAccounts.find((account) => account.id === nextId);
+                    if (currency === "USD" && nextAccount?.currency === "NPR") setShowActual(true);
+                  }}
+                >
+                  <option value="" disabled>Choose account</option>
+                  {matchingAccounts.map((account) => (
+                    <option key={account.id} value={account.id}>
+                      {account.name}{account.currency !== currency ? ` · charged in ${account.currency}` : ""}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              {matchingAccounts.length === 0 && (
+                <p className="field-help" style={{ color: "var(--amber)" }}>
+                  Create a {currency} account on the Company money page first.
+                </p>
+              )}
+              <p className="field-help">
+                {isNprAccountPayingUsd
+                  ? "Enter the exact NPR charged above. That rupee amount—not the USD face value—will reduce this account."
+                  : "This reduces the selected company-money balance and never counts as Swornim's or another founder's investment."}
+              </p>
+            </div>
+          )}
+        </div>
 
         <div className="grid grid-cols-2 gap-2">
           <Field label="Date">
@@ -193,16 +288,18 @@ export default function AddExpense({
               className="input"
             />
           </Field>
-          <Field label="Paid by">
-            <select name="paid_by_user_id" defaultValue={meId} className="input">
-              {users.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.name}
-                  {!u.is_core_member ? " (manual split)" : ""}
-                </option>
-              ))}
-            </select>
-          </Field>
+          {fundingSource === "personal" && (
+            <Field label="Invested / paid personally by">
+              <select name="paid_by_user_id" defaultValue={meId} className="input">
+                {users.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.name}
+                    {!u.is_core_member ? " (manual split)" : ""}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          )}
           <Field label="Billing month">
             <input
               name="billing_month"
@@ -237,7 +334,9 @@ export default function AddExpense({
           </Field>
         </div>
 
-        <ShareAllocationFields users={users} total={amount} currency={currency} />
+        {fundingSource === "personal" && (
+          <ShareAllocationFields users={users} total={amount} currency={currency} />
+        )}
 
         <Field label="Client (optional)">
           <input name="client" placeholder="e.g. Hotel Everest" className="input" />
@@ -263,7 +362,7 @@ function Field({
 }) {
   return (
     <label className="block">
-      <span className="text-xs muted">{label}</span>
+      <span className="field-label">{label}</span>
       <div className="mt-1">{children}</div>
     </label>
   );

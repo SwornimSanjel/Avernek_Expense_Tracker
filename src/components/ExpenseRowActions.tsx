@@ -6,8 +6,9 @@ import {
   deleteExpense,
   retryConversion,
 } from "@/app/(app)/expenses/actions";
-import type { AppUser, Category, Expense, Vendor } from "@/lib/types";
+import type { AppUser, Category, Expense, MoneyAccount, Vendor } from "@/lib/types";
 import EditExpenseModal from "./EditExpenseModal";
+import Icon from "./Icons";
 
 export default function ExpenseRowActions({
   expense,
@@ -16,6 +17,7 @@ export default function ExpenseRowActions({
   categories,
   vendors,
   users,
+  moneyAccounts,
 }: {
   expense: Expense;
   isReimbursed: boolean;
@@ -23,6 +25,7 @@ export default function ExpenseRowActions({
   categories: Category[];
   vendors: Vendor[];
   users: AppUser[];
+  moneyAccounts: MoneyAccount[];
 }) {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -34,19 +37,19 @@ export default function ExpenseRowActions({
       <button
         onClick={() => setOpen((o) => !o)}
         disabled={busy}
-        className="w-8 h-8 rounded-lg muted"
+        className="icon-btn !w-8 !h-8"
         aria-label="Row actions"
       >
-        ⋯
+        <Icon name="more" size={17} />
       </button>
       {open && (
         <div
-          className="absolute right-0 top-9 z-10 w-48 card !rounded-xl py-1 text-sm shadow-xl"
+            className="absolute right-0 top-9 z-20 w-48 card !rounded-xl p-1 text-xs shadow-xl"
           onMouseLeave={() => setOpen(false)}
         >
           {pending && (
             <button
-              className="w-full text-left px-3 py-2 hover:opacity-70"
+              className="w-full text-left px-3 py-2 rounded-lg hover:bg-white/[.04]"
               onClick={() =>
                 startTransition(async () => {
                   await retryConversion(id);
@@ -58,7 +61,7 @@ export default function ExpenseRowActions({
             </button>
           )}
           <button
-            className="w-full text-left px-3 py-2 hover:opacity-70"
+            className="w-full text-left px-3 py-2 rounded-lg hover:bg-white/[.04]"
             onClick={() => {
               setOpen(false);
               setEditing(true);
@@ -67,7 +70,7 @@ export default function ExpenseRowActions({
             Edit
           </button>
           <button
-            className="w-full text-left px-3 py-2 hover:opacity-70"
+            className="w-full text-left px-3 py-2 rounded-lg hover:bg-white/[.04]"
             onClick={() =>
               startTransition(async () => {
                 await toggleReimbursed(id, !isReimbursed);
@@ -78,14 +81,15 @@ export default function ExpenseRowActions({
             {isReimbursed ? "Mark not reimbursed" : "Mark reimbursed"}
           </button>
           <button
-            className="w-full text-left px-3 py-2 hover:opacity-70"
+            className="w-full text-left px-3 py-2 rounded-lg hover:bg-white/[.04]"
             style={{ color: "var(--red)" }}
-            onClick={() =>
+            onClick={() => {
+              if (!window.confirm("Delete this expense? This cannot be undone.")) return;
               startTransition(async () => {
                 await deleteExpense(id);
                 setOpen(false);
-              })
-            }
+              });
+            }}
           >
             Delete
           </button>
@@ -97,6 +101,7 @@ export default function ExpenseRowActions({
           categories={categories}
           vendors={vendors}
           users={users}
+          moneyAccounts={moneyAccounts}
           onClose={() => setEditing(false)}
         />
       )}

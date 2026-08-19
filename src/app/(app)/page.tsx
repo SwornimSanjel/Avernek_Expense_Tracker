@@ -2,10 +2,21 @@ import Link from "next/link";
 import { one, query } from "@/lib/db";
 import { requireSession } from "@/lib/auth/server";
 import { getCachedUsdSellRate } from "@/lib/fx";
-import { FxBadge } from "@/components/ui";
-import { npr, usd, rateLabel } from "@/lib/format";
-import type { AppUser, Category, Expense, Recurring, Vendor } from "@/lib/types";
+import { EmptyState, FxBadge, LedgerCard, PageHeader, SectionHeader, StatTile } from "@/components/ui";
+import { npr, usd } from "@/lib/format";
+import type {
+  AppUser,
+  Category,
+  Expense,
+  IncomePayment,
+  MoneyAccount,
+  MoneyTransfer,
+  Recurring,
+  Vendor,
+} from "@/lib/types";
 import { computeIndividualSpending } from "@/lib/individual";
+import { computeMoneyAccountBalances } from "@/lib/funds";
+import { formatIncomeMoney } from "@/lib/income";
 import { format, startOfMonth, addMonths } from "date-fns";
 
 export const dynamic = "force-dynamic";
@@ -22,7 +33,7 @@ const SLICE = [
 export default async function Dashboard() {
   const session = await requireSession();
 
-  const [exp, shareRows, cats, vends, recs, team, me, currentRate] =
+  const [exp, shareRows, cats, vends, recs, team, me, currentRate, accounts, payments, transfers] =
     await Promise.all([
       query<Expense>(
         `select * from public.expenses order by expense_date desc`
@@ -36,6 +47,9 @@ export default async function Dashboard() {
         session.sub,
       ]),
       getCachedUsdSellRate(),
+      query<MoneyAccount>(`select * from public.money_accounts where is_active = true order by currency, name`),
+      query<IncomePayment>(`select * from public.income_payments order by paid_on desc, created_at desc`),
+      query<MoneyTransfer>(`select * from public.money_transfers order by transfer_date desc, created_at desc`),
     ]);
 
   const expenses = exp.map((expense) => ({
@@ -50,6 +64,16 @@ export default async function Dashboard() {
   const users = team as AppUser[];
   const individualSpending = computeIndividualSpending(users, expenses);
   const assignedTotal = individualSpending.reduce((sum, row) => sum + row.assigned, 0);
+  const founderExpenseTotal = sum(
+    expenses
+      .filter((expense) => expense.funding_source !== "company_funds")
+      .map((expense) => Number(expense.amount_npr ?? 0))
+  );
+  const accountBalances = computeMoneyAccountBalances(accounts, payments, expenses, transfers);
+  const primaryAccountBalances = [
+    accountBalances.find((item) => item.account.kind === "personal_custody"),
+    accountBalances.find((item) => item.account.kind === "company_bank"),
+  ].filter((item): item is NonNullable<typeof item> => Boolean(item));
   const firstName = (me?.name ?? "there").split(" ")[0];
 
   const withNpr = expenses.filter((e) => e.amount_npr != null);
@@ -129,68 +153,27 @@ export default async function Dashboard() {
 
   return (
     <>
-      {/* Header */}
-      <div className="flex flex-wrap items-end justify-between gap-3 mb-6">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Hi {firstName} 👋</h1>
-          <p className="muted text-sm mt-1">{format(new Date(), "EEEE, d MMMM yyyy")}</p>
-        </div>
-        {currentRate && (
+      <PageHeader
+        eyebrow="Command center"
+        title={`Good to see you, ${firstName}`}
+        subtitle={`${format(new Date(), "EEEE, d MMMM yyyy")} · A complete view of Avernek's financial activity.`}
+        action={currentRate ? (
           <div className="pill !py-1.5 !px-3 tnum">
             $1 = NPR {currentRate.rate.toFixed(2)}
             <span className="ml-1.5 opacity-60">NRB · {currentRate.rateDate.slice(5)}</span>
           </div>
-        )}
-      </div>
+        ) : undefined}
+      />
 
       {/* Stats */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <div
-          className="card p-5"
-          style={{
-            borderColor: "color-mix(in srgb, var(--accent) 45%, var(--line))",
-            background:
-              "linear-gradient(135deg, color-mix(in srgb, var(--accent) 10%, var(--surface)), var(--surface) 60%)",
-          }}
-        >
-          <div className="text-[12px] uppercase tracking-wider muted font-semibold">
-            Total spent
-          </div>
-          <div className="tnum mt-2 text-3xl font-bold tracking-tight">
-            {npr(totalNpr)}
-          </div>
-          {usdForeign > 0 && (
-            <div className="text-xs muted mt-1">includes {usd(usdForeign)} in USD</div>
-          )}
-        </div>
-        <div className="card p-5">
-          <div className="text-[12px] uppercase tracking-wider muted font-semibold">
-            This month
-          </div>
-          <div className="tnum mt-2 text-3xl font-bold tracking-tight">
-            {npr(thisMonth)}
-          </div>
-          <div className="text-xs muted mt-1">{format(new Date(), "MMMM")}</div>
-        </div>
-        <div className="card p-5">
-          <div className="text-[12px] uppercase tracking-wider muted font-semibold">
-            Next month
-          </div>
-          <div className="tnum mt-2 text-3xl font-bold tracking-tight">
-            {npr(projected)}
-          </div>
-          <div className="text-xs muted mt-1">expected from subscriptions</div>
-        </div>
+        <StatTile label="Total spent" value={npr(totalNpr)} hint={usdForeign > 0 ? `Includes ${usd(usdForeign)} in USD` : "All recorded company costs"} emphasis icon="wallet" tone="accent" />
+        <StatTile label="This month" value={npr(thisMonth)} hint={format(new Date(), "MMMM")} icon="calendar" tone="blue" />
+        <StatTile label="Next month" value={npr(projected)} hint="Expected subscription renewals" icon="subscription" tone="amber" />
       </div>
 
       {pendingCount > 0 && (
-        <div
-          className="mt-4 rounded-xl px-4 py-2 text-sm"
-          style={{
-            border: "1px solid color-mix(in srgb, var(--amber) 35%, transparent)",
-            color: "var(--amber)",
-          }}
-        >
+        <div className="alert alert-warn mt-4">
           {pendingCount} expense{pendingCount > 1 ? "s" : ""} missing an exchange rate.{" "}
           <Link href="/expenses" className="underline">
             Fix
@@ -198,22 +181,57 @@ export default async function Dashboard() {
         </div>
       )}
 
+      <div className="mt-6 mb-3">
+        <SectionHeader
+          title="Three lifetime ledgers"
+          subtitle="Founder spending stays separate. The two company-money accounts independently show money in, money out, and what remains."
+          action={<Link href="/funds" className="text-xs muted hover:opacity-80 transition-opacity">Open company money →</Link>}
+        />
+      </div>
+      <div className="grid lg:grid-cols-3 gap-3">
+        <LedgerCard
+          title="Founder/team investment"
+          subtitle="Pre-registration and later own-pocket spending by founders or team members."
+          badge="Founder capital"
+          moneyOut={npr(founderExpenseTotal)}
+          outLabel="All-time founder money spent"
+          note="No money-in or balance is calculated here. Every founder expense records the amount, payer, vendor/category, date, and purpose."
+          icon="contribution"
+          tone="accent"
+        />
+        {primaryAccountBalances.map((item) => {
+          const personallyHeld = item.account.kind === "personal_custody";
+          return (
+            <LedgerCard
+              key={item.account.id}
+              title={personallyHeld ? "Swornim Global IME" : "Avernek company Global IME"}
+              subtitle={personallyHeld ? "Company-owned money from clients who do not need a VAT bill." : "Official company account for clients who need a VAT bill."}
+              badge={personallyHeld ? "Non-VAT company money" : "VAT company money"}
+              moneyIn={formatIncomeMoney(item.received + item.transferredIn, item.account.currency)}
+              moneyOut={formatIncomeMoney(item.spent + item.transferredOut, item.account.currency)}
+              balance={formatIncomeMoney(item.balance, item.account.currency)}
+              note={personallyHeld ? "The account holder is Swornim, but every rupee in this ledger belongs to Avernek." : "Income, expenses, and transfers remain separate from founder investment."}
+              icon={personallyHeld ? "user" : "bank"}
+              tone={personallyHeld ? "blue" : "green"}
+            />
+          );
+        })}
+      </div>
+
       <div className="card p-5 mt-4">
-        <div className="flex items-center justify-between gap-3 mb-3">
-          <div>
-            <h2 className="font-semibold">Individual spending</h2>
-            <p className="text-xs muted">All-time assigned share and cash paid</p>
-          </div>
-          <Link href="/expenses" className="text-sm muted hover:underline">
+        <div className="mb-3">
+          <SectionHeader title="Founder/team investment" subtitle="Pre-registration and own-pocket expenses only; company-money spending is excluded" action={
+          <Link href="/expenses" className="text-xs muted hover:opacity-80 transition-opacity">
             View details →
           </Link>
+          } />
         </div>
         <div className="divide-y" style={{ borderColor: "var(--line)" }}>
           {individualSpending.map(({ member, assigned, paid }, index) => (
             <Link
               key={member.id}
               href={`/expenses?person=${member.id}&basis=share`}
-              className="flex items-center gap-3 py-3 hover:opacity-80"
+              className="list-row flex items-center gap-3 py-3 px-2 -mx-2 rounded-xl"
               style={{ borderColor: "var(--line)" }}
             >
               <span className="pill !px-2 !py-0.5 tnum">#{index + 1}</span>
@@ -225,7 +243,7 @@ export default async function Dashboard() {
             </Link>
           ))}
           <div className="flex items-center justify-between pt-3 text-sm font-semibold">
-            <span>Total assigned</span>
+            <span>Total founder/team investment</span>
             <span className="tnum">{npr(assignedTotal)}</span>
           </div>
         </div>
@@ -235,7 +253,7 @@ export default async function Dashboard() {
       <div className="grid lg:grid-cols-2 gap-4 mt-6">
         {/* Donut — spend share */}
         <div className="card p-6">
-          <h2 className="font-semibold">Spend by category</h2>
+          <SectionHeader title="Spend by category" subtitle="Share of all recorded spending" />
           {slices.length === 0 ? (
             <Empty />
           ) : (
@@ -296,7 +314,7 @@ export default async function Dashboard() {
 
         {/* Bars — monthly trend */}
         <div className="card p-6">
-          <h2 className="font-semibold">Monthly spend</h2>
+          <SectionHeader title="Monthly spend" subtitle="Six-month cost trend" />
           {months.every((m) => m.value === 0) ? (
             <Empty />
           ) : (
@@ -335,18 +353,19 @@ export default async function Dashboard() {
 
       {/* Latest */}
       <div className="card p-6 mt-4">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="font-semibold">Latest expenses</h2>
-          <Link href="/expenses" className="text-sm muted hover:underline">
+        <div className="mb-4">
+          <SectionHeader title="Latest expenses" subtitle="Most recent company transactions" action={
+          <Link href="/expenses" className="text-xs muted hover:opacity-80 transition-opacity">
             See all →
           </Link>
+          } />
         </div>
         {recent.length === 0 ? (
           <Empty />
         ) : (
           <div className="space-y-3">
             {recent.map((e) => (
-              <div key={e.id} className="flex items-center gap-3 text-sm">
+              <div key={e.id} className="list-row flex items-center gap-3 text-sm px-2 py-2 -mx-2 rounded-xl">
                 <div className="min-w-0 flex-1">
                   <div className="font-medium truncate">
                     {vName(e.vendor_id) || cName(e.category_id)}
@@ -372,9 +391,7 @@ export default async function Dashboard() {
 
 function Empty() {
   return (
-    <div className="h-32 flex items-center justify-center muted text-sm">
-      Nothing yet — add your first expense.
-    </div>
+    <EmptyState title="Nothing here yet" description="Add your first expense to unlock this financial view." />
   );
 }
 

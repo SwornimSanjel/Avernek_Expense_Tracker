@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { exec, insertRows, one, query, transaction, updateRow } from "@/lib/db";
 import { requireSession } from "@/lib/auth/server";
 import { getUsdSellRateForDate, resolveConversion } from "@/lib/fx";
-import type { Currency } from "@/lib/types";
+import type { Currency, ExpenseFundingSource } from "@/lib/types";
 import {
   billingMonthDate,
   readShareInputs,
@@ -29,7 +29,26 @@ export async function addExpense(formData: FormData) {
     new Date().toISOString().slice(0, 10);
   const actualNprCharged = n(formData.get("actual_npr_charged"));
   const manualRate = n(formData.get("manual_rate"));
-  const shares = readShareInputs(formData);
+  const fundingSource = String(
+    formData.get("funding_source") ?? "personal"
+  ) as ExpenseFundingSource;
+  if (!(["personal", "company_funds"] as string[]).includes(fundingSource)) {
+    throw new Error("Choose founder/team investment or company operating money.");
+  }
+  const moneyAccountId =
+    fundingSource === "company_funds"
+      ? String(formData.get("money_account_id") ?? "")
+      : null;
+  let moneyAccount: { currency: Currency; is_active: boolean } | null = null;
+  if (fundingSource === "company_funds") {
+    if (!moneyAccountId) throw new Error("Choose which company-money account paid.");
+    moneyAccount = await one<{ currency: Currency; is_active: boolean }>(
+      `select currency, is_active from public.money_accounts where id = $1`,
+      [moneyAccountId]
+    );
+    if (!moneyAccount?.is_active) throw new Error("That company-money account is unavailable.");
+  }
+  const shares = fundingSource === "personal" ? readShareInputs(formData) : [];
   validateShareTotal(shares, amount);
 
   // Look up the NRB sell rate for the expense date only when we actually need it
@@ -46,6 +65,13 @@ export async function addExpense(formData: FormData) {
     nrbRate,
     manualRate,
   });
+  if (
+    moneyAccount &&
+    moneyAccount.currency !== currency &&
+    !(moneyAccount.currency === "NPR" && currency === "USD" && actualNprCharged != null)
+  ) {
+    throw new Error("For a USD charge paid from an NPR account, enter the exact NPR amount shown on the bank statement.");
+  }
 
   // The expense and its shares must both land or neither: a saved expense with
   // no shares silently breaks the split. Previously this was a delete-on-failure
@@ -54,10 +80,11 @@ export async function addExpense(formData: FormData) {
     const inserted = await client.query<{ id: string }>(
       `insert into public.expenses
          (amount, currency, expense_date, billing_month, category_id, vendor_id,
-          paid_by_user_id, client, note, receipt_url, source, created_by,
+          paid_by_user_id, funding_source, money_account_id, client, note,
+          receipt_url, source, created_by,
           amount_npr, fx_rate_to_npr, fx_rate_date, fx_source, conversion_status,
           actual_npr_charged)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'manual',$11,$12,$13,$14,$15,$16,$17)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'manual',$13,$14,$15,$16,$17,$18,$19)
        returning id`,
       [
         amount,
@@ -66,7 +93,11 @@ export async function addExpense(formData: FormData) {
         billingMonthDate(formData.get("billing_month")),
         (formData.get("category_id") as string) || null,
         (formData.get("vendor_id") as string) || null,
-        (formData.get("paid_by_user_id") as string) || session.sub,
+        fundingSource === "personal"
+          ? (formData.get("paid_by_user_id") as string) || session.sub
+          : null,
+        fundingSource,
+        moneyAccountId,
         (formData.get("client") as string) || null,
         (formData.get("note") as string) || null,
         (formData.get("receipt_url") as string) || null,
@@ -92,6 +123,7 @@ export async function addExpense(formData: FormData) {
   });
 
   revalidatePath("/expenses");
+  revalidatePath("/funds");
   revalidatePath("/");
 }
 
@@ -110,7 +142,26 @@ export async function updateExpense(formData: FormData) {
       new Date().toISOString().slice(0, 10);
     const actualNprCharged = n(formData.get("actual_npr_charged"));
     const manualRate = n(formData.get("manual_rate"));
-    const shares = readShareInputs(formData);
+    const fundingSource = String(
+      formData.get("funding_source") ?? "personal"
+    ) as ExpenseFundingSource;
+    if (!(["personal", "company_funds"] as string[]).includes(fundingSource)) {
+      throw new Error("Choose founder/team investment or company operating money.");
+    }
+    const moneyAccountId =
+      fundingSource === "company_funds"
+        ? String(formData.get("money_account_id") ?? "")
+        : null;
+    let moneyAccount: { currency: Currency; is_active: boolean } | null = null;
+    if (fundingSource === "company_funds") {
+      if (!moneyAccountId) throw new Error("Choose which company-money account paid.");
+      moneyAccount = await one<{ currency: Currency; is_active: boolean }>(
+        `select currency, is_active from public.money_accounts where id = $1`,
+        [moneyAccountId]
+      );
+      if (!moneyAccount?.is_active) throw new Error("That company-money account is unavailable.");
+    }
+    const shares = fundingSource === "personal" ? readShareInputs(formData) : [];
     validateShareTotal(shares, amount);
 
     let nrbRate = null;
@@ -125,6 +176,13 @@ export async function updateExpense(formData: FormData) {
       manualRate,
       nrbRate,
     });
+    if (
+      moneyAccount &&
+      moneyAccount.currency !== currency &&
+      !(moneyAccount.currency === "NPR" && currency === "USD" && actualNprCharged != null)
+    ) {
+      throw new Error("For a USD charge paid from an NPR account, enter the exact NPR amount shown on the bank statement.");
+    }
 
     // Replacing the shares is a delete-then-insert, so it must be atomic —
     // otherwise a failure between the two leaves the expense with no split.
@@ -139,7 +197,11 @@ export async function updateExpense(formData: FormData) {
           category_id: String(formData.get("category_id") ?? "") || null,
           vendor_id: String(formData.get("vendor_id") ?? "") || null,
           paid_by_user_id:
-            String(formData.get("paid_by_user_id") ?? "") || session.sub,
+            fundingSource === "personal"
+              ? String(formData.get("paid_by_user_id") ?? "") || session.sub
+              : null,
+          funding_source: fundingSource,
+          money_account_id: moneyAccountId,
           client: String(formData.get("client") ?? "") || null,
           note: String(formData.get("note") ?? "") || null,
           ...conv,
@@ -163,6 +225,7 @@ export async function updateExpense(formData: FormData) {
     });
 
     revalidatePath("/expenses");
+    revalidatePath("/funds");
     revalidatePath("/settlements");
     revalidatePath("/");
     return { error: null };
@@ -183,6 +246,7 @@ export async function toggleReimbursed(id: string, value: boolean) {
   ]);
 
   revalidatePath("/expenses");
+  revalidatePath("/funds");
   revalidatePath("/settlements");
 }
 
@@ -193,6 +257,7 @@ export async function deleteExpense(id: string) {
   await exec(`delete from public.expenses where id = $1`, [id]);
 
   revalidatePath("/expenses");
+  revalidatePath("/funds");
   revalidatePath("/");
 }
 
@@ -261,5 +326,6 @@ export async function retryConversion(id: string) {
   });
 
   revalidatePath("/expenses");
+  revalidatePath("/funds");
   revalidatePath("/");
 }

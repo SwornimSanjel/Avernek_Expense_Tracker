@@ -8,6 +8,7 @@ import TeamToggle from "@/components/TeamToggle";
 import AddMemberForm from "@/components/AddMemberForm";
 import SetPasswordForm from "@/components/SetPasswordForm";
 import { isAppOwner } from "@/lib/authz";
+import Icon from "@/components/Icons";
 
 export const dynamic = "force-dynamic";
 
@@ -30,12 +31,12 @@ export default async function SettingsPage() {
 
   return (
     <>
-      <PageHeader title="Settings" subtitle="You, the team, and categories." />
+      <PageHeader eyebrow="Workspace control" title="Settings" subtitle="Manage your profile, access, participants, and financial categories." />
 
       <div className="grid lg:grid-cols-2 gap-4">
         {/* Your profile */}
-        <div className="card p-5">
-          <h2 className="font-semibold mb-3">Your name</h2>
+        <div className="card p-5 md:p-6">
+          <div className="flex items-center gap-3 mb-4"><div className="stat-icon" style={{ color: "#b8a0fb" }}><Icon name="user" size={16} /></div><div><h2 className="section-title">Your profile</h2><p className="section-kicker mt-0.5">Identity used across the workspace</p></div></div>
           <p className="text-xs muted mb-3">
             Shown everywhere instead of your email.
           </p>
@@ -56,11 +57,12 @@ export default async function SettingsPage() {
         </div>
 
         {/* Team */}
-        <div className="card p-5">
-          <h2 className="font-semibold mb-3">Team</h2>
+        <div className="card p-5 md:p-6">
+          <div className="flex items-center gap-3 mb-4"><div className="stat-icon" style={{ color: "var(--blue)" }}><Icon name="users" size={16} /></div><div><h2 className="section-title">Team</h2><p className="section-kicker mt-0.5">Participants and allocation defaults</p></div></div>
           <div className="space-y-2">
             {users.map((u) => (
-              <div key={u.id} className="flex items-center gap-3 py-1">
+              <div key={u.id} className="list-row flex items-center gap-3 p-2 -mx-2 rounded-xl">
+                <div className="avatar !w-9 !h-9">{u.name.split(" ").map((part) => part[0]).slice(0, 2).join("")}</div>
                 <div className="flex-1 min-w-0">
                   <div className="font-medium truncate">
                     {u.name}
@@ -91,13 +93,13 @@ export default async function SettingsPage() {
 
         {canManage && (
           <>
-            <div className="card p-5">
-              <h2 className="font-semibold mb-3">Add member</h2>
+            <div className="card p-5 md:p-6">
+              <div className="flex items-center gap-3 mb-4"><div className="stat-icon" style={{ color: "var(--green)" }}><Icon name="plus" size={16} /></div><div><h2 className="section-title">Add member</h2><p className="section-kicker mt-0.5">Create a participant or login account</p></div></div>
               <AddMemberForm />
             </div>
 
-            <div className="card p-5">
-              <h2 className="font-semibold mb-3">Set a password</h2>
+            <div className="card p-5 md:p-6">
+              <div className="flex items-center gap-3 mb-4"><div className="stat-icon" style={{ color: "var(--amber)" }}><Icon name="settings" size={16} /></div><div><h2 className="section-title">Login access</h2><p className="section-kicker mt-0.5">Set or replace a member password</p></div></div>
               <SetPasswordForm
                 members={users.map((u) => ({
                   id: u.id,
@@ -111,11 +113,11 @@ export default async function SettingsPage() {
         )}
 
         {/* Categories */}
-        <div className="card p-5 lg:col-span-2">
-          <h2 className="font-semibold mb-3">Categories &amp; budgets</h2>
-          <div className="space-y-1">
+        <div className="card p-5 md:p-6 lg:col-span-2">
+          <div className="flex items-center gap-3 mb-4"><div className="stat-icon" style={{ color: "#b8a0fb" }}><Icon name="wallet" size={16} /></div><div><h2 className="section-title">Categories &amp; budgets</h2><p className="section-kicker mt-0.5">Structure reporting and optional monthly limits</p></div></div>
+          <div className="grid sm:grid-cols-2 gap-2">
             {categories.map((c) => (
-              <div key={c.id} className="flex items-center gap-3 py-1.5">
+              <div key={c.id} className="card-soft flex items-center gap-3 px-3 py-2.5">
                 <span className="flex-1">{c.name}</span>
                 <span className="tnum text-sm muted">
                   {c.monthly_budget != null
@@ -135,7 +137,9 @@ export default async function SettingsPage() {
               />
               <input
                 name="monthly_budget"
-                inputMode="decimal"
+                type="number"
+                min="0"
+                step="0.01"
                 placeholder="Budget"
                 className="input tnum !w-28"
               />

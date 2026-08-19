@@ -20,7 +20,7 @@ export default function SettlementRowActions({
         Edit
       </button>
       {open && (
-        <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/50">
+        <div className="modal-backdrop">
           <form
             action={(formData) =>
               start(async () => {
@@ -29,12 +29,12 @@ export default function SettlementRowActions({
                 else setOpen(false);
               })
             }
-            className="w-full md:max-w-md card !rounded-b-none md:!rounded-2xl p-5 space-y-4"
+            className="modal-panel md:max-w-md p-5 md:p-6 space-y-4"
           >
             <input type="hidden" name="settlement_id" value={settlement.id} />
-            <div className="flex items-center justify-between">
+            <div className="modal-header">
               <h2 className="text-lg font-bold">Edit reimbursement</h2>
-              <button type="button" onClick={() => setOpen(false)} className="muted px-2">✕</button>
+              <button type="button" onClick={() => setOpen(false)} className="icon-btn">✕</button>
             </div>
             <div className="grid grid-cols-2 gap-2">
               <label className="block text-xs muted">

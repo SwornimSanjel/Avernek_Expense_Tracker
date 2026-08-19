@@ -1,5 +1,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { one } from "@/lib/db";
+import { isAuthBypassEnabled } from "./bypass";
 import {
   SESSION_COOKIE,
   SESSION_MAX_AGE_SECONDS,
@@ -18,6 +20,35 @@ import {
 
 /** The signed-in user, or null. */
 export async function getSession(): Promise<Session | null> {
+  if (isAuthBypassEnabled()) {
+    const admin = await one<{
+      id: string;
+      email: string;
+      name: string;
+      is_admin: boolean;
+    }>(
+      `select id, email, name, is_admin
+         from public.users
+        where is_admin = true
+        order by last_login_at desc nulls last, id
+        limit 1`
+    );
+
+    if (!admin) {
+      throw new Error(
+        "AUTH_BYPASS is enabled, but the database has no administrator account."
+      );
+    }
+
+    return {
+      sub: admin.id,
+      email: admin.email,
+      name: admin.name,
+      isAdmin: true,
+      exp: Math.floor(Date.now() / 1000) + SESSION_MAX_AGE_SECONDS,
+    };
+  }
+
   const store = await cookies();
   return verifySession(store.get(SESSION_COOKIE)?.value);
 }

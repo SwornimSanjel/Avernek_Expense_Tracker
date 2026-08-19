@@ -5,6 +5,11 @@ import { addRecurring } from "@/app/(app)/subscriptions/actions";
 import type { AppUser, Category, Vendor } from "@/lib/types";
 import ShareAllocationFields from "./ShareAllocationFields";
 
+function today() {
+  const date = new Date();
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
+}
+
 export default function AddRecurring({
   categories,
   vendors,
@@ -24,12 +29,12 @@ export default function AddRecurring({
   if (!open)
     return (
       <button onClick={() => setOpen(true)} className="btn btn-primary">
-        + Add subscription
+        <span className="text-base leading-none">＋</span> Add subscription
       </button>
     );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/50">
+    <div className="modal-backdrop">
       <form
         action={(fd) =>
           start(async () => {
@@ -38,11 +43,11 @@ export default function AddRecurring({
             if (result?.error) window.alert(result.error);
           })
         }
-        className="w-full md:max-w-lg card !rounded-b-none md:!rounded-2xl p-5 space-y-3 max-h-[92vh] overflow-y-auto"
+        className="modal-panel md:max-w-lg p-5 md:p-6 space-y-4"
       >
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-bold">Add subscription</h2>
-          <button type="button" onClick={() => setOpen(false)} className="muted px-2">
+        <div className="modal-header">
+          <div><h2 className="text-lg font-bold">Add subscription</h2><p className="text-xs muted mt-1">Track a recurring cost and upcoming renewal.</p></div>
+          <button type="button" onClick={() => setOpen(false)} className="icon-btn">
             ✕
           </button>
         </div>
@@ -56,7 +61,9 @@ export default function AddRecurring({
         <div className="flex gap-2">
           <input
             name="amount"
-            inputMode="decimal"
+            type="number"
+            min="0.01"
+            step="0.01"
             required
             value={amount}
             onChange={(event) => setAmount(event.target.value)}
@@ -83,7 +90,7 @@ export default function AddRecurring({
             name="next_renewal_date"
             type="date"
             required
-            defaultValue={new Date().toISOString().slice(0, 10)}
+            defaultValue={today()}
             className="input mt-1"
           />
         </label>

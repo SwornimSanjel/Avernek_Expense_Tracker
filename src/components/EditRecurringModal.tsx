@@ -23,7 +23,7 @@ export default function EditRecurringModal({
   const [busy, start] = useTransition();
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/50">
+    <div className="modal-backdrop">
       <form
         action={(formData) =>
           start(async () => {
@@ -32,12 +32,12 @@ export default function EditRecurringModal({
             else onClose();
           })
         }
-        className="w-full md:max-w-lg card !rounded-b-none md:!rounded-2xl p-5 space-y-4 max-h-[92vh] overflow-y-auto"
+        className="modal-panel md:max-w-lg p-5 md:p-6 space-y-4"
       >
         <input type="hidden" name="recurring_id" value={recurring.id} />
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-bold">Edit subscription</h2>
-          <button type="button" onClick={onClose} className="muted px-2">✕</button>
+        <div className="modal-header">
+          <div><h2 className="text-lg font-bold">Edit subscription</h2><p className="text-xs muted mt-1">Change the renewal, amount, payer, or split.</p></div>
+          <button type="button" onClick={onClose} className="icon-btn">✕</button>
         </div>
 
         <label className="block text-xs muted">
@@ -47,7 +47,9 @@ export default function EditRecurringModal({
         <div className="flex gap-2">
           <input
             name="amount"
-            inputMode="decimal"
+            type="number"
+            min="0.01"
+            step="0.01"
             required
             value={amount}
             onChange={(event) => setAmount(event.target.value)}

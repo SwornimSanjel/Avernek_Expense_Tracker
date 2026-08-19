@@ -9,6 +9,7 @@ import {
 import type { AppUser, Category, Currency, Cycle, Recurring, Vendor } from "@/lib/types";
 import ShareAllocationFields from "./ShareAllocationFields";
 import EditRecurringModal from "./EditRecurringModal";
+import Icon from "./Icons";
 
 export default function RecurringRow({
   id,
@@ -38,6 +39,7 @@ export default function RecurringRow({
   vendors: Vendor[];
 }) {
   const [open, setOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [amount, setAmount] = useState(String(initialAmount));
   const [busy, start] = useTransition();
@@ -52,32 +54,24 @@ export default function RecurringRow({
       >
         Mark paid
       </button>
-      <button
-        disabled={busy}
-        onClick={() => setEditing(true)}
-        className="btn !h-8 !px-3 text-xs"
-      >
-        Edit
-      </button>
-      <button
-        disabled={busy}
-        onClick={() => start(() => toggleActive(id, !isActive))}
-        className="btn !h-8 !px-3 text-xs"
-      >
-        {isActive ? "Pause" : "Resume"}
-      </button>
-      <button
-        disabled={busy}
-        onClick={() => start(() => deleteRecurring(id))}
-        className="w-8 h-8 rounded-lg text-xs"
-        style={{ color: "var(--red)" }}
-        aria-label="Delete"
-      >
-        ✕
-      </button>
+      <div className="relative" onMouseLeave={() => setMenuOpen(false)}>
+        <button disabled={busy} onClick={() => setMenuOpen((value) => !value)} className="icon-btn !w-8 !h-8" aria-label="Subscription actions">
+          <Icon name="more" size={17} />
+        </button>
+        {menuOpen && (
+          <div className="absolute right-0 top-9 z-20 w-44 card !rounded-xl p-1 text-xs shadow-xl">
+            <button className="w-full rounded-lg px-3 py-2 text-left hover:bg-white/[.04]" onClick={() => { setMenuOpen(false); setEditing(true); }}>Edit details</button>
+            <button className="w-full rounded-lg px-3 py-2 text-left hover:bg-white/[.04]" onClick={() => start(async () => { await toggleActive(id, !isActive); setMenuOpen(false); })}>{isActive ? "Pause subscription" : "Resume subscription"}</button>
+            <button className="w-full rounded-lg px-3 py-2 text-left hover:bg-white/[.04]" style={{ color: "var(--red)" }} onClick={() => {
+              if (!window.confirm("Delete this subscription? Existing expense records will stay.")) return;
+              start(async () => { await deleteRecurring(id); setMenuOpen(false); });
+            }}>Delete subscription</button>
+          </div>
+        )}
+      </div>
 
       {open && (
-        <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/50">
+        <div className="modal-backdrop">
           <form
             action={(formData) =>
               start(async () => {
@@ -85,10 +79,10 @@ export default function RecurringRow({
                 setOpen(false);
               })
             }
-            className="w-full md:max-w-lg card !rounded-b-none md:!rounded-2xl p-5 space-y-4 max-h-[92vh] overflow-y-auto"
+            className="modal-panel md:max-w-lg p-5 md:p-6 space-y-4"
           >
             <input type="hidden" name="recurring_id" value={id} />
-            <div className="flex items-center justify-between">
+            <div className="modal-header">
               <div>
                 <h2 className="text-lg font-bold">
                   Log {isAnnual ? "annual" : "monthly"} payment
@@ -97,7 +91,7 @@ export default function RecurringRow({
                   Change this {isAnnual ? "renewal" : "month"} without changing future defaults.
                 </p>
               </div>
-              <button type="button" onClick={() => setOpen(false)} className="muted px-2">
+              <button type="button" onClick={() => setOpen(false)} className="icon-btn">
                 ✕
               </button>
             </div>
@@ -107,7 +101,9 @@ export default function RecurringRow({
                 Total charged
                 <input
                   name="amount"
-                  inputMode="decimal"
+                  type="number"
+                  min="0.01"
+                  step="0.01"
                   required
                   value={amount}
                   onChange={(event) => setAmount(event.target.value)}

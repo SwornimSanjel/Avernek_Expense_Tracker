@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Avernek Expense Tracker",
-  description: "Internal spend tracker for Avernek Technologies.",
+  title: "Avernek Finance Tracker",
+  description: "Internal expense, income, and client payment tracker for Avernek Technologies.",
   icons: {
     icon: "/avernek-logo.jpg",
   },

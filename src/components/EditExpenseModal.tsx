@@ -2,7 +2,15 @@
 
 import { useState, useTransition } from "react";
 import { updateExpense } from "@/app/(app)/expenses/actions";
-import type { AppUser, Category, Currency, Expense, Vendor } from "@/lib/types";
+import type {
+  AppUser,
+  Category,
+  Currency,
+  Expense,
+  ExpenseFundingSource,
+  MoneyAccount,
+  Vendor,
+} from "@/lib/types";
 import ShareAllocationFields from "./ShareAllocationFields";
 
 export default function EditExpenseModal({
@@ -10,20 +18,34 @@ export default function EditExpenseModal({
   categories,
   vendors,
   users,
+  moneyAccounts,
   onClose,
 }: {
   expense: Expense;
   categories: Category[];
   vendors: Vendor[];
   users: AppUser[];
+  moneyAccounts: MoneyAccount[];
   onClose: () => void;
 }) {
   const [amount, setAmount] = useState(String(expense.amount));
   const [currency, setCurrency] = useState<Currency>(expense.currency);
+  const [fundingSource, setFundingSource] = useState<ExpenseFundingSource>(
+    expense.funding_source ?? "personal"
+  );
+  const [moneyAccountId, setMoneyAccountId] = useState(expense.money_account_id ?? "");
   const [busy, start] = useTransition();
+  const matchingAccounts = moneyAccounts.filter(
+    (account) =>
+      account.is_active &&
+      (account.currency === currency || (currency === "USD" && account.currency === "NPR"))
+  );
+  const selectedMoneyAccount = matchingAccounts.find((account) => account.id === moneyAccountId);
+  const isNprAccountPayingUsd =
+    currency === "USD" && selectedMoneyAccount?.currency === "NPR";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/50">
+    <div className="modal-backdrop">
       <form
         action={(formData) =>
           start(async () => {
@@ -32,12 +54,12 @@ export default function EditExpenseModal({
             else onClose();
           })
         }
-        className="w-full md:max-w-lg card !rounded-b-none md:!rounded-2xl p-5 space-y-4 max-h-[92vh] overflow-y-auto"
+        className="modal-panel md:max-w-lg p-5 md:p-6 space-y-4"
       >
         <input type="hidden" name="expense_id" value={expense.id} />
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-bold">Edit expense</h2>
-          <button type="button" onClick={onClose} className="muted px-2">✕</button>
+        <div className="modal-header">
+          <div><h2 className="text-lg font-bold">Edit expense</h2><p className="text-xs muted mt-1">Keep founder investment separate from company operating money.</p></div>
+          <button type="button" onClick={onClose} className="icon-btn">✕</button>
         </div>
 
         <div className="flex gap-2">
@@ -45,7 +67,9 @@ export default function EditExpenseModal({
             Amount
             <input
               name="amount"
-              inputMode="decimal"
+              type="number"
+              min="0.01"
+              step="0.01"
               required
               value={amount}
               onChange={(event) => setAmount(event.target.value)}
@@ -57,7 +81,10 @@ export default function EditExpenseModal({
             <select
               name="currency"
               value={currency}
-              onChange={(event) => setCurrency(event.target.value as Currency)}
+              onChange={(event) => {
+                setCurrency(event.target.value as Currency);
+                setMoneyAccountId("");
+              }}
               className="input mt-1"
             >
               <option value="NPR">NPR</option>
@@ -69,10 +96,13 @@ export default function EditExpenseModal({
         {currency === "USD" && (
           <div className="grid grid-cols-2 gap-2">
             <label className="block text-xs muted">
-              Actual NPR charged
+              Actual NPR charged{isNprAccountPayingUsd ? " · required" : ""}
               <input
                 name="actual_npr_charged"
-                inputMode="decimal"
+                type="number"
+                min="0.01"
+                step="0.01"
+                required={isNprAccountPayingUsd}
                 defaultValue={expense.actual_npr_charged ?? ""}
                 placeholder="Optional"
                 className="input tnum mt-1"
@@ -82,7 +112,9 @@ export default function EditExpenseModal({
               Manual NPR/USD rate
               <input
                 name="manual_rate"
-                inputMode="decimal"
+                type="number"
+                min="0.01"
+                step="0.01"
                 defaultValue={expense.fx_source === "manual" ? expense.fx_rate_to_npr : ""}
                 placeholder="Use NRB automatically"
                 className="input tnum mt-1"
@@ -90,6 +122,51 @@ export default function EditExpenseModal({
             </label>
           </div>
         )}
+
+        <div className="card-soft p-3.5">
+          <div className="field-label mb-2">Which money paid for this?</div>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => setFundingSource("personal")}
+              className={`funding-choice ${fundingSource === "personal" ? "funding-choice-active" : ""}`}
+            >
+              <strong>Founder/team investment</strong>
+              <span>Pre-registration or own-pocket money</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setFundingSource("company_funds")}
+              className={`funding-choice ${fundingSource === "company_funds" ? "funding-choice-active" : ""}`}
+            >
+              <strong>Company operating money</strong>
+              <span>Uses client-earned company money</span>
+            </button>
+          </div>
+          <input type="hidden" name="funding_source" value={fundingSource} />
+          {fundingSource === "company_funds" && (
+            <div className="mt-3">
+              <label className="block text-xs muted">
+                Paid from which company-money account?
+                <select
+                  name="money_account_id"
+                  required
+                  value={matchingAccounts.some((account) => account.id === moneyAccountId) ? moneyAccountId : ""}
+                  onChange={(event) => setMoneyAccountId(event.target.value)}
+                  className="input mt-1"
+                >
+                  <option value="" disabled>Choose account</option>
+                  {matchingAccounts.map((account) => (
+                    <option key={account.id} value={account.id}>
+                      {account.name}{account.currency !== currency ? ` · charged in ${account.currency}` : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <p className="field-help">This reduces the selected company-money balance and is excluded from founder/team investment.</p>
+            </div>
+          )}
+        </div>
 
         <div className="grid grid-cols-2 gap-2">
           <label className="block text-xs muted">
@@ -111,16 +188,18 @@ export default function EditExpenseModal({
               className="input mt-1"
             />
           </label>
-          <label className="block text-xs muted">
-            Paid by
-            <select
-              name="paid_by_user_id"
-              defaultValue={expense.paid_by_user_id ?? ""}
-              className="input mt-1"
-            >
-              {users.map((user) => <option key={user.id} value={user.id}>{user.name}</option>)}
-            </select>
-          </label>
+          {fundingSource === "personal" && (
+            <label className="block text-xs muted">
+              Invested / paid personally by
+              <select
+                name="paid_by_user_id"
+                defaultValue={expense.paid_by_user_id ?? ""}
+                className="input mt-1"
+              >
+                {users.map((user) => <option key={user.id} value={user.id}>{user.name}</option>)}
+              </select>
+            </label>
+          )}
           <label className="block text-xs muted">
             Category
             <select name="category_id" defaultValue={expense.category_id ?? ""} className="input mt-1">
@@ -137,15 +216,17 @@ export default function EditExpenseModal({
           </label>
         </div>
 
-        <ShareAllocationFields
-          users={users}
-          total={amount}
-          currency={currency}
-          initialShares={(expense.expense_shares ?? []).map((share) => ({
-            userId: share.user_id,
-            amount: Number(share.amount),
-          }))}
-        />
+        {fundingSource === "personal" && (
+          <ShareAllocationFields
+            users={users}
+            total={amount}
+            currency={currency}
+            initialShares={(expense.expense_shares ?? []).map((share) => ({
+              userId: share.user_id,
+              amount: Number(share.amount),
+            }))}
+          />
+        )}
 
         <label className="block text-xs muted">
           Client

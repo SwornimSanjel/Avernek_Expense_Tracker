@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE, verifySession } from "@/lib/auth/session";
+import { isAuthBypassEnabled } from "@/lib/auth/bypass";
 
 /**
  * Gates every request on the signed session cookie.
@@ -10,6 +11,13 @@ import { SESSION_COOKIE, verifySession } from "@/lib/auth/session";
  */
 export async function middleware(request: NextRequest) {
   const path = request.nextUrl.pathname;
+
+  if (isAuthBypassEnabled()) {
+    if (path.startsWith("/login")) {
+      return NextResponse.redirect(new URL("/", request.url));
+    }
+    return NextResponse.next();
+  }
 
   const isPublic =
     path.startsWith("/login") ||

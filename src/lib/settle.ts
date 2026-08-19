@@ -27,7 +27,7 @@ export function computeBalances(
   const fronted = new Map<string, number>();
   const assigned = new Map<string, number>();
   for (const e of expenses) {
-    if (e.is_reimbursed || e.amount_npr == null) continue;
+    if (e.is_reimbursed || e.amount_npr == null || e.funding_source === "company_funds") continue;
     const amountNpr = Number(e.amount_npr);
     if (e.paid_by_user_id) {
       fronted.set(
