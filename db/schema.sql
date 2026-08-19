@@ -139,14 +139,64 @@ create table if not exists public.expenses (
     (funding_source = 'company_funds' and money_account_id is not null)
   )
 );
+-- CREATE TABLE IF NOT EXISTS skips the entire statement on a database that
+-- already has `expenses`, columns and constraints included. Every column added
+-- after the table first shipped therefore has to be reconciled here too, and
+-- before the indexes below, which reference them.
+alter table public.expenses add column if not exists billing_month date;
+
+-- Defaulting to 'personal' classifies existing historical rows as founder/team
+-- money, which is what they were before company funds were tracked.
+alter table public.expenses
+  add column if not exists funding_source text not null default 'personal';
+alter table public.expenses
+  add column if not exists money_account_id uuid
+    references public.money_accounts (id) on delete set null;
+
+-- Constraints are not "if not exists"-able, so each is guarded by a catalogue
+-- lookup instead. The names match the ones Postgres generates for the inline
+-- definitions above, so a fresh install skips these blocks.
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conname = 'expenses_funding_source_check'
+      and conrelid = 'public.expenses'::regclass
+  ) then
+    alter table public.expenses
+      add constraint expenses_funding_source_check
+      check (funding_source in ('personal','company_funds'));
+  end if;
+end $$;
+
+-- One expense belongs to exactly one money ledger. Clear any stale pairing
+-- before the constraint that forbids it is added.
+update public.expenses
+   set money_account_id = null
+ where funding_source = 'personal' and money_account_id is not null;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conname = 'expenses_money_ledger_check'
+      and conrelid = 'public.expenses'::regclass
+  ) then
+    alter table public.expenses
+      add constraint expenses_money_ledger_check
+      check (
+        (funding_source = 'personal' and money_account_id is null)
+        or
+        (funding_source = 'company_funds' and money_account_id is not null)
+      );
+  end if;
+end $$;
+
 create index if not exists expenses_by_date on public.expenses (expense_date desc);
 create index if not exists expenses_by_category on public.expenses (category_id);
 create index if not exists expenses_by_payer on public.expenses (paid_by_user_id);
 create index if not exists expenses_by_money_account
   on public.expenses (money_account_id, expense_date desc);
-
--- Existing projects need the column too (CREATE TABLE IF NOT EXISTS does not add it).
-alter table public.expenses add column if not exists billing_month date;
 
 -- Exact responsibility allocations. `amount` is in the parent expense currency;
 -- `amount_npr` is frozen with the parent expense and powers settlements.
@@ -217,6 +267,25 @@ create table if not exists public.income_agreements (
   created_at                timestamptz not null default now(),
   updated_at                timestamptz not null default now()
 );
+-- Added after income_agreements first shipped; see the note above expenses.
+alter table public.income_agreements
+  add column if not exists service_end_date date;
+alter table public.income_agreements
+  add column if not exists service_type text not null default 'full_track';
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conname = 'income_agreements_service_type_check'
+      and conrelid = 'public.income_agreements'::regclass
+  ) then
+    alter table public.income_agreements
+      add constraint income_agreements_service_type_check
+      check (service_type in ('ai_automation','marketing','full_track'));
+  end if;
+end $$;
+
 create index if not exists income_agreements_by_client
   on public.income_agreements (client_name);
 create index if not exists income_agreements_by_status
@@ -241,10 +310,16 @@ create table if not exists public.income_payments (
     or (payment_for = 'recurring' and billing_period_start is not null)
   )
 );
+alter table public.income_payments
+  add column if not exists money_account_id uuid
+    references public.money_accounts (id) on delete set null;
+
 create index if not exists income_payments_by_agreement
   on public.income_payments (agreement_id, paid_on desc);
 create index if not exists income_payments_by_period
   on public.income_payments (agreement_id, billing_period_start);
+create index if not exists income_payments_by_money_account
+  on public.income_payments (money_account_id, paid_on desc);
 
 -- Moving money between accounts is not income or an expense. Both sides are
 -- stored so NPR -> USD exchanges preserve the remaining balance in each unit.
