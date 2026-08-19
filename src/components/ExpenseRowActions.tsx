@@ -18,6 +18,7 @@ export default function ExpenseRowActions({
   vendors,
   users,
   moneyAccounts,
+  clients,
 }: {
   expense: Expense;
   isReimbursed: boolean;
@@ -26,6 +27,7 @@ export default function ExpenseRowActions({
   vendors: Vendor[];
   users: AppUser[];
   moneyAccounts: MoneyAccount[];
+  clients: string[];
 }) {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -102,6 +104,7 @@ export default function ExpenseRowActions({
           vendors={vendors}
           users={users}
           moneyAccounts={moneyAccounts}
+          clients={clients}
           onClose={() => setEditing(false)}
         />
       )}

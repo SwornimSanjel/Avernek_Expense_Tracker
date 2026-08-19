@@ -32,11 +32,14 @@ export default async function ExpensesPage({
   const session = await requireSession();
   const canManage = canManageExpenses(session);
 
-  const [cats, vends, team, accounts] = await Promise.all([
+  const [cats, vends, team, accounts, agreementClients] = await Promise.all([
     query<Category>(`select * from public.categories order by name`),
     query<Vendor>(`select * from public.vendors order by name`),
     query<AppUser>(`select id, name, email, is_core_member, is_admin from public.users order by name`),
     query<MoneyAccount>(`select * from public.money_accounts where is_active = true order by currency, name`),
+    query<{ client_name: string }>(
+      `select distinct client_name from public.income_agreements order by client_name`
+    ),
   ]);
 
   // Filters are optional, so the WHERE clause is assembled from whichever
@@ -92,6 +95,7 @@ export default async function ExpensesPage({
   const vendors = vends as Vendor[];
   const users = team as AppUser[];
   const moneyAccounts = accounts as MoneyAccount[];
+  const clientNames = agreementClients.map((row) => row.client_name);
   const sourceRows = expenses.map((expense) => ({
     ...expense,
     expense_shares: shareRows.filter(
@@ -154,6 +158,7 @@ export default async function ExpensesPage({
             vendors={vendors}
             users={users}
             moneyAccounts={moneyAccounts}
+            clients={clientNames}
             meId={session.sub}
           />
         ) : undefined}
@@ -339,6 +344,7 @@ export default async function ExpensesPage({
                 vendors={vendors}
                 users={users}
                 moneyAccounts={moneyAccounts}
+                clients={clientNames}
               />
             )}
           </div>

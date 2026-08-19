@@ -21,7 +21,7 @@ export default function AddIncomeAgreement({ moneyAccounts }: { moneyAccounts: M
   if (!open) {
     return (
       <button onClick={() => setOpen(true)} className="btn btn-primary">
-        <span className="text-base leading-none">＋</span> Add agreement
+        <span className="text-base leading-none">＋</span> Add client
       </button>
     );
   }
@@ -35,7 +35,7 @@ export default function AddIncomeAgreement({ moneyAccounts }: { moneyAccounts: M
         <div className="modal-header">
           <div>
             <h2 className="text-lg font-bold">New client agreement</h2>
-            <p className="text-xs muted">Ads live is Day 1. The next service cycle starts exactly 30 days later.</p>
+            <p className="text-xs muted">Ads / automation live is Service Day 1. Recurring billing starts 30 days after the first setup payment date.</p>
           </div>
           <button type="button" onClick={() => setOpen(false)} className="icon-btn">
             ✕

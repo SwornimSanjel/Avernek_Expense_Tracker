@@ -78,7 +78,7 @@ function agreementValues(formData: FormData) {
     return { error: "Choose AI automation, marketing, or the full track." } as const;
   }
   if (![agreementDate, adsLiveDate, setupDueDate].every(validDate)) {
-    return { error: "Enter the agreement, setup due, and ads-live dates." } as const;
+    return { error: "Enter the agreement, setup due, and ads / automation-live dates." } as const;
   }
   if (setupAmount == null || recurringAmount == null) {
     return { error: "Setup and recurring amounts must be zero or more." } as const;
@@ -238,7 +238,7 @@ export async function updateIncomeAgreement(
     Number(current.recurring_payment_count) > 0 &&
     current.ads_live_date !== value.adsLiveDate
   ) {
-    return { error: "Ads-live billing date cannot change after recurring payments exist.", ok: null };
+    return { error: "The ads / automation-live service date cannot change after recurring payments exist.", ok: null };
   }
   if (
     Number(current.recurring_payment_count) > 0 &&
@@ -308,12 +308,20 @@ export async function recordIncomePayment(
   const agreement = await one<{
     client_name: string;
     ads_live_date: string;
+    billing_anchor_date: string;
     currency: Currency;
     setup_amount: number | string;
     recurring_amount: number | string;
   }>(
-    `select client_name, ads_live_date, currency, setup_amount, recurring_amount
-       from public.income_agreements where id = $1`,
+    `select a.client_name, a.ads_live_date, a.currency,
+            a.setup_amount, a.recurring_amount,
+            coalesce(
+              (select min(p.paid_on)
+                 from public.income_payments p
+                where p.agreement_id = a.id and p.payment_for = 'setup'),
+              a.ads_live_date
+            ) as billing_anchor_date
+       from public.income_agreements a where a.id = $1`,
     [agreementId]
   );
   if (!agreement) return { error: "Agreement no longer exists.", ok: null };
@@ -330,10 +338,10 @@ export async function recordIncomePayment(
       return { error: "Choose which 30-day service cycle this payment covers.", ok: null };
     }
     const anchored = Array.from({ length: 240 }, (_, index) =>
-      addCalendarDays(agreement.ads_live_date, (index + 1) * 30)
+      addCalendarDays(agreement.billing_anchor_date, (index + 1) * 30)
     ).includes(billingPeriodStart);
     if (!anchored) {
-      return { error: "That billing period is not an exact 30-day cycle from ads-live Day 1.", ok: null };
+      return { error: "That billing period is not an exact 30-day cycle from the first setup payment date.", ok: null };
     }
     period = billingPeriodStart;
   }
@@ -406,6 +414,22 @@ export async function setIncomeAgreementStatus(
     [status, id]
   );
   revalidatePath("/income");
+}
+
+export async function deleteIncomeAgreement(id: string) {
+  await requireIncomeAdmin();
+  const agreement = await one<{ client_name: string }>(
+    `select client_name from public.income_agreements where id = $1`,
+    [id]
+  );
+  if (!agreement) return;
+
+  // income_payments is intentionally ON DELETE CASCADE. Removing a client
+  // agreement therefore removes its receipts from the account ledger too.
+  await exec(`delete from public.income_agreements where id = $1`, [id]);
+  revalidatePath("/income");
+  revalidatePath("/funds");
+  revalidatePath("/");
 }
 
 export async function deleteIncomePayment(id: string) {

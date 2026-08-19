@@ -7,6 +7,7 @@ import type {
   MoneyAccount,
   SetupPaymentTerms,
 } from "@/lib/types";
+import { addCalendarDays } from "@/lib/income";
 
 const today = () => {
   const date = new Date();
@@ -30,6 +31,7 @@ export default function IncomeAgreementFields({
     agreement ? String(Number(agreement.setup_amount)) : ""
   );
   const [initialPaid, setInitialPaid] = useState("");
+  const [initialPaidOn, setInitialPaidOn] = useState(today());
   const [currency, setCurrency] = useState<Currency>(agreement?.currency ?? "NPR");
   const dueAmount = useMemo(
     () => Math.max(0, Number(setupAmount || 0) - Number(initialPaid || 0)),
@@ -78,7 +80,7 @@ export default function IncomeAgreementFields({
               className="input"
             />
           </Field>
-          <Field label="Ads live date · Service Day 1">
+          <Field label="Ads / automation live date · Service Day 1">
             <input
               name="ads_live_date"
               type="date"
@@ -86,7 +88,7 @@ export default function IncomeAgreementFields({
               defaultValue={agreement?.ads_live_date ?? today()}
               className="input"
             />
-            <p className="field-help">The next billing cycle starts exactly 30 days later.</p>
+            <p className="field-help">This is when delivery goes live. Recurring billing is timed separately from the first setup payment date.</p>
           </Field>
         </div>
       </FormSection>
@@ -169,7 +171,8 @@ export default function IncomeAgreementFields({
                   name="initial_paid_on"
                   type="date"
                   required
-                  defaultValue={today()}
+                  value={initialPaidOn}
+                  onChange={(event) => setInitialPaidOn(event.target.value)}
                   className="input"
                 />
               </Field>
@@ -184,6 +187,10 @@ export default function IncomeAgreementFields({
               <p className="sm:col-span-2 text-xs muted">
                 Both choices hold Avernek&apos;s money. Swornim Global IME is for non-VAT receipts; the company Global IME account is for VAT-bill receipts.
               </p>
+              <div className="sm:col-span-2 agreement-balance-preview">
+                <span>First recurring payment date · 30 days after this payment</span>
+                <strong className="tnum">{addCalendarDays(initialPaidOn, 30)}</strong>
+              </div>
             </div>
           )}
         </FormSection>
@@ -222,7 +229,7 @@ export default function IncomeAgreementFields({
                 className="input"
               >
                 <option value="full_upfront">Full setup upfront</option>
-                <option value="half_advance">Advance + rest on ads-live day</option>
+                <option value="half_advance">Advance + rest on ads / automation-live day</option>
                 <option value="custom">Custom / partial payments</option>
               </select>
             </Field>

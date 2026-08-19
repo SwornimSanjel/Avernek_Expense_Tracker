@@ -19,6 +19,7 @@ export default function EditExpenseModal({
   vendors,
   users,
   moneyAccounts,
+  clients,
   onClose,
 }: {
   expense: Expense;
@@ -26,6 +27,7 @@ export default function EditExpenseModal({
   vendors: Vendor[];
   users: AppUser[];
   moneyAccounts: MoneyAccount[];
+  clients: string[];
   onClose: () => void;
 }) {
   const [amount, setAmount] = useState(String(expense.amount));
@@ -229,8 +231,17 @@ export default function EditExpenseModal({
         )}
 
         <label className="block text-xs muted">
-          Client
-          <input name="client" defaultValue={expense.client ?? ""} className="input mt-1" />
+          Client / project (optional)
+          <input
+            name="client"
+            list={`edit-expense-client-options-${expense.id}`}
+            defaultValue={expense.client ?? ""}
+            className="input mt-1"
+          />
+          <datalist id={`edit-expense-client-options-${expense.id}`}>
+            {clients.map((client) => <option key={client} value={client} />)}
+          </datalist>
+          <span className="field-help">Leave blank when this is a shared company cost.</span>
         </label>
         <label className="block text-xs muted">
           Note

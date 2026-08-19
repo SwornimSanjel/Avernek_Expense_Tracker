@@ -1,20 +1,30 @@
+import Link from "next/link";
 import { query } from "@/lib/db";
 import { requireSession } from "@/lib/auth/server";
 import { isAppOwner } from "@/lib/authz";
-import { EmptyState, PageHeader, StatTile } from "@/components/ui";
+import { EmptyState, LedgerCard, PageHeader, SectionHeader, StatTile } from "@/components/ui";
 import Icon from "@/components/Icons";
 import AddIncomeAgreement from "@/components/AddIncomeAgreement";
 import RecordIncomePayment from "@/components/RecordIncomePayment";
 import IncomeAgreementControls from "@/components/IncomeAgreementControls";
 import DeleteIncomePayment from "@/components/DeleteIncomePayment";
 import {
+  daysUntilDate,
   formatIncomeMoney,
   periodLabel,
   serviceTypeLabel,
   setupTermsLabel,
   summarizeIncomeAgreement,
 } from "@/lib/income";
-import type { Currency, IncomeAgreement, IncomePayment, MoneyAccount } from "@/lib/types";
+import { computeMoneyAccountBalances, expenseAmountFromAccount } from "@/lib/funds";
+import type {
+  Currency,
+  Expense,
+  IncomeAgreement,
+  IncomePayment,
+  MoneyAccount,
+  MoneyTransfer,
+} from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -28,10 +38,23 @@ function addTotal(map: Map<string, number>, currency: Currency, amount: number) 
   map.set(currency, (map.get(currency) ?? 0) + amount);
 }
 
+type CompanyExpense = Expense & {
+  category_name: string | null;
+  vendor_name: string | null;
+};
+
+function dueTimingLabel(date: string | null) {
+  if (!date) return "No pending deadline";
+  const days = daysUntilDate(date);
+  if (days < 0) return `${Math.abs(days)} day${days === -1 ? "" : "s"} overdue`;
+  if (days === 0) return "Due today";
+  return `Due in ${days} day${days === 1 ? "" : "s"}`;
+}
+
 export default async function IncomePage() {
   const session = await requireSession();
   const canManage = isAppOwner(session);
-  const [agreements, payments, moneyAccounts] = await Promise.all([
+  const [agreements, payments, moneyAccounts, companyExpenses, transfers] = await Promise.all([
     query<IncomeAgreement>(
       `select * from public.income_agreements
        order by case status when 'active' then 0 else 1 end, client_name, agreement_date desc`
@@ -41,6 +64,17 @@ export default async function IncomePage() {
     ),
     query<MoneyAccount>(
       `select * from public.money_accounts where is_active = true order by currency, name`
+    ),
+    query<CompanyExpense>(
+      `select e.*, c.name as category_name, v.name as vendor_name
+         from public.expenses e
+         left join public.categories c on c.id = e.category_id
+         left join public.vendors v on v.id = e.vendor_id
+        where e.funding_source = 'company_funds'
+        order by e.expense_date desc, e.created_at desc`
+    ),
+    query<MoneyTransfer>(
+      `select * from public.money_transfers order by transfer_date desc, created_at desc`
     ),
   ]);
 
@@ -54,8 +88,6 @@ export default async function IncomePage() {
   const dueNow = new Map<string, number>();
   const setupLeft = new Map<string, number>();
   const activeRecurring = new Map<string, number>();
-  const companyReceived = new Map<string, number>();
-  const personalReceived = new Map<string, number>();
 
   for (const agreement of agreements) {
     const summary = summaries.get(agreement.id)!;
@@ -66,17 +98,13 @@ export default async function IncomePage() {
       addTotal(activeRecurring, agreement.currency, Number(agreement.recurring_amount));
     }
   }
-  const agreementById = new Map(agreements.map((agreement) => [agreement.id, agreement]));
   const accountById = new Map(moneyAccounts.map((account) => [account.id, account]));
-  for (const payment of payments) {
-    const agreement = agreementById.get(payment.agreement_id);
-    if (!agreement) continue;
-    addTotal(
-      payment.received_in === "company" ? companyReceived : personalReceived,
-      agreement.currency,
-      Number(payment.amount)
-    );
-  }
+  const accountBalances = computeMoneyAccountBalances(
+    moneyAccounts,
+    payments,
+    companyExpenses,
+    transfers
+  );
 
   return (
     <>
@@ -92,7 +120,7 @@ export default async function IncomePage() {
         <StatTile
           label="Due now"
           value={totalsLabel(dueNow)}
-          hint="Setup milestones + recurring cycles"
+          hint="Setup due + recurring due; separated per client below"
           icon="clock"
           tone="amber"
         />
@@ -100,20 +128,163 @@ export default async function IncomePage() {
         <StatTile label="Active recurring" value={totalsLabel(activeRecurring)} hint="Expected every 30 days" icon="subscription" tone="accent" />
       </div>
 
-      <div className="grid sm:grid-cols-2 gap-3 mb-6">
-        <div className="card card-interactive p-4 flex items-center gap-4">
-          <div className="stat-icon" style={{ color: "var(--green)" }}><Icon name="bank" size={16} /></div>
-          <div><div className="stat-label">VAT receipts · company Global IME</div><div className="tnum text-xl font-bold mt-1">{totalsLabel(companyReceived)}</div><div className="text-xs muted mt-1">Money received in Avernek Technologies&apos; official account</div></div>
-        </div>
-        <div className="card card-interactive p-4 flex items-center gap-4">
-          <div className="stat-icon" style={{ color: "var(--blue)" }}><Icon name="user" size={16} /></div>
-          <div><div className="stat-label">Non-VAT receipts · Swornim Global IME</div><div className="tnum text-xl font-bold mt-1">{totalsLabel(personalReceived)}</div><div className="text-xs muted mt-1">Still Avernek company money; not Swornim&apos;s investment</div></div>
+      <div className="mb-6">
+        <SectionHeader
+          title="Company-money account balances"
+          subtitle="Receipts increase the selected account; company expenses and transfers reduce it immediately."
+        />
+        <div className="grid sm:grid-cols-2 gap-3 mt-3">
+          {accountBalances.map((item) => {
+            const accountIn = item.received + item.transferredIn;
+            const accountOut = item.spent + item.transferredOut;
+            const isOfficial = item.account.kind === "company_bank";
+            return (
+              <Link
+                key={item.account.id}
+                href={`/expenses?ledger=account:${item.account.id}`}
+                className="block"
+              >
+                <LedgerCard
+                  title={item.account.name}
+                  subtitle={isOfficial
+                    ? "Avernek Technologies official account · VAT-bill collections"
+                    : item.account.kind === "personal_custody"
+                      ? "Swornim-held account · non-VAT collections · still 100% company money"
+                      : "Company operating-money account"}
+                  badge={item.account.currency}
+                  moneyIn={formatIncomeMoney(accountIn, item.account.currency)}
+                  moneyOut={formatIncomeMoney(accountOut, item.account.currency)}
+                  balance={formatIncomeMoney(item.balance, item.account.currency)}
+                  outLabel="Spent / moved"
+                  note="Open the exact expenses deducted from this account"
+                  icon={isOfficial ? "bank" : "wallet"}
+                  tone={isOfficial ? "green" : "blue"}
+                />
+              </Link>
+            );
+          })}
         </div>
       </div>
 
+      <div className="mb-6">
+        <SectionHeader
+          title="Recent company-money spending"
+          subtitle="These debits are already subtracted from the account balances above; founder/team investment never appears here."
+          action={<Link href="/expenses?ledger=company" className="btn !h-9">View all expenses</Link>}
+        />
+        <div className="card overflow-hidden divide-y mt-3" style={{ borderColor: "var(--line)" }}>
+          {companyExpenses.length === 0 && (
+            <EmptyState
+              title="No company-money spending yet"
+              description="Expenses paid from either company-use account will appear here and reduce that account's balance."
+              icon="expense"
+            />
+          )}
+          {companyExpenses.slice(0, 8).map((expense) => {
+            const account = expense.money_account_id
+              ? accountById.get(expense.money_account_id)
+              : null;
+            const debit = account
+              ? expenseAmountFromAccount(expense, account)
+              : Number(expense.amount_npr ?? expense.amount);
+            const title = expense.note || expense.vendor_name || expense.category_name || "Company expense";
+            return (
+              <div key={expense.id} className="list-row px-4 py-3 flex items-center gap-3">
+                <div className="stat-icon !w-10 !h-10 shrink-0" style={{ color: "var(--red)" }}>
+                  <Icon name="expense" size={16} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="font-medium truncate">{title}</div>
+                  <div className="text-xs muted mt-0.5 truncate">
+                    {expense.expense_date} · {account?.name ?? "Company account"}
+                    {expense.client ? ` · client/project: ${expense.client}` : " · shared company cost"}
+                    {expense.vendor_name && expense.note ? ` · ${expense.vendor_name}` : ""}
+                  </div>
+                </div>
+                <div className="text-right shrink-0">
+                  <div className="tnum font-semibold" style={{ color: "var(--red)" }}>
+                    −{formatIncomeMoney(debit, account?.currency ?? expense.currency)}
+                  </div>
+                  {expense.currency !== account?.currency && (
+                    <div className="tnum text-xs muted">original {formatIncomeMoney(Number(expense.amount), expense.currency)}</div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {agreements.length > 0 && (
+        <div className="mb-6">
+          <SectionHeader
+            title={`Clients & collection status (${agreements.length})`}
+            subtitle="A compact portfolio view. Open any row for its full agreement, billing schedule, and payment history below."
+          />
+          <div className="card overflow-x-auto mt-3">
+            <table className="w-full min-w-[820px] text-sm">
+              <thead className="text-xs muted text-left">
+                <tr>
+                  <th className="px-4 py-3 font-medium">Client</th>
+                  <th className="px-4 py-3 font-medium text-right">Collected</th>
+                  <th className="px-4 py-3 font-medium text-right">Setup remaining</th>
+                  <th className="px-4 py-3 font-medium text-right">Recurring</th>
+                  <th className="px-4 py-3 font-medium">Next recurring date</th>
+                  <th className="px-4 py-3 font-medium text-right">Details</th>
+                </tr>
+              </thead>
+              <tbody>
+                {agreements.map((agreement) => {
+                  const summary = summaries.get(agreement.id)!;
+                  const recurringDays = summary.nextRecurringDueDate
+                    ? daysUntilDate(summary.nextRecurringDueDate)
+                    : null;
+                  return (
+                    <tr key={agreement.id} className="border-t" style={{ borderColor: "var(--line)" }}>
+                      <td className="px-4 py-3">
+                        <div className="font-medium">{agreement.client_name}</div>
+                        <div className="text-xs muted mt-0.5">{serviceTypeLabel(agreement.service_type)} · {agreement.status}</div>
+                      </td>
+                      <td className="px-4 py-3 text-right tnum font-medium">{formatIncomeMoney(summary.totalCollected, agreement.currency)}</td>
+                      <td className="px-4 py-3 text-right">
+                        <div className="tnum" style={{ color: summary.setupRemaining > 0 ? "var(--amber)" : "var(--green)" }}>
+                          {formatIncomeMoney(summary.setupRemaining, agreement.currency)}
+                        </div>
+                        <div className="text-xs muted mt-0.5">{summary.setupRemaining > 0 && summary.setupNextDueDate ? `due ${summary.setupNextDueDate}` : "setup settled"}</div>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <div className="tnum" style={{ color: summary.recurringDueNow > 0 ? "var(--amber)" : "var(--green)" }}>
+                          {formatIncomeMoney(summary.recurringDueNow, agreement.currency)} due now
+                        </div>
+                        <div className="text-xs muted mt-0.5">{formatIncomeMoney(Number(agreement.recurring_amount), agreement.currency)} every 30 days</div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="tnum">{summary.nextRecurringDueDate ?? "—"}</div>
+                        <div className="text-xs mt-0.5" style={{ color: recurringDays != null && recurringDays <= 0 ? "var(--amber)" : "var(--muted)" }}>
+                          {dueTimingLabel(summary.nextRecurringDueDate)}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <Link href={`#client-${agreement.id}`} className="btn !h-8">Open</Link>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {agreements.length > 0 && (
+        <div className="mb-3">
+          <SectionHeader title="Full client details" subtitle="Every added client keeps a complete agreement and payment record here." />
+        </div>
+      )}
+
       <div className="space-y-4">
         {agreements.length === 0 && (
-          <div className="card"><EmptyState title="No client agreements yet" description="Add the first agreement to track signed dates, ads-live Day 1, payments, and 30-day billing." icon="income" /></div>
+          <div className="card"><EmptyState title="No client agreements yet" description="Add the first agreement to track signed dates, ads / automation-live Day 1, payments, and 30-day billing." icon="income" /></div>
         )}
 
         {agreements.map((agreement) => {
@@ -121,6 +292,12 @@ export default async function IncomePage() {
             (payment) => payment.agreement_id === agreement.id
           );
           const summary = summaries.get(agreement.id)!;
+          const recurringDays = summary.nextRecurringDueDate
+            ? daysUntilDate(summary.nextRecurringDueDate)
+            : null;
+          const hasSetupPayment = agreementPayments.some(
+            (payment) => payment.payment_for === "setup"
+          );
           const setupProgress =
             Number(agreement.setup_amount) > 0
               ? Math.min(100, (summary.setupPaid / Number(agreement.setup_amount)) * 100)
@@ -137,7 +314,7 @@ export default async function IncomePage() {
           );
 
           return (
-            <section key={agreement.id} className="card overflow-hidden">
+            <section id={`client-${agreement.id}`} key={agreement.id} className="card overflow-hidden scroll-mt-6">
               <div className="p-5 flex flex-wrap items-start justify-between gap-4">
                 <div className="min-w-0 flex items-start gap-3">
                   <div className="avatar !w-11 !h-11 text-sm">{agreement.client_name.split(" ").map((part) => part[0]).slice(0, 2).join("").toUpperCase()}</div>
@@ -155,7 +332,7 @@ export default async function IncomePage() {
                     {agreement.contact_name ? ` · ${agreement.contact_name}` : ""}
                   </p>
                   <p className="text-xs muted mt-1">
-                    Signed {agreement.agreement_date} · ads live / Day 1 {agreement.ads_live_date}
+                    Signed {agreement.agreement_date} · ads / automation live · Service Day 1 {agreement.ads_live_date}
                   </p>
                   </div>
                 </div>
@@ -168,7 +345,11 @@ export default async function IncomePage() {
                       suggestedPeriod={summary.nextRecurringPeriodStart}
                       moneyAccounts={moneyAccounts}
                     />
-                    <IncomeAgreementControls agreement={agreement} moneyAccounts={moneyAccounts} />
+                    <IncomeAgreementControls
+                      agreement={agreement}
+                      moneyAccounts={moneyAccounts}
+                      paymentCount={agreementPayments.length}
+                    />
                   </div>
                 )}
               </div>
@@ -184,7 +365,7 @@ export default async function IncomePage() {
                         <div className="text-sm font-semibold">
                           Service starts in {summary.daysUntilNextCycle} {summary.daysUntilNextCycle === 1 ? "day" : "days"}
                         </div>
-                        <div className="text-xs muted mt-1">Ads go live on {agreement.ads_live_date}</div>
+                        <div className="text-xs muted mt-1">Ads / automation goes live on {agreement.ads_live_date}</div>
                       </>
                     ) : summary.cycleState === "ended" ? (
                       <>
@@ -204,15 +385,18 @@ export default async function IncomePage() {
                         </div>
                         <div className="flex flex-wrap justify-between gap-2 text-xs muted mt-2">
                           <span>{summary.currentCycleStart} – {summary.currentCycleEnd}</span>
-                          <span>Next cycle starts {summary.nextCycleStart}</span>
+                          <span>Next service cycle starts {summary.nextCycleStart}</span>
                         </div>
                       </>
                     )}
                   </div>
-                  {summary.cycleState === "running" && summary.nextCycleStart && (
+                  {summary.nextRecurringDueDate && (
                     <div className="text-right tnum">
-                      <div className="text-xs muted">Next recurring amount</div>
-                      <div className="text-sm font-semibold mt-1">{formatIncomeMoney(Number(agreement.recurring_amount), agreement.currency)}</div>
+                      <div className="text-xs muted">Next recurring due</div>
+                      <div className="text-sm font-semibold mt-1">{summary.nextRecurringDueDate}</div>
+                      <div className="text-xs mt-1" style={{ color: recurringDays != null && recurringDays <= 0 ? "var(--amber)" : "var(--muted)" }}>
+                        {formatIncomeMoney(Number(agreement.recurring_amount), agreement.currency)} · {dueTimingLabel(summary.nextRecurringDueDate)}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -270,23 +454,28 @@ export default async function IncomePage() {
                       <div className="text-xs muted">every 30 days</div>
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-3 mt-4 text-sm">
+                  <div className="grid sm:grid-cols-3 gap-3 mt-4 text-sm">
                     <div>
                       <div className="muted text-xs">Recurring collected</div>
                       <div className="tnum font-semibold">{formatIncomeMoney(summary.recurringPaid, agreement.currency)}</div>
                     </div>
                     <div>
-                      <div className="muted text-xs">Due now</div>
+                      <div className="muted text-xs">Recurring due now</div>
                       <div className="tnum font-semibold" style={{ color: summary.recurringDueNow ? "var(--amber)" : "var(--green)" }}>
                         {formatIncomeMoney(summary.recurringDueNow, agreement.currency)}
                       </div>
                     </div>
+                    <div>
+                      <div className="muted text-xs">Next recurring date</div>
+                      <div className="tnum font-semibold">{summary.nextRecurringDueDate ?? "—"}</div>
+                      <div className="text-xs mt-0.5" style={{ color: recurringDays != null && recurringDays <= 0 ? "var(--amber)" : "var(--muted)" }}>
+                        {dueTimingLabel(summary.nextRecurringDueDate)}
+                      </div>
+                    </div>
                   </div>
-                  {summary.nextRecurringDueDate && (
-                    <p className="text-xs muted mt-3">
-                      Next unpaid 30-day cycle due {summary.nextRecurringDueDate}
-                    </p>
-                  )}
+                  <p className="text-xs muted mt-3">
+                    Billing clock started {summary.billingAnchorDate} ({hasSetupPayment ? "first setup payment date" : "temporary service-live fallback until the first setup payment"}). Setup remaining above is separate from recurring charges.
+                  </p>
                 </div>
               </div>
 

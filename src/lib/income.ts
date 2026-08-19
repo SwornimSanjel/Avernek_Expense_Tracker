@@ -31,6 +31,13 @@ function daysBetween(from: string, to: string) {
   return Math.floor((utcDate(to).getTime() - utcDate(from).getTime()) / 86_400_000);
 }
 
+export function daysUntilDate(
+  value: string,
+  today = new Date().toISOString().slice(0, 10)
+) {
+  return daysBetween(today, value);
+}
+
 export function formatIncomeMoney(amount: number, currency: string): string {
   return `${currency} ${new Intl.NumberFormat("en-NP", {
     maximumFractionDigits: 2,
@@ -40,7 +47,7 @@ export function formatIncomeMoney(amount: number, currency: string): string {
 export function setupTermsLabel(agreement: IncomeAgreement): string {
   if (agreement.setup_payment_terms === "full_upfront") return "Full setup upfront";
   if (agreement.setup_payment_terms === "half_advance") {
-    return `${Number(agreement.setup_advance_percent)}% advance · rest on ads-live day`;
+    return `${Number(agreement.setup_advance_percent)}% advance · rest on ads / automation-live day`;
   }
   return "Custom / partial setup payments";
 }
@@ -62,6 +69,7 @@ export type RecurringPeriod = {
 };
 
 export type IncomeAgreementSummary = {
+  billingAnchorDate: string;
   setupPaid: number;
   setupRemaining: number;
   setupDueNow: number;
@@ -85,8 +93,10 @@ export type IncomeAgreementSummary = {
 };
 
 /**
- * Generate recurring obligations in exact 30-day service cycles. Ads-live is
- * day 1 of cycle one (covered by setup); recurring billing starts on day 31.
+ * Generate recurring obligations in exact 30-day billing cycles. Service Day 1
+ * is the ads/automation-live date, while recurring billing starts 30 days after
+ * the first setup payment date. Before any setup payment exists, the service
+ * live date is used as a temporary fallback anchor.
  * Payments stay allocated to a specific cycle so a prepayment cannot hide an
  * older unpaid cycle.
  */
@@ -101,6 +111,8 @@ export function summarizeIncomeAgreement(
     (payment) => payment.payment_for === "recurring"
   );
   const setupPaid = setupPayments.reduce((sum, payment) => sum + Number(payment.amount), 0);
+  const billingAnchorDate =
+    setupPayments.map((payment) => payment.paid_on).sort()[0] ?? agreement.ads_live_date;
   const setupAmount = Number(agreement.setup_amount);
   const setupRemaining = Math.max(0, setupAmount - setupPaid);
 
@@ -161,7 +173,7 @@ export function summarizeIncomeAgreement(
   const periods: RecurringPeriod[] = [];
   let upcomingIncluded = 0;
   for (let index = 1; index <= 240; index += 1) {
-    const periodStart = addCalendarDays(agreement.ads_live_date, index * 30);
+    const periodStart = addCalendarDays(billingAnchorDate, index * 30);
     if (
       agreement.service_end_date &&
       periodStart > agreement.service_end_date &&
@@ -210,6 +222,7 @@ export function summarizeIncomeAgreement(
   const nextPeriod = periods.find((period) => period.remaining > 0) ?? null;
 
   return {
+    billingAnchorDate,
     setupPaid,
     setupRemaining,
     setupDueNow,

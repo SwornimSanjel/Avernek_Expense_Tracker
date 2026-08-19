@@ -22,12 +22,14 @@ export default function AddExpense({
   vendors,
   users,
   moneyAccounts,
+  clients,
   meId,
 }: {
   categories: Category[];
   vendors: Vendor[];
   users: AppUser[];
   moneyAccounts: MoneyAccount[];
+  clients: string[];
   meId: string;
 }) {
   const [open, setOpen] = useState(false);
@@ -338,8 +340,17 @@ export default function AddExpense({
           <ShareAllocationFields users={users} total={amount} currency={currency} />
         )}
 
-        <Field label="Client (optional)">
-          <input name="client" placeholder="e.g. Hotel Everest" className="input" />
+        <Field label="Client / project (optional)">
+          <input
+            name="client"
+            list="add-expense-client-options"
+            placeholder="Choose a client or type another project"
+            className="input"
+          />
+          <datalist id="add-expense-client-options">
+            {clients.map((client) => <option key={client} value={client} />)}
+          </datalist>
+          <span className="field-help">Tags whose work used this money. Leave blank for shared company costs.</span>
         </Field>
         <Field label="Note (optional)">
           <input name="note" className="input" />

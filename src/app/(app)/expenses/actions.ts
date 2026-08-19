@@ -124,6 +124,7 @@ export async function addExpense(formData: FormData) {
 
   revalidatePath("/expenses");
   revalidatePath("/funds");
+  revalidatePath("/income");
   revalidatePath("/");
 }
 
@@ -226,6 +227,7 @@ export async function updateExpense(formData: FormData) {
 
     revalidatePath("/expenses");
     revalidatePath("/funds");
+    revalidatePath("/income");
     revalidatePath("/settlements");
     revalidatePath("/");
     return { error: null };
@@ -258,6 +260,7 @@ export async function deleteExpense(id: string) {
 
   revalidatePath("/expenses");
   revalidatePath("/funds");
+  revalidatePath("/income");
   revalidatePath("/");
 }
 
@@ -327,5 +330,6 @@ export async function retryConversion(id: string) {
 
   revalidatePath("/expenses");
   revalidatePath("/funds");
+  revalidatePath("/income");
   revalidatePath("/");
 }

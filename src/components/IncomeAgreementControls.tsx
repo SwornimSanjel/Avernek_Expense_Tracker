@@ -2,6 +2,7 @@
 
 import { useActionState, useEffect, useState, useTransition } from "react";
 import {
+  deleteIncomeAgreement,
   setIncomeAgreementStatus,
   updateIncomeAgreement,
   type IncomeFormState,
@@ -15,9 +16,11 @@ const initialState: IncomeFormState = { error: null, ok: null };
 export default function IncomeAgreementControls({
   agreement,
   moneyAccounts,
+  paymentCount,
 }: {
   agreement: IncomeAgreement;
   moneyAccounts: MoneyAccount[];
+  paymentCount: number;
 }) {
   const [editing, setEditing] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -30,7 +33,7 @@ export default function IncomeAgreementControls({
 
   return (
     <>
-      <div className="relative" onMouseLeave={() => setMenuOpen(false)}>
+      <div className="relative">
         <button disabled={statusPending} onClick={() => setMenuOpen((value) => !value)} className="icon-btn !w-9 !h-9" aria-label="Agreement actions">
           <Icon name="more" size={17} />
         </button>
@@ -45,6 +48,29 @@ export default function IncomeAgreementControls({
             ) : (
               <button className="w-full rounded-lg px-3 py-2 text-left hover:bg-white/[.04]" onClick={() => startTransition(async () => { await setIncomeAgreementStatus(agreement.id, "active"); setMenuOpen(false); })}>Reactivate service</button>
             )}
+            <div className="my-1 border-t" style={{ borderColor: "var(--line)" }} />
+            <button
+              className="w-full rounded-lg px-3 py-2 text-left hover:bg-white/[.04]"
+              style={{ color: "var(--red)" }}
+              onClick={() => {
+                const paymentWarning = paymentCount > 0
+                  ? ` and its ${paymentCount} payment record${paymentCount === 1 ? "" : "s"}`
+                  : "";
+                if (!window.confirm(
+                  `Delete ${agreement.client_name}${paymentWarning}? This will remove its receipts from the account balance and cannot be undone.`
+                )) return;
+                startTransition(async () => {
+                  try {
+                    await deleteIncomeAgreement(agreement.id);
+                    setMenuOpen(false);
+                  } catch (error) {
+                    window.alert(error instanceof Error ? error.message : "Could not delete this client.");
+                  }
+                });
+              }}
+            >
+              Delete client &amp; agreement
+            </button>
           </div>
         )}
       </div>
