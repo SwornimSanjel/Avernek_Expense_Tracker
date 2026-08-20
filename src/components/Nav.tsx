@@ -95,7 +95,15 @@ function NavLink({ item, active }: { item: { href: string; label: string; icon: 
   return (
     <motion.div whileHover={{ x: 2 }} whileTap={{ scale: 0.985 }} transition={{ duration: 0.16 }}>
       <Link href={item.href} className={`nav-item ${active ? "nav-item-active" : ""}`}>
-        {active && <motion.span layoutId="desktop-nav-active" className="nav-active-rail" transition={{ type: "spring", stiffness: 430, damping: 34 }} />}
+        {active && (
+          <motion.span
+            layoutId="desktop-nav-active"
+            className="nav-active-shell"
+            transition={{ type: "spring", stiffness: 430, damping: 34 }}
+          >
+            <span className="nav-active-rail" />
+          </motion.span>
+        )}
         <span className="nav-icon"><Icon name={item.icon} size={17} strokeWidth={active ? 2.1 : 1.75} /></span>
         <span>{item.label}</span>
       </Link>

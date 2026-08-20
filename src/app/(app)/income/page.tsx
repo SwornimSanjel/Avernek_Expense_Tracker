@@ -107,7 +107,7 @@ export default async function IncomePage() {
   );
 
   return (
-    <>
+    <div className="income-workspace">
       <PageHeader
         eyebrow="Revenue operations"
         title="Income"
@@ -221,7 +221,7 @@ export default async function IncomePage() {
             title={`Clients & collection status (${agreements.length})`}
             subtitle="A compact portfolio view. Open any row for its full agreement, billing schedule, and payment history below."
           />
-          <div className="card overflow-x-auto mt-3">
+          <div className="card income-portfolio-table overflow-x-auto mt-4">
             <table className="w-full min-w-[820px] text-sm">
               <thead className="text-xs muted text-left">
                 <tr>
@@ -314,8 +314,8 @@ export default async function IncomePage() {
           );
 
           return (
-            <section id={`client-${agreement.id}`} key={agreement.id} className="card overflow-hidden scroll-mt-6">
-              <div className="p-5 flex flex-wrap items-start justify-between gap-4">
+            <section id={`client-${agreement.id}`} key={agreement.id} className="card income-client-card overflow-hidden scroll-mt-6">
+              <div className="income-client-header flex flex-wrap items-start justify-between gap-5">
                 <div className="min-w-0 flex items-start gap-3">
                   <div className="avatar !w-11 !h-11 text-sm">{agreement.client_name.split(" ").map((part) => part[0]).slice(0, 2).join("").toUpperCase()}</div>
                   <div className="min-w-0">
@@ -354,7 +354,7 @@ export default async function IncomePage() {
                 )}
               </div>
 
-              <div className="border-t px-5 py-4" style={{ borderColor: "var(--line)", background: "var(--surface-2)" }}>
+              <div className="income-cycle-strip border-t" style={{ borderColor: "var(--line)", background: "var(--surface-2)" }}>
                 <div className="flex flex-wrap items-center gap-4">
                   <div className="stat-icon" style={{ color: summary.cycleState === "ended" ? "var(--muted)" : "#b8a0fb" }}>
                     <Icon name="clock" size={16} />
@@ -402,8 +402,8 @@ export default async function IncomePage() {
                 </div>
               </div>
 
-              <div className="grid lg:grid-cols-2 border-t" style={{ borderColor: "var(--line)" }}>
-                <div className="p-5 lg:border-r" style={{ borderColor: "var(--line)" }}>
+              <div className="income-billing-grid border-t" style={{ borderColor: "var(--line)" }}>
+                <div className="income-billing-panel">
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <div className="text-xs uppercase tracking-wider muted font-semibold">Setup / first 30 days</div>
@@ -439,7 +439,7 @@ export default async function IncomePage() {
                   )}
                 </div>
 
-                <div className="p-5">
+                <div className="income-billing-panel">
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <div className="text-xs uppercase tracking-wider muted font-semibold">Recurring from cycle two</div>
@@ -558,6 +558,6 @@ export default async function IncomePage() {
           );
         })}
       </div>
-    </>
+    </div>
   );
 }

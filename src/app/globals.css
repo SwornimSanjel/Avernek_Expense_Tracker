@@ -161,13 +161,18 @@ a { color: inherit; text-decoration: none; }
   background: linear-gradient(100deg, rgb(139 92 246 / 0.16), rgb(139 92 246 / 0.06));
   box-shadow: 0 8px 24px rgb(42 20 91 / 0.1), 0 1px 0 rgb(255 255 255 / 0.03) inset;
 }
-.nav-active-rail {
+.nav-active-shell {
   position: absolute;
   left: -1px;
-  top: 50%;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+}
+.nav-active-rail {
+  display: block;
   width: 3px;
   height: 18px;
-  transform: translateY(-50%);
   border-radius: 0 6px 6px 0;
   background: linear-gradient(180deg, #a78bfa, var(--accent-strong));
   box-shadow: 0 0 16px rgb(139 92 246 / 0.6);
@@ -210,12 +215,36 @@ a { color: inherit; text-decoration: none; }
   font-weight: 750;
 }
 .logo-mark {
-  border: 1px solid rgb(139 92 246 / 0.36);
-  background: #0b0911;
-  box-shadow: 0 9px 24px rgb(87 43 176 / 0.25), 0 1px 0 rgb(255 255 255 / 0.1) inset;
-  transition: transform 180ms ease, box-shadow 180ms ease;
+  background: transparent;
+  transition: transform 180ms ease;
 }
-.logo-word:hover .logo-mark { transform: translateY(-1px) rotate(-1deg); box-shadow: 0 12px 30px rgb(87 43 176 / 0.32); }
+.logo-word:hover .logo-mark { transform: translateY(-1px); }
+
+.status-control-trigger { min-height: 48px; }
+
+/* ----- income workspace ----- */
+.income-workspace > * + * { scroll-margin-top: 24px; }
+.income-portfolio-table th { padding-block: 15px; }
+.income-portfolio-table td { padding-block: 16px; }
+.income-client-card { border-color: var(--line-strong); }
+.income-client-header { padding: 24px; }
+.income-cycle-strip { padding: 19px 24px; }
+.income-billing-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  padding: 16px;
+  background: color-mix(in srgb, var(--surface-2) 62%, transparent);
+}
+.income-billing-panel {
+  min-width: 0;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  background: var(--surface);
+}
+.income-client-card > details > summary { padding: 16px 22px; }
+.income-client-card > details[open] > summary { border-bottom: 1px solid var(--line); }
 
 /* ----- client workspace ----- */
 .client-channel {
@@ -654,6 +683,8 @@ details > summary:hover { background: rgb(255 255 255 / 0.018); }
 }
 [data-theme="light"] .nav-item-active .nav-icon { color: var(--accent); background: rgb(112 64 216 / 0.08); }
 [data-theme="light"] .nav-active-rail { box-shadow: 0 0 12px rgb(112 64 216 / 0.28); }
+[data-theme="light"] .income-billing-grid { background: #ece7df; }
+[data-theme="light"] .income-billing-panel { border-color: rgb(47 39 31 / .24); }
 [data-theme="light"] .user-chip {
   border-color: rgb(47 39 31 / 0.21);
   background: #f2eee8;
@@ -779,6 +810,7 @@ details > summary:hover { background: rgb(255 255 255 / 0.018); }
 @media (max-width: 1100px) {
   .page-container { padding-inline: 28px; }
   .dashboard-chart-grid { grid-template-columns: 1fr; }
+  .income-billing-grid { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 767px) {
@@ -824,6 +856,10 @@ details > summary:hover { background: rgb(255 255 255 / 0.018); }
   .chart-donut-wrap { height: 180px; }
   .chart-bar-wrap { height: 210px; margin-top: 12px; }
   .chart-legend-row { grid-template-columns: 10px minmax(0, 1fr) 36px 46px; }
+  .income-client-header { padding: 19px; }
+  .income-cycle-strip { padding: 17px 19px; }
+  .income-billing-grid { gap: 10px; padding: 10px; }
+  .income-billing-panel { padding: 17px; }
   .modal-panel { max-height: 94dvh; }
 }
 

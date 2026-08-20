@@ -62,15 +62,17 @@ export default function ClientStatusControl({
         type="button"
         disabled={pending}
         onClick={() => setOpen((value) => !value)}
-        className="inline-flex h-9 min-w-[128px] items-center gap-2 rounded-xl border px-3 text-left transition hover:-translate-y-px disabled:opacity-50"
+        className="status-control-trigger inline-flex min-w-[138px] items-center gap-3 rounded-xl border px-3 text-left transition hover:-translate-y-px disabled:opacity-50"
         style={{ borderColor: "var(--line-strong)", background: "var(--surface-2)" }}
         aria-haspopup="menu"
         aria-expanded={open}
       >
-        <span className="client-status-dot" style={{ background: current.color }} />
         <span className="min-w-0 flex-1">
           <span className="block text-[10px] font-bold uppercase tracking-[0.12em] muted leading-none">Status</span>
-          <span className="block text-xs font-semibold leading-none mt-1.5">{pending ? "Updating…" : current.label}</span>
+          <span className="mt-1.5 flex items-center gap-2 text-xs font-semibold leading-none">
+            <span className="client-status-dot" style={{ background: current.color }} />
+            <span>{pending ? "Updating…" : current.label}</span>
+          </span>
         </span>
         <Icon name="chevronDown" size={14} className={`muted transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
