@@ -1,6 +1,9 @@
+"use client";
+
 import type { ConversionStatus, FxSource } from "@/lib/types";
 import { fxSourceLabel } from "@/lib/format";
 import Icon, { type IconName } from "@/components/Icons";
+import { motion, useReducedMotion } from "framer-motion";
 
 export function PageHeader({
   title,
@@ -13,20 +16,36 @@ export function PageHeader({
   action?: React.ReactNode;
   eyebrow?: string;
 }) {
+  const reduceMotion = useReducedMotion();
   return (
-    <div className="page-header">
+    <motion.div
+      className="page-header"
+      initial={reduceMotion ? false : { opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
+    >
       <div>
         <div className="eyebrow"><Icon name="sparkles" size={12} />{eyebrow}</div>
         <h1 className="page-title">{title}</h1>
         {subtitle && <p className="page-subtitle">{subtitle}</p>}
       </div>
       {action && <div className="shrink-0">{action}</div>}
-    </div>
+    </motion.div>
   );
 }
 
 export function Card({ children, className = "" }: { children: React.ReactNode; className?: string }) {
-  return <div className={`card ${className}`}>{children}</div>;
+  const reduceMotion = useReducedMotion();
+  return (
+    <motion.div
+      className={`card ${className}`}
+      initial={reduceMotion ? false : { opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+    >
+      {children}
+    </motion.div>
+  );
 }
 
 export function SectionHeader({
@@ -64,6 +83,7 @@ export function StatTile({
   icon?: IconName;
   tone?: "accent" | "green" | "amber" | "blue";
 }) {
+  const reduceMotion = useReducedMotion();
   const glow = {
     accent: "rgb(139 92 246 / 0.13)",
     green: "rgb(70 216 144 / 0.11)",
@@ -78,14 +98,21 @@ export function StatTile({
   }[tone];
 
   return (
-    <div className="card stat-tile" style={{ "--stat-glow": glow } as React.CSSProperties}>
+    <motion.div
+      className="card stat-tile"
+      style={{ "--stat-glow": glow } as React.CSSProperties}
+      initial={reduceMotion ? false : { opacity: 0, y: 12, scale: 0.99 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      whileHover={reduceMotion ? undefined : { y: -3 }}
+      transition={{ duration: 0.36, ease: [0.22, 1, 0.36, 1] }}
+    >
       <div className="flex items-center justify-between gap-3">
         <div className="stat-label">{label}</div>
         {icon && <div className="stat-icon" style={{ color: toneColor }}><Icon name={icon} size={15} /></div>}
       </div>
       <div className={`stat-value tnum ${emphasis ? "!text-[2rem]" : ""}`}>{value}</div>
       {hint && <div className="stat-hint">{hint}</div>}
-    </div>
+    </motion.div>
   );
 }
 
@@ -114,6 +141,7 @@ export function LedgerCard({
   icon?: IconName;
   tone?: "accent" | "green" | "amber" | "blue";
 }) {
+  const reduceMotion = useReducedMotion();
   const toneColor = {
     accent: "#b8a0fb",
     green: "var(--green)",
@@ -123,7 +151,14 @@ export function LedgerCard({
   const expenseOnly = moneyIn == null && balance == null;
 
   return (
-    <div className="card ledger-card" style={{ "--ledger-tone": toneColor } as React.CSSProperties}>
+    <motion.div
+      className="card ledger-card"
+      style={{ "--ledger-tone": toneColor } as React.CSSProperties}
+      initial={reduceMotion ? false : { opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      whileHover={reduceMotion ? undefined : { y: -2 }}
+      transition={{ duration: 0.36, ease: [0.22, 1, 0.36, 1] }}
+    >
       <div className="flex items-start justify-between gap-3">
         <div className="stat-icon ledger-icon"><Icon name={icon} size={16} /></div>
         <span className="pill">{badge}</span>
@@ -149,7 +184,7 @@ export function LedgerCard({
         </div>
       )}
       <p className="ledger-note">{note}</p>
-    </div>
+    </motion.div>
   );
 }
 

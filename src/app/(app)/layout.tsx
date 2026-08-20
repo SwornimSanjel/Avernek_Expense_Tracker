@@ -1,4 +1,5 @@
 import Nav from "@/components/Nav";
+import MotionPage from "@/components/MotionPage";
 import { requireSession } from "@/lib/auth/server";
 import { one } from "@/lib/db";
 
@@ -20,7 +21,7 @@ export default async function AppLayout({
     <div className="app-shell flex min-h-screen">
       <Nav name={profile?.name ?? session.name ?? session.email} isAdmin={profile?.is_admin ?? session.isAdmin} />
       <main className="app-main flex-1 min-w-0 pt-16 md:pt-0">
-        <div className="page-container">{children}</div>
+        <MotionPage>{children}</MotionPage>
       </main>
     </div>
   );
