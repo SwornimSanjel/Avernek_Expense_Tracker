@@ -192,6 +192,7 @@ export async function addIncomeAgreement(
   });
 
   revalidatePath("/income");
+  revalidatePath("/clients");
   revalidatePath("/funds");
   revalidatePath("/");
   return { error: null, ok: `${value.clientName} agreement added.` };
@@ -280,6 +281,7 @@ export async function updateIncomeAgreement(
 
   if (!changed) return { error: "Agreement no longer exists.", ok: null };
   revalidatePath("/income");
+  revalidatePath("/clients");
   return { error: null, ok: "Agreement updated." };
 }
 
@@ -389,6 +391,7 @@ export async function recordIncomePayment(
   );
 
   revalidatePath("/income");
+  revalidatePath("/clients");
   revalidatePath("/funds");
   revalidatePath("/");
   return { error: null, ok: `Payment recorded for ${agreement.client_name}.` };
@@ -414,6 +417,7 @@ export async function setIncomeAgreementStatus(
     [status, id]
   );
   revalidatePath("/income");
+  revalidatePath("/clients");
 }
 
 export async function deleteIncomeAgreement(id: string) {
@@ -428,6 +432,7 @@ export async function deleteIncomeAgreement(id: string) {
   // agreement therefore removes its receipts from the account ledger too.
   await exec(`delete from public.income_agreements where id = $1`, [id]);
   revalidatePath("/income");
+  revalidatePath("/clients");
   revalidatePath("/funds");
   revalidatePath("/");
 }
@@ -436,6 +441,7 @@ export async function deleteIncomePayment(id: string) {
   await requireIncomeAdmin();
   await exec(`delete from public.income_payments where id = $1`, [id]);
   revalidatePath("/income");
+  revalidatePath("/clients");
   revalidatePath("/funds");
   revalidatePath("/");
 }

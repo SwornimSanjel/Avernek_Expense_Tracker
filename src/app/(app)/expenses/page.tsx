@@ -26,6 +26,7 @@ export default async function ExpensesPage({
     basis?: "share" | "paid";
     month?: string;
     vendor?: string;
+    client?: string;
   }>;
 }) {
   const sp = await searchParams;
@@ -55,6 +56,10 @@ export default async function ExpensesPage({
   if (sp.vendor) {
     params.push(sp.vendor);
     conditions.push(`vendor_id = $${params.length}`);
+  }
+  if (sp.client) {
+    params.push(sp.client);
+    conditions.push(`lower(btrim(client)) = lower(btrim($${params.length}))`);
   }
   if (sp.ledger === "founder") {
     conditions.push(`funding_source <> 'company_funds'`);
@@ -234,6 +239,12 @@ export default async function ExpensesPage({
             <option key={vendor.id} value={vendor.id}>{vendor.name}</option>
           ))}
         </select>
+        <select name="client" aria-label="Client filter" defaultValue={sp.client ?? ""} className="input !w-full sm:!w-auto !h-10">
+          <option value="">All clients / projects</option>
+          {clientNames.map((client) => (
+            <option key={client} value={client}>{client}</option>
+          ))}
+        </select>
         <select
           name="person"
           defaultValue={selectedPersonId}
@@ -259,7 +270,7 @@ export default async function ExpensesPage({
           className="input !w-[calc(50%-4px)] sm:!w-auto !h-10"
         />
         <button className="btn !h-10">Filter</button>
-        {(selectedPersonId || sp.ledger || sp.cat || sp.vendor || sp.month) && (
+        {(selectedPersonId || sp.ledger || sp.cat || sp.vendor || sp.client || sp.month) && (
           <a href="/expenses" className="btn !h-10">Clear</a>
         )}
         <a href="/api/export" className="btn !h-10">

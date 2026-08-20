@@ -14,9 +14,11 @@ export default function ThemeToggle({ compact = false }: { compact?: boolean }) 
 
   function toggle() {
     const next = theme === "dark" ? "light" : "dark";
+    document.documentElement.classList.add("theme-transition");
     setTheme(next);
     document.documentElement.dataset.theme = next;
     localStorage.setItem("avernek-theme", next);
+    window.setTimeout(() => document.documentElement.classList.remove("theme-transition"), 260);
   }
 
   return (

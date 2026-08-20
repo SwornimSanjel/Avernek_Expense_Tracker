@@ -11,6 +11,7 @@ const items: { href: string; label: string; short: string; icon: IconName }[] = 
   { href: "/", label: "Overview", short: "Home", icon: "home" },
   { href: "/expenses", label: "Expenses", short: "Spend", icon: "expense" },
   { href: "/income", label: "Income", short: "Income", icon: "income" },
+  { href: "/clients", label: "Clients", short: "Clients", icon: "users" },
   { href: "/funds", label: "Company money", short: "Funds", icon: "wallet" },
   { href: "/subscriptions", label: "Subscriptions", short: "Subs", icon: "subscription" },
   { href: "/settlements", label: "Contributions", short: "Team", icon: "contribution" },
@@ -37,13 +38,13 @@ export default function Nav({ name, isAdmin }: { name: string; isAdmin: boolean 
         <nav className="flex-1 min-h-0 overflow-y-auto">
           <div className="nav-section-label mb-2">Workspace</div>
           <div className="space-y-1">
-            {items.slice(0, 5).map((item) => (
+            {items.slice(0, 6).map((item) => (
               <NavLink key={item.href} item={item} active={active(item.href)} />
             ))}
           </div>
           <div className="nav-section-label mt-7 mb-2">Organisation</div>
           <div className="space-y-1">
-            {items.slice(5).map((item) => (
+            {items.slice(6).map((item) => (
               <NavLink key={item.href} item={item} active={active(item.href)} />
             ))}
           </div>
@@ -77,7 +78,7 @@ export default function Nav({ name, isAdmin }: { name: string; isAdmin: boolean 
         </div>
       </header>
 
-      <nav className="mobile-bottom-nav md:hidden fixed bottom-0 inset-x-0 z-40 grid grid-cols-7 h-[68px]" style={{ borderTop: "1px solid var(--line)" }}>
+      <nav className="mobile-bottom-nav md:hidden fixed bottom-0 inset-x-0 z-40 grid grid-cols-8 h-[68px]" style={{ borderTop: "1px solid var(--line)" }}>
         {items.map((item) => (
           <Link key={item.href} href={item.href} className={`mobile-nav-item ${active(item.href) ? "mobile-nav-item-active" : ""}`}>
             <Icon name={item.icon} size={18} strokeWidth={active(item.href) ? 2.2 : 1.8} />

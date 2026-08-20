@@ -24,6 +24,7 @@ export type IconName =
   | "filter"
   | "check"
   | "clock"
+  | "chevronDown"
   | "bank";
 
 export default function Icon({
@@ -76,6 +77,7 @@ export default function Icon({
     filter: <path d="M4 5h16l-6 7v5l-4 2v-7Z"/>,
     check: <path d="m5 12 4 4L19 6"/>,
     clock: <><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></>,
+    chevronDown: <path d="m7 10 5 5 5-5"/>,
     bank: <><path d="m3 9 9-5 9 5M5 10h14M6 10v8M10 10v8M14 10v8M18 10v8M4 20h16"/></>,
   };
 
