@@ -270,7 +270,7 @@ export default async function ClientsPage({
 function ChannelGroup({ title, agreements, selectedId }: { title: string; agreements: IncomeAgreement[]; selectedId?: string }) {
   return (
     <div className="mt-4">
-      <div className="px-3 mb-1 text-[10px] font-bold uppercase tracking-[0.13em] muted">{title} · {agreements.length}</div>
+      <div className="px-3 mb-1 text-[11px] font-bold uppercase tracking-[0.13em] muted">{title} · {agreements.length}</div>
       <div className="space-y-0.5">
         {agreements.map((agreement) => (
           <Link key={agreement.id} href={`/clients?client=${agreement.id}`} className={`client-channel ${selectedId === agreement.id ? "client-channel-active" : ""}`}>
@@ -320,7 +320,7 @@ function Portfolio({ agreements, payments, expenses, summaries }: {
                 <MiniMetric label="Recurring" value={formatIncomeMoney(Number(agreement.recurring_amount), agreement.currency)} />
                 <MiniMetric label="Client costs" value={formatIncomeMoney(spend, "NPR")} />
               </div>
-              <p className="text-[10px] muted mt-3">{paymentCount} payment record{paymentCount === 1 ? "" : "s"} · {ownExpenses.length} linked expense{ownExpenses.length === 1 ? "" : "s"}</p>
+              <p className="text-[11px] muted mt-3">{paymentCount} payment record{paymentCount === 1 ? "" : "s"} · {ownExpenses.length} linked expense{ownExpenses.length === 1 ? "" : "s"}</p>
             </Link>
           );
         })}
@@ -330,15 +330,15 @@ function Portfolio({ agreements, payments, expenses, summaries }: {
 }
 
 function Metric({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: string }) {
-  return <div className="p-4 min-h-[112px]" style={{ background: "var(--surface)" }}><div className="stat-label">{label}</div><div className="text-xl font-bold tnum mt-3" style={{ color: tone }}>{value}</div>{sub && <div className="text-[10px] muted mt-1">{sub}</div>}</div>;
+  return <div className="p-4 min-h-[112px]" style={{ background: "var(--surface)" }}><div className="stat-label">{label}</div><div className="text-xl font-bold tnum mt-3" style={{ color: tone }}>{value}</div>{sub && <div className="text-[11px] muted mt-1">{sub}</div>}</div>;
 }
 
 function MiniMetric({ label, value, warn }: { label: string; value: string; warn?: boolean }) {
-  return <div className="rounded-xl p-3" style={{ background: "var(--surface-2)", border: "1px solid var(--line)" }}><div className="text-[9px] font-bold uppercase tracking-[0.12em] muted">{label}</div><div className="text-sm font-semibold tnum mt-1" style={{ color: warn ? "var(--amber)" : undefined }}>{value}</div></div>;
+  return <div className="rounded-xl p-3" style={{ background: "var(--surface-2)", border: "1px solid var(--line)" }}><div className="text-[10px] font-bold uppercase tracking-[0.12em] muted">{label}</div><div className="text-sm font-semibold tnum mt-1" style={{ color: warn ? "var(--amber)" : undefined }}>{value}</div></div>;
 }
 
 function Detail({ label, value }: { label: string; value: string }) {
-  return <div><div className="text-[10px] uppercase tracking-[0.12em] muted font-bold">{label}</div><div className="mt-1 font-medium">{value}</div></div>;
+  return <div><div className="text-[11px] uppercase tracking-[0.12em] muted font-bold">{label}</div><div className="mt-1 font-medium">{value}</div></div>;
 }
 
 function ActivityCard({ title, empty, items }: { title: string; empty: string; items: { id: string; title: string; meta: string; amount: string; color: string; icon: "income" | "expense" }[] }) {
@@ -346,7 +346,7 @@ function ActivityCard({ title, empty, items }: { title: string; empty: string; i
     <div className="card overflow-hidden">
       <div className="px-4 py-3 border-b font-semibold" style={{ borderColor: "var(--line)" }}>{title}</div>
       {!items.length && <p className="p-5 text-xs muted">{empty}</p>}
-      {items.slice(0, 10).map((item) => <div key={item.id} className="px-4 py-3 flex items-center gap-3 border-b last:border-b-0" style={{ borderColor: "var(--line)" }}><div className="stat-icon !w-9 !h-9 shrink-0" style={{ color: item.color }}><Icon name={item.icon} size={14} /></div><div className="min-w-0 flex-1"><div className="text-sm font-medium truncate">{item.title}</div><div className="text-[10px] muted mt-0.5 truncate">{item.meta}</div></div><div className="text-sm font-semibold tnum shrink-0" style={{ color: item.color }}>{item.amount}</div></div>)}
+      {items.slice(0, 10).map((item) => <div key={item.id} className="px-4 py-3 flex items-center gap-3 border-b last:border-b-0" style={{ borderColor: "var(--line)" }}><div className="stat-icon !w-9 !h-9 shrink-0" style={{ color: item.color }}><Icon name={item.icon} size={14} /></div><div className="min-w-0 flex-1"><div className="text-sm font-medium truncate">{item.title}</div><div className="text-[11px] muted mt-0.5 truncate">{item.meta}</div></div><div className="text-sm font-semibold tnum shrink-0" style={{ color: item.color }}>{item.amount}</div></div>)}
     </div>
   );
 }

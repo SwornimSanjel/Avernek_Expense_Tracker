@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Icon from "@/components/Icons";
+import { AnimatePresence, motion } from "framer-motion";
 
 export default function ThemeToggle({ compact = false }: { compact?: boolean }) {
   const [theme, setTheme] = useState<"dark" | "light">("dark");
@@ -25,7 +26,18 @@ export default function ThemeToggle({ compact = false }: { compact?: boolean }) 
     <button type="button" onClick={toggle} className={compact ? "icon-btn !w-9 !h-9" : "btn"}
       aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
       title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}>
-      <Icon name={theme === "dark" ? "sun" : "moon"} size={16} />
+      <AnimatePresence mode="wait" initial={false}>
+        <motion.span
+          key={theme}
+          className="inline-grid"
+          initial={{ opacity: 0, rotate: -35, scale: 0.75 }}
+          animate={{ opacity: 1, rotate: 0, scale: 1 }}
+          exit={{ opacity: 0, rotate: 35, scale: 0.75 }}
+          transition={{ duration: 0.18 }}
+        >
+          <Icon name={theme === "dark" ? "sun" : "moon"} size={16} />
+        </motion.span>
+      </AnimatePresence>
       {!compact && <span>{theme === "dark" ? "Light" : "Dark"}</span>}
     </button>
   );

@@ -165,7 +165,7 @@ export function LedgerCard({
       </div>
       <div className="mt-4">
         <h3 className="font-semibold leading-tight">{title}</h3>
-        <p className="text-[10px] muted leading-relaxed mt-1 min-h-[28px]">{subtitle}</p>
+        <p className="text-[11px] muted leading-relaxed mt-1 min-h-[31px]">{subtitle}</p>
       </div>
       <div className="ledger-balance mt-5">
         <span>{expenseOnly ? outLabel : balanceLabel}</span>

@@ -69,8 +69,8 @@ export default function ClientStatusControl({
       >
         <span className="client-status-dot" style={{ background: current.color }} />
         <span className="min-w-0 flex-1">
-          <span className="block text-[8px] font-bold uppercase tracking-[0.12em] muted leading-none">Status</span>
-          <span className="block text-[11px] font-semibold leading-none mt-1">{pending ? "Updating…" : current.label}</span>
+          <span className="block text-[10px] font-bold uppercase tracking-[0.12em] muted leading-none">Status</span>
+          <span className="block text-xs font-semibold leading-none mt-1.5">{pending ? "Updating…" : current.label}</span>
         </span>
         <Icon name="chevronDown" size={14} className={`muted transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
@@ -81,7 +81,7 @@ export default function ClientStatusControl({
           style={{ borderColor: "var(--line-strong)", background: "var(--surface)", boxShadow: "var(--shadow-float)" }}
           role="menu"
         >
-          <div className="px-2.5 pt-1 pb-2 text-[9px] font-bold uppercase tracking-[0.14em] muted">Change client status</div>
+          <div className="px-3 pt-1 pb-2 text-[10px] font-bold uppercase tracking-[0.14em] muted">Change client status</div>
           <div className="space-y-1">
             {options.map((option) => {
               const selected = option.value === status;
@@ -100,14 +100,14 @@ export default function ClientStatusControl({
                   <span className="client-status-dot" style={{ background: option.color }} />
                   <span className="min-w-0 flex-1">
                     <span className="block text-xs font-semibold">{option.label}</span>
-                    <span className="block text-[10px] muted mt-0.5">{option.description}</span>
+                    <span className="block text-[11px] muted mt-1 leading-relaxed">{option.description}</span>
                   </span>
                   {selected && <span className="grid h-6 w-6 place-items-center rounded-lg" style={{ background: "var(--surface)" }}><Icon name="check" size={13} /></span>}
                 </button>
               );
             })}
           </div>
-          <p className="mx-2 mt-2 border-t pt-2 text-[9px] leading-relaxed muted" style={{ borderColor: "var(--line)" }}>
+          <p className="mx-2 mt-2 border-t pt-2 text-[10px] leading-relaxed muted" style={{ borderColor: "var(--line)" }}>
             Inactive stops future recurring dues and keeps the complete history.
           </p>
         </div>

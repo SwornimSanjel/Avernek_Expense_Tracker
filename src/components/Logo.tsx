@@ -3,14 +3,11 @@ export function LogoMark({ size = 28 }: { size?: number }) {
     <span
       aria-label="Avernek"
       role="img"
-      className="relative inline-block shrink-0 overflow-hidden"
+      className="logo-mark relative inline-block shrink-0 overflow-hidden"
       style={{
         width: size,
         height: size,
         borderRadius: Math.max(8, size * 0.28),
-        border: "1px solid rgb(139 92 246 / 0.24)",
-        background: "#0b0911",
-        boxShadow: "0 8px 22px rgb(87 43 176 / 0.2), 0 1px 0 rgb(255 255 255 / 0.08) inset",
       }}
     >
       <img
@@ -26,7 +23,7 @@ export function LogoMark({ size = 28 }: { size?: number }) {
 
 export function LogoWord({ compact = false }: { compact?: boolean }) {
   return (
-    <span className="inline-flex items-center gap-2.5">
+    <span className="logo-word inline-flex items-center gap-2.5">
       <LogoMark size={30} />
       {!compact && (
         <span className="font-bold tracking-[-0.025em] text-[19px] leading-none">

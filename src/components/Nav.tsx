@@ -6,6 +6,7 @@ import { signOut } from "@/app/login/actions";
 import Icon, { type IconName } from "@/components/Icons";
 import { LogoWord } from "@/components/Logo";
 import ThemeToggle from "@/components/ThemeToggle";
+import { motion } from "framer-motion";
 
 const items: { href: string; label: string; short: string; icon: IconName }[] = [
   { href: "/", label: "Overview", short: "Home", icon: "home" },
@@ -27,10 +28,10 @@ export default function Nav({ name, isAdmin }: { name: string; isAdmin: boolean 
 
   return (
     <>
-      <aside className="sidebar hidden md:flex md:flex-col w-[264px] shrink-0 h-screen sticky top-0 px-4 py-5">
-        <div className="px-2 pb-8">
+      <aside className="sidebar hidden md:flex md:flex-col w-[272px] shrink-0 h-screen sticky top-0 px-4 py-5">
+        <div className="px-2 pb-7">
           <LogoWord />
-          <div className="mt-2 ml-[38px] text-[9px] uppercase tracking-[0.18em]" style={{ color: "var(--muted-2)" }}>
+          <div className="mt-2 ml-[38px] text-[10px] uppercase tracking-[0.16em]" style={{ color: "var(--muted-2)" }}>
             Finance workspace
           </div>
         </div>
@@ -52,14 +53,14 @@ export default function Nav({ name, isAdmin }: { name: string; isAdmin: boolean 
 
         <div className="space-y-3 pt-4 mt-4" style={{ borderTop: "1px solid var(--line)" }}>
           <div className="flex items-center justify-between gap-2">
-            <span className="text-[10px] font-semibold uppercase tracking-[0.12em] muted">Appearance</span>
+            <span className="text-[11px] font-semibold uppercase tracking-[0.12em] muted">Appearance</span>
             <ThemeToggle compact />
           </div>
           <div className="user-chip">
             <div className="avatar">{initials || "A"}</div>
             <div className="min-w-0 flex-1">
               <div className="truncate text-xs font-semibold">{name}</div>
-              <div className="text-[10px] muted">{isAdmin ? "Administrator" : "View only"}</div>
+              <div className="text-[11px] muted">{isAdmin ? "Administrator" : "View only"}</div>
             </div>
             <form action={signOut}>
               <button type="submit" className="icon-btn !w-8 !h-8" title="Sign out" aria-label="Sign out">
@@ -92,9 +93,12 @@ export default function Nav({ name, isAdmin }: { name: string; isAdmin: boolean 
 
 function NavLink({ item, active }: { item: { href: string; label: string; icon: IconName }; active: boolean }) {
   return (
-    <Link href={item.href} className={`nav-item ${active ? "nav-item-active" : ""}`}>
-      <span className="nav-icon"><Icon name={item.icon} size={17} strokeWidth={active ? 2.1 : 1.75} /></span>
-      <span>{item.label}</span>
-    </Link>
+    <motion.div whileHover={{ x: 2 }} whileTap={{ scale: 0.985 }} transition={{ duration: 0.16 }}>
+      <Link href={item.href} className={`nav-item ${active ? "nav-item-active" : ""}`}>
+        {active && <motion.span layoutId="desktop-nav-active" className="nav-active-rail" transition={{ type: "spring", stiffness: 430, damping: 34 }} />}
+        <span className="nav-icon"><Icon name={item.icon} size={17} strokeWidth={active ? 2.1 : 1.75} /></span>
+        <span>{item.label}</span>
+      </Link>
+    </motion.div>
   );
 }
