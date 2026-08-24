@@ -51,6 +51,22 @@ function dueTimingLabel(date: string | null) {
   return `Due in ${days} day${days === 1 ? "" : "s"}`;
 }
 
+function paymentHealthLabel(setupDueNow: number, recurringDueNow: number) {
+  if (setupDueNow > 0) return "Setup payment due";
+  if (recurringDueNow > 0) return "Recurring payment due";
+  return "On track";
+}
+
+function shortDate(value: string | null) {
+  if (!value) return "Not scheduled";
+  return new Intl.DateTimeFormat("en", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(`${value}T00:00:00Z`));
+}
+
 export default async function IncomePage() {
   const session = await requireSession();
   const canManage = isAppOwner(session);
@@ -115,7 +131,7 @@ export default async function IncomePage() {
         action={canManage ? <AddIncomeAgreement moneyAccounts={moneyAccounts} /> : undefined}
       />
 
-      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+      <div className="income-top-stats grid sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
         <StatTile label="Collected" value={totalsLabel(collected)} hint="All recorded receipts" emphasis icon="income" tone="green" />
         <StatTile
           label="Due now"
@@ -128,7 +144,7 @@ export default async function IncomePage() {
         <StatTile label="Active recurring" value={totalsLabel(activeRecurring)} hint="Expected every 30 days" icon="subscription" tone="accent" />
       </div>
 
-      <div className="mb-6">
+      <div className="income-accounts-section mb-6">
         <SectionHeader
           title="Company-money account balances"
           subtitle="Receipts increase the selected account; company expenses and transfers reduce it immediately."
@@ -166,7 +182,7 @@ export default async function IncomePage() {
         </div>
       </div>
 
-      <div className="mb-6">
+      <div className="income-spending-section mb-6">
         <SectionHeader
           title="Recent company-money spending"
           subtitle="These debits are already subtracted from the account balances above; founder/team investment never appears here."
@@ -216,73 +232,138 @@ export default async function IncomePage() {
       </div>
 
       {agreements.length > 0 && (
-        <div className="mb-6">
+        <div className="income-client-snapshot mb-6">
           <SectionHeader
-            title={`Clients & collection status (${agreements.length})`}
-            subtitle="A compact portfolio view. Open any row for its full agreement, billing schedule, and payment history below."
+            title={`Client payment snapshot (${agreements.length})`}
+            subtitle="See every agreement, payment balance, and upcoming deadline without opening the full records."
           />
-          <div className="card income-portfolio-table overflow-x-auto mt-4">
-            <table className="w-full min-w-[820px] text-sm">
-              <thead className="text-xs muted text-left">
-                <tr>
-                  <th className="px-4 py-3 font-medium">Client</th>
-                  <th className="px-4 py-3 font-medium text-right">Collected</th>
-                  <th className="px-4 py-3 font-medium text-right">Setup remaining</th>
-                  <th className="px-4 py-3 font-medium text-right">Recurring</th>
-                  <th className="px-4 py-3 font-medium">Next recurring date</th>
-                  <th className="px-4 py-3 font-medium text-right">Details</th>
-                </tr>
-              </thead>
-              <tbody>
-                {agreements.map((agreement) => {
-                  const summary = summaries.get(agreement.id)!;
-                  const recurringDays = summary.nextRecurringDueDate
-                    ? daysUntilDate(summary.nextRecurringDueDate)
-                    : null;
-                  return (
-                    <tr key={agreement.id} className="border-t" style={{ borderColor: "var(--line)" }}>
-                      <td className="px-4 py-3">
-                        <div className="font-medium">{agreement.client_name}</div>
-                        <div className="text-xs muted mt-0.5">{serviceTypeLabel(agreement.service_type)} · {agreement.status}</div>
-                      </td>
-                      <td className="px-4 py-3 text-right tnum font-medium">{formatIncomeMoney(summary.totalCollected, agreement.currency)}</td>
-                      <td className="px-4 py-3 text-right">
-                        <div className="tnum" style={{ color: summary.setupRemaining > 0 ? "var(--amber)" : "var(--green)" }}>
-                          {formatIncomeMoney(summary.setupRemaining, agreement.currency)}
+          <div className="income-snapshot-grid mt-4">
+            {agreements.map((agreement) => {
+              const summary = summaries.get(agreement.id)!;
+              const setupAmount = Number(agreement.setup_amount);
+              const setupPercent = setupAmount > 0
+                ? Math.min(100, Math.round((summary.setupPaid / setupAmount) * 100))
+                : 100;
+              const recurringDays = summary.nextRecurringDueDate
+                ? daysUntilDate(summary.nextRecurringDueDate)
+                : null;
+              const countdownProgress = recurringDays == null
+                ? 0
+                : Math.max(0, Math.min(100, ((30 - recurringDays) / 30) * 100));
+              const setupDeadline = dueTimingLabel(summary.setupNextDueDate);
+              const health = paymentHealthLabel(summary.setupDueNow, summary.recurringDueNow);
+              const needsPayment = summary.totalDueNow > 0;
+
+              return (
+                <article key={agreement.id} className="income-snapshot-card">
+                  <div className="income-snapshot-header">
+                    <div className="flex items-start gap-3 min-w-0">
+                      <div className="avatar !w-10 !h-10">
+                        {agreement.client_name.split(" ").map((part) => part[0]).slice(0, 2).join("").toUpperCase()}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h3 className="font-bold text-lg truncate">{agreement.client_name}</h3>
+                          <span className={needsPayment ? "pill warn" : "pill ok"}>{health}</span>
                         </div>
-                        <div className="text-xs muted mt-0.5">{summary.setupRemaining > 0 && summary.setupNextDueDate ? `due ${summary.setupNextDueDate}` : "setup settled"}</div>
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <div className="tnum" style={{ color: summary.recurringDueNow > 0 ? "var(--amber)" : "var(--green)" }}>
-                          {formatIncomeMoney(summary.recurringDueNow, agreement.currency)} due now
+                        <p className="text-xs muted mt-1 truncate">{serviceTypeLabel(agreement.service_type)} · {agreement.status}</p>
+                      </div>
+                    </div>
+                    <div className="income-collected-total">
+                      <span>Total received</span>
+                      <strong>{formatIncomeMoney(summary.totalCollected, agreement.currency)}</strong>
+                    </div>
+                  </div>
+
+                  <div className="income-agreement-strip">
+                    <div>
+                      <span>Setup / first month</span>
+                      <strong>{formatIncomeMoney(setupAmount, agreement.currency)}</strong>
+                    </div>
+                    <div>
+                      <span>Recurring agreement</span>
+                      <strong>{formatIncomeMoney(Number(agreement.recurring_amount), agreement.currency)} <small>/ 30 days</small></strong>
+                    </div>
+                  </div>
+
+                  <div className="income-visual-grid">
+                    <div className="income-setup-visual">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <div className="income-visual-label">Setup payment</div>
+                          <div className="text-sm font-semibold mt-1">{setupPercent}% paid</div>
                         </div>
-                        <div className="text-xs muted mt-0.5">{formatIncomeMoney(Number(agreement.recurring_amount), agreement.currency)} every 30 days</div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="tnum">{summary.nextRecurringDueDate ?? "—"}</div>
-                        <div className="text-xs mt-0.5" style={{ color: recurringDays != null && recurringDays <= 0 ? "var(--amber)" : "var(--muted)" }}>
-                          {dueTimingLabel(summary.nextRecurringDueDate)}
+                        <div className="income-payment-state" data-complete={summary.setupRemaining === 0}>
+                          {summary.setupRemaining === 0 ? "Paid in full" : `${setupPercent}% complete`}
                         </div>
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <Link href={`#client-${agreement.id}`} className="btn !h-8">Open</Link>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                      </div>
+                      <div className="income-money-bar mt-4" aria-label={`${setupPercent}% of setup paid`}>
+                        <span className="income-money-paid" style={{ width: `${setupPercent}%` }} />
+                        <span className="income-money-left" style={{ width: `${100 - setupPercent}%` }} />
+                      </div>
+                      <div className="income-money-legend">
+                        <div><i className="paid" /><span>Paid</span><strong>{formatIncomeMoney(summary.setupPaid, agreement.currency)}</strong></div>
+                        <div><i className="left" /><span>Left</span><strong>{formatIncomeMoney(summary.setupRemaining, agreement.currency)}</strong></div>
+                      </div>
+                      <div className={`income-deadline ${summary.setupDueNow > 0 ? "is-due" : ""}`}>
+                        <Icon name={summary.setupRemaining > 0 ? "clock" : "check"} size={15} />
+                        <span>{summary.setupRemaining > 0 ? `${setupDeadline} · ${shortDate(summary.setupNextDueDate)}` : "Setup fully settled"}</span>
+                      </div>
+                    </div>
+
+                    <div className="income-recurring-visual">
+                      <div
+                        className={`income-countdown-ring ${recurringDays != null && recurringDays <= 0 ? "is-due" : ""}`}
+                        style={{ "--countdown-progress": `${countdownProgress * 3.6}deg` } as React.CSSProperties}
+                      >
+                        <div>
+                          <strong>{recurringDays == null ? "—" : recurringDays <= 0 ? "Due" : recurringDays}</strong>
+                          <span>{recurringDays != null && recurringDays > 0 ? "days left" : "now"}</span>
+                        </div>
+                      </div>
+                      <div className="min-w-0">
+                        <div className="income-visual-label">Next recurring payment</div>
+                        <div className="tnum font-bold text-lg mt-1">{formatIncomeMoney(Number(agreement.recurring_amount), agreement.currency)}</div>
+                        <div className="text-xs muted mt-1">Due {shortDate(summary.nextRecurringDueDate)}</div>
+                        <div className="text-xs muted mt-1 tnum">Recurring paid {formatIncomeMoney(summary.recurringPaid, agreement.currency)}</div>
+                        <div className={`income-due-now ${summary.recurringDueNow > 0 ? "is-due" : ""}`}>
+                          {summary.recurringDueNow > 0
+                            ? `${formatIncomeMoney(summary.recurringDueNow, agreement.currency)} due now`
+                            : "Nothing due today"}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="income-snapshot-footer">
+                    <div className="text-xs muted">Signed {shortDate(agreement.agreement_date)} · Service day 1 {shortDate(agreement.ads_live_date)}</div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <Link href={`#client-${agreement.id}`} className="btn !h-9">View full record</Link>
+                      {canManage && (
+                        <RecordIncomePayment
+                          agreement={agreement}
+                          setupRemaining={summary.setupRemaining}
+                          periods={summary.periods}
+                          suggestedPeriod={summary.nextRecurringPeriodStart}
+                          moneyAccounts={moneyAccounts}
+                        />
+                      )}
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
           </div>
         </div>
       )}
 
       {agreements.length > 0 && (
-        <div className="mb-3">
+        <div className="income-full-details-heading mb-3">
           <SectionHeader title="Full client details" subtitle="Every added client keeps a complete agreement and payment record here." />
         </div>
       )}
 
-      <div className="space-y-4">
+      <div className="income-full-details space-y-4">
         {agreements.length === 0 && (
           <div className="card"><EmptyState title="No client agreements yet" description="Add the first agreement to track signed dates, ads / automation-live Day 1, payments, and 30-day billing." icon="income" /></div>
         )}
