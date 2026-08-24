@@ -90,6 +90,10 @@ export default function IncomeAgreementControls({
               <button type="button" onClick={() => setEditing(false)} className="icon-btn">✕</button>
             </div>
             <IncomeAgreementFields agreement={agreement} moneyAccounts={moneyAccounts} />
+            <div className="agreement-balance-preview">
+              <span>Receiving bank belongs to each payment</span>
+              <strong className="!text-xs !font-medium">Open Payment history on the client card to change the bank for a recorded payment.</strong>
+            </div>
             {state.error && <p className="text-sm" style={{ color: "var(--red)" }}>{state.error}</p>}
             <button disabled={pending} className="btn btn-primary w-full !h-12">
               {pending ? "Saving…" : "Save changes"}

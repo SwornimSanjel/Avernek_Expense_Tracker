@@ -239,7 +239,7 @@ create table if not exists public.settlements (
 );
 
 -- Client agreements and money received. Ads-live is service day 1; recurring
--- obligations begin every exact 30 days because the setup fee covers cycle one.
+-- obligations begin on its monthly anniversary because setup covers month one.
 create table if not exists public.income_agreements (
   id                        uuid primary key default gen_random_uuid(),
   client_name               text not null,

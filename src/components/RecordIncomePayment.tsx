@@ -106,7 +106,7 @@ export default function RecordIncomePayment({
 
         {paymentFor === "recurring" && (
           <label className="block text-xs muted">
-            30-day cycle covered
+            Monthly service period covered
             <select
               name="billing_period_start"
               value={periodStart}

@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { exec, one, transaction } from "@/lib/db";
 import { requireSession } from "@/lib/auth/server";
 import { assertAppOwner } from "@/lib/authz";
-import { addCalendarDays } from "@/lib/income";
+import { addCalendarMonths } from "@/lib/income";
 import type {
   Currency,
   IncomeAccountType,
@@ -310,19 +310,12 @@ export async function recordIncomePayment(
   const agreement = await one<{
     client_name: string;
     ads_live_date: string;
-    billing_anchor_date: string;
     currency: Currency;
     setup_amount: number | string;
     recurring_amount: number | string;
   }>(
     `select a.client_name, a.ads_live_date, a.currency,
-            a.setup_amount, a.recurring_amount,
-            coalesce(
-              (select min(p.paid_on)
-                 from public.income_payments p
-                where p.agreement_id = a.id and p.payment_for = 'setup'),
-              a.ads_live_date
-            ) as billing_anchor_date
+            a.setup_amount, a.recurring_amount
        from public.income_agreements a where a.id = $1`,
     [agreementId]
   );
@@ -337,13 +330,13 @@ export async function recordIncomePayment(
   let period: string | null = null;
   if (paymentFor === "recurring") {
     if (!validDate(billingPeriodStart)) {
-      return { error: "Choose which 30-day service cycle this payment covers.", ok: null };
+      return { error: "Choose which monthly service period this payment covers.", ok: null };
     }
     const anchored = Array.from({ length: 240 }, (_, index) =>
-      addCalendarDays(agreement.billing_anchor_date, (index + 1) * 30)
+      addCalendarMonths(agreement.ads_live_date, index + 1)
     ).includes(billingPeriodStart);
     if (!anchored) {
-      return { error: "That billing period is not an exact 30-day cycle from the first setup payment date.", ok: null };
+      return { error: "That billing period is not a monthly renewal date from Service Day 1.", ok: null };
     }
     period = billingPeriodStart;
   }
@@ -395,6 +388,85 @@ export async function recordIncomePayment(
   revalidatePath("/funds");
   revalidatePath("/");
   return { error: null, ok: `Payment recorded for ${agreement.client_name}.` };
+}
+
+export async function updateIncomePayment(
+  _previous: IncomeFormState,
+  formData: FormData
+): Promise<IncomeFormState> {
+  await requireIncomeAdmin();
+  const paymentId = stringValue(formData, "payment_id");
+  const amount = Number(formData.get("amount"));
+  const paidOn = stringValue(formData, "paid_on");
+  const moneyAccountId = stringValue(formData, "money_account_id");
+  const reference = stringValue(formData, "reference") || null;
+  const note = stringValue(formData, "note") || null;
+
+  if (!paymentId) return { error: "Payment not found.", ok: null };
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return { error: "Payment amount must be greater than zero.", ok: null };
+  }
+  if (!validDate(paidOn)) return { error: "Enter the payment date.", ok: null };
+
+  const payment = await one<{
+    agreement_id: string;
+    payment_for: IncomePaymentFor;
+    billing_period_start: string | null;
+    currency: Currency;
+    setup_amount: number | string;
+    recurring_amount: number | string;
+  }>(
+    `select p.agreement_id, p.payment_for, p.billing_period_start,
+            a.currency, a.setup_amount, a.recurring_amount
+       from public.income_payments p
+       join public.income_agreements a on a.id = p.agreement_id
+      where p.id = $1`,
+    [paymentId]
+  );
+  if (!payment) return { error: "Payment no longer exists.", ok: null };
+
+  let account: Awaited<ReturnType<typeof paymentAccount>>;
+  try {
+    account = await paymentAccount(moneyAccountId, payment.currency);
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Choose the receiving account.", ok: null };
+  }
+
+  const otherPayments = await one<{ paid: number | string }>(
+    payment.payment_for === "setup"
+      ? `select coalesce(sum(amount), 0) as paid
+           from public.income_payments
+          where agreement_id = $1 and payment_for = 'setup' and id <> $2`
+      : `select coalesce(sum(amount), 0) as paid
+           from public.income_payments
+          where agreement_id = $1 and payment_for = 'recurring'
+            and billing_period_start = $2 and id <> $3`,
+    payment.payment_for === "setup"
+      ? [payment.agreement_id, paymentId]
+      : [payment.agreement_id, payment.billing_period_start, paymentId]
+  );
+  const agreed = Number(
+    payment.payment_for === "setup" ? payment.setup_amount : payment.recurring_amount
+  );
+  const available = Math.max(0, agreed - Number(otherPayments?.paid ?? 0));
+  if (amount > available) {
+    return { error: `Amount cannot exceed the remaining ${available.toLocaleString("en-NP")}.`, ok: null };
+  }
+
+  const changed = await exec(
+    `update public.income_payments
+        set amount = $1, paid_on = $2, received_in = $3,
+            money_account_id = $4, account_name = $5,
+            reference = $6, note = $7
+      where id = $8`,
+    [amount, paidOn, account.receivedIn, account.id, account.name, reference, note, paymentId]
+  );
+  if (!changed) return { error: "Payment no longer exists.", ok: null };
+
+  revalidatePath("/income");
+  revalidatePath("/funds");
+  revalidatePath("/");
+  return { error: null, ok: "Payment updated." };
 }
 
 export async function setIncomeAgreementStatus(

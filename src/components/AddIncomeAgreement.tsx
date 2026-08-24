@@ -35,7 +35,7 @@ export default function AddIncomeAgreement({ moneyAccounts }: { moneyAccounts: M
         <div className="modal-header">
           <div>
             <h2 className="text-lg font-bold">New client agreement</h2>
-            <p className="text-xs muted">Ads / automation live is Service Day 1. Recurring billing starts 30 days after the first setup payment date.</p>
+            <p className="text-xs muted">Ads / automation live is Service Day 1. The first recurring payment is due one calendar month after that date.</p>
           </div>
           <button type="button" onClick={() => setOpen(false)} className="icon-btn">
             ✕

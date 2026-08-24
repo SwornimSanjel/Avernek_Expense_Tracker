@@ -153,7 +153,7 @@ export default async function ClientsPage({
         <StatTile label="Active clients" value={String(active.length)} hint={`${agreements.length} total · ${former.length} inactive`} icon="users" tone="accent" />
         <StatTile label="Money in" value={totalsLabel(collected)} hint="All client receipts" icon="income" tone="green" />
         <StatTile label="Due now" value={totalsLabel(outstanding)} hint="Setup + recurring outstanding" icon="clock" tone="amber" />
-        <StatTile label="Active recurring" value={totalsLabel(recurring)} hint="Expected every 30 days" icon="subscription" tone="blue" />
+        <StatTile label="Active recurring" value={totalsLabel(recurring)} hint="Expected every month" icon="subscription" tone="blue" />
         <StatTile label="Client money out" value={formatIncomeMoney(companyClientSpendNpr, "NPR")} hint={`${formatIncomeMoney(clientSpendNpr, "NPR")} incl. founder-paid`} icon="expense" tone="amber" />
       </div>
 
@@ -213,7 +213,7 @@ export default async function ClientsPage({
                 <Metric label="Collected" value={formatIncomeMoney(selectedSummary!.totalCollected, selected.currency)} tone="var(--green)" />
                 <Metric label="Due now" value={formatIncomeMoney(selectedSummary!.totalDueNow, selected.currency)} sub={dueLabel(selectedSummary!.nextRecurringDueDate ?? selectedSummary!.setupNextDueDate)} tone={selectedSummary!.totalDueNow > 0 ? "var(--amber)" : "var(--green)"} />
                 <Metric label="Setup left" value={formatIncomeMoney(selectedSummary!.setupRemaining, selected.currency)} />
-                <Metric label="Recurring / 30 days" value={formatIncomeMoney(Number(selected.recurring_amount), selected.currency)} />
+                <Metric label="Recurring / month" value={formatIncomeMoney(Number(selected.recurring_amount), selected.currency)} />
                 <Metric label="Client delivery cost" value={formatIncomeMoney(selectedAllSpend, "NPR")} sub={`${formatIncomeMoney(selectedCompanySpend, "NPR")} paid from company money`} tone="var(--red)" />
                 <Metric label="Net contribution" value={selectedNet == null ? "Mixed currencies" : formatIncomeMoney(selectedNet, "NPR")} sub="Collected minus all linked client costs" tone={selectedNet != null && selectedNet < 0 ? "var(--red)" : "var(--green)"} />
               </div>

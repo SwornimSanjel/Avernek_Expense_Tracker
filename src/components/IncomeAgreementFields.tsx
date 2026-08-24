@@ -7,7 +7,7 @@ import type {
   MoneyAccount,
   SetupPaymentTerms,
 } from "@/lib/types";
-import { addCalendarDays } from "@/lib/income";
+import { addCalendarMonths } from "@/lib/income";
 
 const today = () => {
   const date = new Date();
@@ -32,6 +32,9 @@ export default function IncomeAgreementFields({
   );
   const [initialPaid, setInitialPaid] = useState("");
   const [initialPaidOn, setInitialPaidOn] = useState(today());
+  const [adsLiveDate, setAdsLiveDate] = useState(
+    agreement?.ads_live_date ?? today()
+  );
   const [currency, setCurrency] = useState<Currency>(agreement?.currency ?? "NPR");
   const dueAmount = useMemo(
     () => Math.max(0, Number(setupAmount || 0) - Number(initialPaid || 0)),
@@ -85,10 +88,11 @@ export default function IncomeAgreementFields({
               name="ads_live_date"
               type="date"
               required
-              defaultValue={agreement?.ads_live_date ?? today()}
+              value={adsLiveDate}
+              onChange={(event) => setAdsLiveDate(event.target.value)}
               className="input"
             />
-            <p className="field-help">This is when delivery goes live. Recurring billing is timed separately from the first setup payment date.</p>
+            <p className="field-help">The first month begins here. The first recurring payment is due on this date next month.</p>
           </Field>
         </div>
       </FormSection>
@@ -99,7 +103,7 @@ export default function IncomeAgreementFields({
         description="What the client owes for the first cycle and every cycle after."
       >
         <div className="grid sm:grid-cols-[1fr_1fr_120px] gap-3">
-          <Field label="First 30 days / setup">
+          <Field label="First service month / setup">
             <input
               name="setup_amount"
               type="number"
@@ -112,7 +116,7 @@ export default function IncomeAgreementFields({
               className="input tnum"
             />
           </Field>
-          <Field label="Recurring every 30 days">
+          <Field label="Recurring every month">
             <input
               name="recurring_amount"
               type="number"
@@ -188,15 +192,15 @@ export default function IncomeAgreementFields({
                 Both choices hold Avernek&apos;s money. Swornim Global IME is for non-VAT receipts; the company Global IME account is for VAT-bill receipts.
               </p>
               <div className="sm:col-span-2 agreement-balance-preview">
-                <span>First recurring payment date · 30 days after this payment</span>
-                <strong className="tnum">{addCalendarDays(initialPaidOn, 30)}</strong>
+                <span>First recurring payment date · one month after Service Day 1</span>
+                <strong className="tnum">{addCalendarMonths(adsLiveDate, 1)}</strong>
               </div>
             </div>
           )}
         </FormSection>
       )}
 
-      <details className="agreement-details">
+      <details className="agreement-details" open={agreement ? true : undefined}>
         <summary>
           <span>
             <strong>Optional agreement details</strong>
@@ -257,18 +261,12 @@ export default function IncomeAgreementFields({
             ) : (
               <input type="hidden" name="setup_advance_percent" value="100" />
             )}
-            <Field label="Recurring payment due">
-              <div className="flex items-center gap-2">
-                <input
-                  name="recurring_due_days_before"
-                  type="number"
-                  min="0"
-                  max="30"
-                  defaultValue={agreement?.recurring_due_days_before ?? 0}
-                  className="input tnum !w-20"
-                />
-                <span className="text-xs muted">days before each next 30-day cycle</span>
+            <Field label="Recurring schedule">
+              <div className="agreement-balance-preview !min-h-[48px]">
+                <span>Due monthly on the Service Day 1 anniversary</span>
+                <strong className="tnum">{addCalendarMonths(adsLiveDate, 1)}</strong>
               </div>
+              <input type="hidden" name="recurring_due_days_before" value="0" />
             </Field>
           </div>
           <Field label="Agreement notes (optional)">

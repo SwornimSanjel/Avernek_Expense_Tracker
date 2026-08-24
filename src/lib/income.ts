@@ -27,6 +27,15 @@ export function addCalendarDays(value: string, days: number): string {
   return isoDate(date);
 }
 
+export function addCalendarMonths(value: string, months: number): string {
+  const { year, month, day } = dateParts(value);
+  const targetMonthIndex = month - 1 + months;
+  const targetYear = year + Math.floor(targetMonthIndex / 12);
+  const normalizedMonth = ((targetMonthIndex % 12) + 12) % 12;
+  const lastDay = new Date(Date.UTC(targetYear, normalizedMonth + 1, 0)).getUTCDate();
+  return isoDate(new Date(Date.UTC(targetYear, normalizedMonth, Math.min(day, lastDay))));
+}
+
 function daysBetween(from: string, to: string) {
   return Math.floor((utcDate(to).getTime() - utcDate(from).getTime()) / 86_400_000);
 }
@@ -93,10 +102,10 @@ export type IncomeAgreementSummary = {
 };
 
 /**
- * Generate recurring obligations in exact 30-day billing cycles. Service Day 1
- * is the ads/automation-live date, while recurring billing starts 30 days after
- * the first setup payment date. Before any setup payment exists, the service
- * live date is used as a temporary fallback anchor.
+ * Generate recurring obligations on the monthly anniversary of Service Day 1.
+ * The setup amount covers the first service month. The first recurring fee is
+ * therefore due one calendar month after ads/automation goes live. Setup
+ * payment dates never move the service or recurring schedule.
  * Payments stay allocated to a specific cycle so a prepayment cannot hide an
  * older unpaid cycle.
  */
@@ -111,8 +120,7 @@ export function summarizeIncomeAgreement(
     (payment) => payment.payment_for === "recurring"
   );
   const setupPaid = setupPayments.reduce((sum, payment) => sum + Number(payment.amount), 0);
-  const billingAnchorDate =
-    setupPayments.map((payment) => payment.paid_on).sort()[0] ?? agreement.ads_live_date;
+  const billingAnchorDate = agreement.ads_live_date;
   const setupAmount = Number(agreement.setup_amount);
   const setupRemaining = Math.max(0, setupAmount - setupPaid);
 
@@ -122,24 +130,30 @@ export function summarizeIncomeAgreement(
     Boolean(agreement.service_end_date && agreement.service_end_date <= today);
   const cycleReferenceDate =
     hasEnded && agreement.service_end_date ? agreement.service_end_date : today;
-  const elapsedDays = hasStarted
-    ? Math.max(0, daysBetween(agreement.ads_live_date, cycleReferenceDate))
-    : 0;
-  const cycleIndex = Math.floor(elapsedDays / 30);
+  let cycleIndex = 0;
+  if (hasStarted) {
+    while (addCalendarMonths(agreement.ads_live_date, cycleIndex + 1) <= cycleReferenceDate) {
+      cycleIndex += 1;
+    }
+  }
   const currentCycleStart = hasStarted
-    ? addCalendarDays(agreement.ads_live_date, cycleIndex * 30)
+    ? addCalendarMonths(agreement.ads_live_date, cycleIndex)
     : null;
-  const currentCycleDay = hasStarted ? (elapsedDays % 30) + 1 : 0;
+  const followingCycleStart = hasStarted
+    ? addCalendarMonths(agreement.ads_live_date, cycleIndex + 1)
+    : agreement.ads_live_date;
+  const currentCycleLength = currentCycleStart
+    ? daysBetween(currentCycleStart, followingCycleStart)
+    : 0;
+  const currentCycleDay = currentCycleStart
+    ? daysBetween(currentCycleStart, cycleReferenceDate) + 1
+    : 0;
   const nextCycleStart = hasEnded
     ? null
-    : hasStarted
-      ? addCalendarDays(agreement.ads_live_date, (cycleIndex + 1) * 30)
-      : agreement.ads_live_date;
+    : followingCycleStart;
   const daysUntilNextCycle = hasEnded
     ? 0
-    : hasStarted
-      ? 30 - (elapsedDays % 30)
-      : Math.max(0, daysBetween(today, agreement.ads_live_date));
+    : Math.max(0, daysBetween(today, followingCycleStart));
 
   let setupDueNow = 0;
   let setupNextDueDate: string | null = null;
@@ -173,7 +187,7 @@ export function summarizeIncomeAgreement(
   const periods: RecurringPeriod[] = [];
   let upcomingIncluded = 0;
   for (let index = 1; index <= 240; index += 1) {
-    const periodStart = addCalendarDays(billingAnchorDate, index * 30);
+    const periodStart = addCalendarMonths(billingAnchorDate, index);
     if (
       agreement.service_end_date &&
       periodStart > agreement.service_end_date &&
@@ -181,10 +195,7 @@ export function summarizeIncomeAgreement(
     ) {
       break;
     }
-    const dueDate = addCalendarDays(
-      periodStart,
-      -Number(agreement.recurring_due_days_before)
-    );
+    const dueDate = periodStart;
     const isDue = dueDate <= today;
     if (!isDue && periodStart > latestPaidPeriod) upcomingIncluded += 1;
 
@@ -192,7 +203,7 @@ export function summarizeIncomeAgreement(
     const agreed = Number(agreement.recurring_amount);
     periods.push({
       periodStart,
-      periodEnd: addCalendarDays(periodStart, 29),
+      periodEnd: addCalendarDays(addCalendarMonths(periodStart, 1), -1),
       dueDate,
       agreed,
       paid,
@@ -238,10 +249,12 @@ export function summarizeIncomeAgreement(
     currentCycleNumber: hasStarted ? cycleIndex + 1 : 0,
     currentCycleDay,
     currentCycleStart,
-    currentCycleEnd: currentCycleStart ? addCalendarDays(currentCycleStart, 29) : null,
+    currentCycleEnd: currentCycleStart ? addCalendarDays(followingCycleStart, -1) : null,
     nextCycleStart,
     daysUntilNextCycle,
-    cycleProgress: hasStarted ? Math.min(100, (currentCycleDay / 30) * 100) : 0,
+    cycleProgress: hasStarted && currentCycleLength > 0
+      ? Math.min(100, (currentCycleDay / currentCycleLength) * 100)
+      : 0,
     periods,
   };
 }
