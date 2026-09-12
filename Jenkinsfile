@@ -18,16 +18,15 @@
 //        ID: avernek-expense-tracker-env
 //        File: production .env
 //
-//   2. Add Jenkins credential for Slack bot:
-//        Kind: Secret text
-//        ID: avernek-slack-bot-token
-//        Secret: xoxb-xxxxxxxxxxxxxxxx
-//
-//   3. Install Jenkins plugin:
+//   2. Install Jenkins plugin:
 //        Slack Notification
 //
-//   4. Make sure the Slack bot is invited to:
-//        #website-build-alert
+//   3. Configure Slack globally (Manage Jenkins -> System -> Slack):
+//        Workspace, credential (bot token) and default channel are all set
+//        there. This Jenkinsfile does not pass channel or tokenCredentialId
+//        to slackSend, so it always uses those global defaults.
+//
+//   4. Make sure the Slack bot is invited to the channel configured above.
 //
 //   5. Allow Jenkins to access Docker:
 //        sudo usermod -aG docker jenkins
@@ -79,10 +78,6 @@ pipeline {
     KEEP_IMAGES = '5'
 
     DOCKER_BUILDKIT = '1'
-
-    // Slack notifications
-    SLACK_CHANNEL = '#website-build-alert'
-    SLACK_CREDENTIAL = 'avernek-slack-bot-token'
   }
 
   stages {
@@ -608,8 +603,6 @@ pipeline {
           : "Jenkins build #${env.BUILD_NUMBER}"
 
         slackSend(
-          channel: env.SLACK_CHANNEL,
-          tokenCredentialId: env.SLACK_CREDENTIAL,
           botUser: true,
           color: 'danger',
           failOnError: false,
