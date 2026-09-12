@@ -5,41 +5,66 @@ import {
   recordIncomePayment,
   type IncomeFormState,
 } from "@/app/(app)/income/actions";
-import { formatIncomeMoney, periodLabel, type RecurringPeriod } from "@/lib/income";
+import {
+  PAYMENT_METHOD_LABELS,
+  formatIncomeMoney,
+  periodLabel,
+  todayIso,
+  type IncomeAgreementSummary,
+} from "@/lib/income";
 import type { IncomeAgreement, IncomePaymentFor, MoneyAccount } from "@/lib/types";
 
 const initialState: IncomeFormState = { error: null, ok: null };
 
-function today() {
-  const date = new Date();
-  const offset = date.getTimezoneOffset();
-  return new Date(date.getTime() - offset * 60_000).toISOString().slice(0, 10);
-}
-
+/**
+ * Record any client payment — a partial setup instalment, a website payment, or
+ * a monthly cycle. Nothing is ever recreated: each payment is its own record
+ * and the balances recalculate from the set of them.
+ */
 export default function RecordIncomePayment({
   agreement,
-  setupRemaining,
-  periods,
-  suggestedPeriod,
+  summary,
   moneyAccounts,
+  compact,
 }: {
   agreement: IncomeAgreement;
-  setupRemaining: number;
-  periods: RecurringPeriod[];
-  suggestedPeriod: string | null;
+  summary: IncomeAgreementSummary;
   moneyAccounts: MoneyAccount[];
+  compact?: boolean;
 }) {
+  const streams = summary.recurring.streams.filter((stream) => stream.billingStartDate);
+  const targets: { value: IncomePaymentFor; label: string; remaining: number }[] = [
+    { value: "setup", label: "Initial / setup billing", remaining: summary.setup.remaining },
+    ...(summary.website
+      ? [
+          {
+            value: "website" as const,
+            label: "Website project billing",
+            remaining: summary.website.remaining,
+          },
+        ]
+      : []),
+    ...(streams.length
+      ? [{ value: "recurring" as const, label: "Monthly recurring cycle", remaining: summary.recurring.dueNow }]
+      : []),
+  ];
+
   const [open, setOpen] = useState(false);
   const [paymentFor, setPaymentFor] = useState<IncomePaymentFor>(
-    setupRemaining > 0 ? "setup" : "recurring"
+    targets.find((target) => target.remaining > 0)?.value ?? targets[0]?.value ?? "setup"
   );
+  const [streamKey, setStreamKey] = useState(
+    summary.recurring.nextDuePeriod?.stream ?? streams[0]?.key ?? "combined"
+  );
+  const activeStream = streams.find((stream) => stream.key === streamKey) ?? streams[0] ?? null;
   const [periodStart, setPeriodStart] = useState(
-    suggestedPeriod ?? periods[0]?.periodStart ?? ""
+    summary.recurring.nextDuePeriod?.periodStart ?? activeStream?.periods[0]?.periodStart ?? ""
   );
   const [state, action, pending] = useActionState(recordIncomePayment, initialState);
+
   const selectedPeriod = useMemo(
-    () => periods.find((period) => period.periodStart === periodStart),
-    [periodStart, periods]
+    () => activeStream?.periods.find((period) => period.periodStart === periodStart) ?? null,
+    [activeStream, periodStart]
   );
   const matchingAccounts = moneyAccounts.filter(
     (account) => account.is_active && account.currency === agreement.currency
@@ -51,28 +76,34 @@ export default function RecordIncomePayment({
 
   if (!open) {
     return (
-      <button onClick={() => setOpen(true)} className="btn btn-primary !h-9 !px-3 text-sm">
-        <span className="text-base leading-none">＋</span> Record payment
+      <button
+        onClick={() => setOpen(true)}
+        className={`btn btn-primary ${compact ? "!h-9 !px-3 text-sm" : ""}`}
+      >
+        <span className="text-base leading-none">＋</span> Add payment
       </button>
     );
   }
 
-  const suggestedAmount =
-    paymentFor === "setup" ? setupRemaining : (selectedPeriod?.remaining ?? 0);
+  const suggested =
+    paymentFor === "setup"
+      ? summary.setup.remaining
+      : paymentFor === "website"
+        ? summary.website?.remaining ?? 0
+        : selectedPeriod?.remaining ?? 0;
 
   return (
     <div className="modal-backdrop">
-      <form
-        action={action}
-        className="modal-panel md:max-w-lg p-5 md:p-6 space-y-4"
-      >
+      <form action={action} className="modal-panel md:max-w-lg p-5 md:p-6 space-y-4">
         <input type="hidden" name="agreement_id" value={agreement.id} />
         <div className="modal-header">
           <div>
-            <h2 className="text-lg font-bold">Record client payment</h2>
+            <h2 className="text-lg font-bold">Add payment</h2>
             <p className="text-xs muted">{agreement.client_name}</p>
           </div>
-          <button type="button" onClick={() => setOpen(false)} className="icon-btn">✕</button>
+          <button type="button" onClick={() => setOpen(false)} className="icon-btn">
+            ✕
+          </button>
         </div>
 
         <div className="grid grid-cols-2 gap-2">
@@ -84,20 +115,23 @@ export default function RecordIncomePayment({
               onChange={(event) => setPaymentFor(event.target.value as IncomePaymentFor)}
               className="input mt-1"
             >
-              <option value="setup">Setup fee</option>
-              <option value="recurring">Recurring cycle</option>
+              {targets.map((target) => (
+                <option key={target.value} value={target.value}>
+                  {target.label}
+                </option>
+              ))}
             </select>
           </label>
           <label className="block text-xs muted">
             Amount ({agreement.currency})
             <input
-              key={`${paymentFor}-${periodStart}`}
+              key={`${paymentFor}-${periodStart}-${streamKey}`}
               name="amount"
               type="number"
               min="0.01"
               step="0.01"
               required
-              defaultValue={suggestedAmount > 0 ? suggestedAmount : ""}
+              defaultValue={suggested > 0 ? suggested : ""}
               placeholder="Amount received"
               className="input tnum mt-1"
             />
@@ -105,58 +139,118 @@ export default function RecordIncomePayment({
         </div>
 
         {paymentFor === "recurring" && (
-          <label className="block text-xs muted">
-            Monthly service period covered
-            <select
-              name="billing_period_start"
-              value={periodStart}
-              onChange={(event) => setPeriodStart(event.target.value)}
-              required
-              className="input mt-1"
-            >
-              {periods.map((period) => (
-                <option key={period.periodStart} value={period.periodStart}>
-                  {periodLabel(period)} · {formatIncomeMoney(period.remaining, agreement.currency)} left
-                </option>
-              ))}
-            </select>
-          </label>
+          <>
+            {summary.recurring.mode === "separate" && streams.length > 1 && (
+              <label className="block text-xs muted">
+                Which monthly service
+                <select
+                  name="billing_stream"
+                  value={streamKey}
+                  onChange={(event) => {
+                    const key = event.target.value as typeof streamKey;
+                    setStreamKey(key);
+                    const stream = streams.find((item) => item.key === key);
+                    setPeriodStart(
+                      stream?.nextDuePeriod?.periodStart ?? stream?.periods[0]?.periodStart ?? ""
+                    );
+                  }}
+                  className="input mt-1"
+                >
+                  {streams.map((stream) => (
+                    <option key={stream.key} value={stream.key}>
+                      {stream.label} · {formatIncomeMoney(stream.monthlyAmount, agreement.currency)} / month
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            {summary.recurring.mode === "separate" && streams.length <= 1 && (
+              <input type="hidden" name="billing_stream" value={streamKey} />
+            )}
+            <label className="block text-xs muted">
+              Billing period covered
+              <select
+                name="billing_period_start"
+                value={periodStart}
+                onChange={(event) => setPeriodStart(event.target.value)}
+                required
+                className="input mt-1"
+              >
+                {(activeStream?.periods ?? []).map((period) => (
+                  <option key={period.periodStart} value={period.periodStart}>
+                    {periodLabel(period)} ·{" "}
+                    {period.remaining > 0
+                      ? `${formatIncomeMoney(period.remaining, agreement.currency)} left`
+                      : "settled"}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </>
         )}
 
         <div className="grid grid-cols-2 gap-2">
           <label className="block text-xs muted">
-            Paid on
+            Payment received date
             <input
               name="paid_on"
               type="date"
               required
-              defaultValue={today()}
+              defaultValue={todayIso()}
               className="input mt-1"
             />
           </label>
           <label className="block text-xs muted">
-            Client paid into
-            <select name="money_account_id" required defaultValue="" className="input mt-1">
-              <option value="" disabled>Choose account</option>
+            Received into
+            <select
+              name="money_account_id"
+              required
+              defaultValue={agreement.default_money_account_id ?? ""}
+              className="input mt-1"
+            >
+              <option value="" disabled>
+                Choose account
+              </option>
               {matchingAccounts.map((account) => (
-                <option key={account.id} value={account.id}>{account.name}</option>
+                <option key={account.id} value={account.id}>
+                  {account.kind === "company_bank"
+                    ? "VAT account"
+                    : account.kind === "personal_custody"
+                      ? "Non-VAT account"
+                      : account.name}{" "}
+                  · {account.name}
+                </option>
               ))}
             </select>
           </label>
         </div>
 
-        <p className="text-xs muted">The receipt increases the selected company-money balance. Swornim Global IME is still company money, not Swornim&apos;s investment.</p>
-
         <div className="grid grid-cols-2 gap-2">
+          <label className="block text-xs muted">
+            Method (optional)
+            <select name="method" defaultValue="" className="input mt-1">
+              <option value="">Not recorded</option>
+              {Object.entries(PAYMENT_METHOD_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
           <label className="block text-xs muted">
             Reference (optional)
             <input name="reference" placeholder="Transaction / invoice ID" className="input mt-1" />
           </label>
-          <label className="block text-xs muted">
-            Note (optional)
-            <input name="note" placeholder="Half advance, cash, etc." className="input mt-1" />
-          </label>
         </div>
+
+        <label className="block text-xs muted">
+          Note (optional)
+          <input name="note" placeholder="Advance, second instalment, cash…" className="input mt-1" />
+        </label>
+
+        <p className="text-xs muted">
+          This is client revenue and raises the selected account balance. Founder money belongs under “Add funds”, not here.
+        </p>
 
         {state.error && <p className="text-sm" style={{ color: "var(--red)" }}>{state.error}</p>}
         <button disabled={pending} className="btn btn-primary w-full !h-12">

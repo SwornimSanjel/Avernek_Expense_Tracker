@@ -7,11 +7,63 @@ export type ConversionStatus =
   | "pending";
 export type ExpenseSource = "manual" | "recurring";
 export type Cycle = "monthly" | "annual";
-export type IncomeAgreementStatus = "active" | "paused" | "completed";
-export type IncomeServiceType = "ai_automation" | "marketing" | "full_track";
+export type IncomeAgreementStatus =
+  | "active"
+  | "pending"
+  | "paused"
+  | "completed"
+  | "cancelled";
+/** Legacy mirror of the has_website / has_ads / has_automation flags. */
+export type IncomeServiceType =
+  | "ai_automation"
+  | "marketing"
+  | "full_track"
+  | "website"
+  | "custom";
+export type ServiceKey = "website" | "ads" | "automation";
+export type WebsiteStatus =
+  | "not_started"
+  | "in_progress"
+  | "review"
+  | "completed"
+  | "on_hold"
+  | "cancelled";
+export type AdsStatus =
+  | "not_started"
+  | "preparation"
+  | "ready"
+  | "live"
+  | "paused"
+  | "stopped";
+export type AutomationStatus =
+  | "not_started"
+  | "development"
+  | "testing"
+  | "ready"
+  | "live"
+  | "paused"
+  | "stopped";
+export type RecurringBillingMode = "combined" | "separate";
+/** Which recurring fee a payment settles. Combined = ads + automation as one. */
+export type BillingStream = "combined" | "ads" | "automation";
 export type SetupPaymentTerms = "full_upfront" | "half_advance" | "custom";
-export type IncomePaymentFor = "setup" | "recurring";
+export type IncomePaymentFor = "setup" | "recurring" | "website";
+export type IncomePaymentMethod =
+  | "bank_transfer"
+  | "cash"
+  | "cheque"
+  | "wallet"
+  | "card"
+  | "other";
+/** Derived from agreed amount vs payments; never stored. */
+export type BillingStatus = "unpaid" | "partial" | "paid" | "overdue";
 export type IncomeAccountType = "company" | "personal";
+/** Money in that is not revenue: it moves a balance, never sales or profit. */
+export type CapitalInflowType =
+  | "founder_investment"
+  | "owner_contribution"
+  | "loan_received"
+  | "other_non_revenue";
 export type ExpenseFundingSource = "personal" | "company_funds";
 export type MoneyAccountKind =
   | "company_bank"
@@ -127,21 +179,76 @@ export interface Settlement {
   note: string | null;
 }
 
+/**
+ * One client agreement. Services are a free combination of website, ads and
+ * automation, so every service block below is meaningful only when its own
+ * has_* flag is set.
+ *
+ * Dates are deliberately distinct and none of them stands in for another:
+ *   agreement_date                signed / contract start
+ *   setup_due_date                when the setup balance is due
+ *   website_*                     the website project's own timeline
+ *   ads_live_date                 the day ads actually went live (nullable)
+ *   automation_live_date          the day automation actually went live (nullable)
+ *   recurring_billing_start_date  the anchor every monthly cycle counts from
+ *
+ * Balances, payment status, current cycle and overdue state are never stored.
+ * They are computed from the amounts here plus income_payments — see
+ * summarizeIncomeAgreement in lib/income.ts.
+ */
 export interface IncomeAgreement {
   id: string;
   client_name: string;
   agreement_name: string | null;
+  /** Legacy mirror of the has_* flags. Written by the app, never read back. */
   service_type: IncomeServiceType;
+  has_website: boolean;
+  has_ads: boolean;
+  has_automation: boolean;
   contact_name: string | null;
   agreement_date: string;
-  ads_live_date: string;
-  setup_amount: number;
-  recurring_amount: number;
+  contract_end_date: string | null;
+  /** VAT vs non-VAT classification: which account this client normally pays into. */
+  default_money_account_id: string | null;
   currency: Currency;
+
+  setup_amount: number;
   setup_payment_terms: SetupPaymentTerms;
   setup_advance_percent: number;
   setup_due_date: string;
+  /** Admin override for the derived date the setup balance reached zero. */
+  setup_paid_in_full_date: string | null;
+  setup_notes: string | null;
+
+  website_amount: number;
+  website_status: WebsiteStatus;
+  website_start_date: string | null;
+  website_expected_date: string | null;
+  website_completed_date: string | null;
+  website_due_date: string | null;
+  website_paid_in_full_date: string | null;
+  website_notes: string | null;
+
+  ads_status: AdsStatus;
+  ads_prep_start_date: string | null;
+  ads_live_date: string | null;
+  ads_monthly_amount: number | null;
+  ads_billing_start_date: string | null;
+  ads_notes: string | null;
+
+  automation_status: AutomationStatus;
+  automation_live_date: string | null;
+  automation_monthly_amount: number | null;
+  automation_billing_start_date: string | null;
+  automation_notes: string | null;
+
+  recurring_billing_mode: RecurringBillingMode;
+  /** Combined-mode monthly fee. */
+  recurring_amount: number;
+  recurring_billing_start_date: string | null;
+  setup_covers_first_cycle: boolean;
   recurring_due_days_before: number;
+
   status: IncomeAgreementStatus;
   service_end_date: string | null;
   notes: string | null;
@@ -150,20 +257,50 @@ export interface IncomeAgreement {
   updated_at: string;
 }
 
+/**
+ * One receipt from a client. Payments are never overwritten by a running
+ * total: totalPaid and remaining are summed from these rows, so a client can
+ * pay in as many instalments as they like without anything being recreated.
+ */
 export interface IncomePayment {
   id: string;
   agreement_id: string;
   payment_for: IncomePaymentFor;
+  /** Recurring payments only: the cycle they settle. */
   billing_period_start: string | null;
+  billing_stream: BillingStream | null;
   amount: number;
   paid_on: string;
   received_in: IncomeAccountType;
   money_account_id: string | null;
   account_name: string | null;
+  method: IncomePaymentMethod | null;
   reference: string | null;
   note: string | null;
   recorded_by: string | null;
   created_at: string;
+  updated_by: string | null;
+  updated_at: string;
+}
+
+/**
+ * Money into an account that is not revenue — founder capital, owner
+ * contributions, loans. It raises the account balance and must never reach
+ * revenue, client income, VAT sales or profit, which is why it has no client.
+ */
+export interface CapitalInflow {
+  id: string;
+  money_account_id: string;
+  inflow_type: CapitalInflowType;
+  amount: number;
+  received_on: string;
+  source_name: string | null;
+  reference: string | null;
+  note: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_by: string | null;
+  updated_at: string;
 }
 
 export interface MoneyAccount {

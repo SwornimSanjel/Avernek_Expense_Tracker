@@ -14,7 +14,7 @@ export function PageHeader({
   title: string;
   subtitle?: string;
   action?: React.ReactNode;
-  eyebrow?: string;
+  eyebrow?: React.ReactNode;
 }) {
   const reduceMotion = useReducedMotion();
   return (
@@ -123,8 +123,10 @@ export function LedgerCard({
   moneyIn,
   moneyOut,
   balance,
+  capitalIn,
   balanceLabel = "Current balance",
   outLabel = "All-time out",
+  inLabel = "Client income in",
   note,
   icon = "wallet",
   tone = "accent",
@@ -135,6 +137,9 @@ export function LedgerCard({
   moneyIn?: string;
   moneyOut: string;
   balance?: string;
+  /** Founder capital and other non-revenue money. Shown apart from income. */
+  capitalIn?: string;
+  inLabel?: string;
   balanceLabel?: string;
   outLabel?: string;
   note: string;
@@ -174,13 +179,19 @@ export function LedgerCard({
       {!expenseOnly && (
         <div className="ledger-flows mt-3">
           <div>
-            <span>All-time in</span>
+            <span>{inLabel}</span>
             <strong className="tnum">{moneyIn}</strong>
           </div>
           <div>
             <span>{outLabel}</span>
             <strong className="tnum">{moneyOut}</strong>
           </div>
+          {capitalIn && (
+            <div className="ledger-flow-capital">
+              <span>Capital added · not revenue</span>
+              <strong className="tnum">{capitalIn}</strong>
+            </div>
+          )}
         </div>
       )}
       <p className="ledger-note">{note}</p>

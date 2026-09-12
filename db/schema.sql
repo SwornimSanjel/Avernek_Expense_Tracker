@@ -238,17 +238,31 @@ create table if not exists public.settlements (
   created_at   timestamptz not null default now()
 );
 
--- Client agreements and money received. Ads-live is service day 1; recurring
--- obligations begin on its monthly anniversary because setup covers month one.
+-- Client agreements and money received.
+--
+-- A client buys any combination of Website / Ads / AI automation. Website is
+-- one-off project billing; ads and automation are recurring. Recurring cycles
+-- are anchored on recurring_billing_start_date, which is deliberately its own
+-- editable field: the agreement date, the payment date and the day a service
+-- actually goes live are three different things.
+--
+-- service_type is a legacy mirror of the three has_* flags, written by the app
+-- and never read back, so the two can not disagree.
 create table if not exists public.income_agreements (
   id                        uuid primary key default gen_random_uuid(),
   client_name               text not null,
   agreement_name            text,
   service_type              text not null default 'full_track'
-                              check (service_type in ('ai_automation','marketing','full_track')),
+                              check (service_type in ('ai_automation','marketing','full_track','website','custom')),
+  has_website               boolean not null default false,
+  has_ads                   boolean not null default false,
+  has_automation            boolean not null default false,
   contact_name              text,
   agreement_date            date not null,
-  ads_live_date             date not null,
+  contract_end_date         date,
+  default_money_account_id  uuid references public.money_accounts (id) on delete set null,
+  -- Nullable on purpose: a client signs and pays weeks before anything is live.
+  ads_live_date             date,
   setup_amount              numeric(14,2) not null default 0 check (setup_amount >= 0),
   recurring_amount          numeric(14,2) not null default 0 check (recurring_amount >= 0),
   currency                  text not null default 'NPR' check (currency in ('NPR','USD')),
@@ -257,10 +271,44 @@ create table if not exists public.income_agreements (
   setup_advance_percent     numeric(5,2) not null default 50
                               check (setup_advance_percent >= 0 and setup_advance_percent <= 100),
   setup_due_date            date not null,
+  -- Derived from the payments; stored only so an admin can correct the date the
+  -- setup balance really reached zero.
+  setup_paid_in_full_date   date,
+  setup_notes               text,
+  website_amount            numeric(14,2) not null default 0 check (website_amount >= 0),
+  website_status            text not null default 'not_started'
+                              check (website_status in ('not_started','in_progress','review','completed','on_hold','cancelled')),
+  website_start_date        date,
+  website_expected_date     date,
+  website_completed_date    date,
+  website_due_date          date,
+  website_paid_in_full_date date,
+  website_notes             text,
+  ads_status                text not null default 'not_started'
+                              check (ads_status in ('not_started','preparation','ready','live','paused','stopped')),
+  ads_prep_start_date       date,
+  ads_monthly_amount        numeric(14,2) check (ads_monthly_amount is null or ads_monthly_amount >= 0),
+  ads_billing_start_date    date,
+  ads_notes                 text,
+  automation_status         text not null default 'not_started'
+                              check (automation_status in ('not_started','development','testing','ready','live','paused','stopped')),
+  automation_live_date      date,
+  automation_monthly_amount numeric(14,2) check (automation_monthly_amount is null or automation_monthly_amount >= 0),
+  automation_billing_start_date date,
+  automation_notes          text,
+  -- 'combined' = one monthly fee for ads + automation; 'separate' = each service
+  -- carries its own amount and its own billing start date.
+  recurring_billing_mode    text not null default 'combined'
+                              check (recurring_billing_mode in ('combined','separate')),
+  recurring_billing_start_date date,
+  -- The setup fee pays for the cycle beginning on the billing start date, so the
+  -- first recurring invoice falls one calendar month later. Off for clients whose
+  -- setup fee bought something else.
+  setup_covers_first_cycle  boolean not null default true,
   recurring_due_days_before integer not null default 0
                               check (recurring_due_days_before >= 0 and recurring_due_days_before <= 30),
   status                    text not null default 'active'
-                              check (status in ('active','paused','completed')),
+                              check (status in ('active','pending','paused','completed','cancelled')),
   service_end_date          date,
   notes                     text,
   created_by                uuid references public.users (id) on delete set null,
@@ -268,23 +316,12 @@ create table if not exists public.income_agreements (
   updated_at                timestamptz not null default now()
 );
 -- Added after income_agreements first shipped; see the note above expenses.
+-- Databases created before db/migrations/20260912_client_service_billing.sql get
+-- the service, website, and recurring-anchor columns from that migration.
 alter table public.income_agreements
   add column if not exists service_end_date date;
 alter table public.income_agreements
   add column if not exists service_type text not null default 'full_track';
-
-do $$
-begin
-  if not exists (
-    select 1 from pg_constraint
-    where conname = 'income_agreements_service_type_check'
-      and conrelid = 'public.income_agreements'::regclass
-  ) then
-    alter table public.income_agreements
-      add constraint income_agreements_service_type_check
-      check (service_type in ('ai_automation','marketing','full_track'));
-  end if;
-end $$;
 
 create index if not exists income_agreements_by_client
   on public.income_agreements (client_name);
@@ -294,19 +331,24 @@ create index if not exists income_agreements_by_status
 create table if not exists public.income_payments (
   id                   uuid primary key default gen_random_uuid(),
   agreement_id         uuid not null references public.income_agreements (id) on delete cascade,
-  payment_for          text not null check (payment_for in ('setup','recurring')),
+  payment_for          text not null check (payment_for in ('setup','recurring','website')),
+  -- Only a recurring payment belongs to a billing period and a billing stream.
   billing_period_start date,
+  billing_stream       text check (billing_stream is null or billing_stream in ('combined','ads','automation')),
   amount               numeric(14,2) not null check (amount > 0),
   paid_on              date not null,
   received_in          text not null check (received_in in ('company','personal')),
   money_account_id     uuid references public.money_accounts (id) on delete set null,
   account_name         text,
+  method               text check (method is null or method in ('bank_transfer','cash','cheque','wallet','card','other')),
   reference            text,
   note                 text,
   recorded_by          uuid references public.users (id) on delete set null,
   created_at           timestamptz not null default now(),
+  updated_by           uuid references public.users (id) on delete set null,
+  updated_at           timestamptz not null default now(),
   constraint income_payment_period_check check (
-    (payment_for = 'setup' and billing_period_start is null)
+    (payment_for in ('setup','website') and billing_period_start is null)
     or (payment_for = 'recurring' and billing_period_start is not null)
   )
 );
@@ -320,6 +362,29 @@ create index if not exists income_payments_by_period
   on public.income_payments (agreement_id, billing_period_start);
 create index if not exists income_payments_by_money_account
   on public.income_payments (money_account_id, paid_on desc);
+
+-- Money that arrives without being earned: founder capital, owner
+-- contributions, loans. It raises an account balance and is NEVER client
+-- income, sales, service revenue, VAT-taxable sales or profit — which is why it
+-- carries no client and no agreement.
+create table if not exists public.capital_inflows (
+  id               uuid primary key default gen_random_uuid(),
+  money_account_id uuid not null references public.money_accounts (id) on delete restrict,
+  inflow_type      text not null
+                     check (inflow_type in ('founder_investment','owner_contribution',
+                                            'loan_received','other_non_revenue')),
+  amount           numeric(14,2) not null check (amount > 0),
+  received_on      date not null default current_date,
+  source_name      text,
+  reference        text,
+  note             text,
+  created_by       uuid references public.users (id) on delete set null,
+  created_at       timestamptz not null default now(),
+  updated_by       uuid references public.users (id) on delete set null,
+  updated_at       timestamptz not null default now()
+);
+create index if not exists capital_inflows_by_account
+  on public.capital_inflows (money_account_id, received_on desc);
 
 -- Moving money between accounts is not income or an expense. Both sides are
 -- stored so NPR -> USD exchanges preserve the remaining balance in each unit.

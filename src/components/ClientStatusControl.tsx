@@ -12,8 +12,10 @@ const options: {
   color: string;
 }[] = [
   { value: "active", label: "Active", description: "Currently working", color: "var(--green)" },
+  { value: "pending", label: "Pending", description: "Signed, not started yet", color: "var(--blue)" },
   { value: "paused", label: "Paused", description: "Temporarily on hold", color: "var(--amber)" },
-  { value: "completed", label: "Inactive", description: "Work has ended", color: "var(--muted)" },
+  { value: "completed", label: "Completed", description: "Work has ended", color: "var(--muted)" },
+  { value: "cancelled", label: "Cancelled", description: "Agreement did not proceed", color: "var(--muted)" },
 ];
 
 export default function ClientStatusControl({
@@ -42,8 +44,10 @@ export default function ClientStatusControl({
       return;
     }
     if (
-      next === "completed" &&
-      !window.confirm("Mark this client inactive? Future recurring dues will stop, but all payments and history will remain.")
+      (next === "completed" || next === "cancelled") &&
+      !window.confirm(
+        "Stop future recurring dues for this client? Every payment and date already recorded is kept."
+      )
     ) return;
 
     startTransition(async () => {
@@ -110,7 +114,7 @@ export default function ClientStatusControl({
             })}
           </div>
           <p className="mx-2 mt-2 border-t pt-2 text-[10px] leading-relaxed muted" style={{ borderColor: "var(--line)" }}>
-            Inactive stops future recurring dues and keeps the complete history.
+            Completed and cancelled stop future recurring dues and keep the complete history.
           </p>
         </div>
       )}

@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { exec, one } from "@/lib/db";
 import { requireSession } from "@/lib/auth/server";
 import { assertAppOwner } from "@/lib/authz";
-import type { Currency, MoneyAccountKind } from "@/lib/types";
+import type { CapitalInflowType, Currency, MoneyAccountKind } from "@/lib/types";
 
 export type FundsFormState = { error: string | null; ok: string | null };
 
@@ -128,4 +128,133 @@ export async function addMoneyTransfer(
   revalidatePath("/funds");
   revalidatePath("/");
   return { error: null, ok: `Moved money from ${fromAccount.name} to ${toAccount.name}.` };
+}
+
+// -----------------------------------------------------------------------------
+// Non-revenue money in
+//
+// Founder capital, owner contributions and loans raise an account balance
+// without being earned. Keeping them in their own ledger is the whole reason
+// nobody has to invent a fake client to correct a bank balance — and the reason
+// revenue, client income, VAT sales and profit stay untouched by them.
+// -----------------------------------------------------------------------------
+
+const CAPITAL_TYPES: CapitalInflowType[] = [
+  "founder_investment",
+  "owner_contribution",
+  "loan_received",
+  "other_non_revenue",
+];
+
+function revalidateFunds() {
+  revalidatePath("/funds");
+  revalidatePath("/income");
+  revalidatePath("/");
+}
+
+function parseCapital(formData: FormData) {
+  const accountId = value(formData, "money_account_id");
+  const inflowType = value(formData, "inflow_type") as CapitalInflowType;
+  const amount = Number(formData.get("amount"));
+  const receivedOn = value(formData, "received_on");
+  const sourceName = value(formData, "source_name") || null;
+  const reference = value(formData, "reference") || null;
+  const note = value(formData, "note") || null;
+
+  if (!accountId) return { error: "Choose the account that received the money." } as const;
+  if (!CAPITAL_TYPES.includes(inflowType)) {
+    return { error: "Choose what kind of non-revenue funding this is." } as const;
+  }
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return { error: "The amount must be greater than zero." } as const;
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(receivedOn)) {
+    return { error: "Enter the date the money reached the account." } as const;
+  }
+  return {
+    value: {
+      accountId,
+      inflowType,
+      amount: Math.round(amount * 100) / 100,
+      receivedOn,
+      sourceName,
+      reference,
+      note,
+    },
+  } as const;
+}
+
+export async function addCapitalInflow(
+  _previous: FundsFormState,
+  formData: FormData
+): Promise<FundsFormState> {
+  const session = await owner();
+  const parsed = parseCapital(formData);
+  if ("error" in parsed) return { error: parsed.error ?? "Check the funding details.", ok: null };
+  const input = parsed.value;
+
+  const account = await one<{ name: string; is_active: boolean }>(
+    `select name, is_active from public.money_accounts where id = $1`,
+    [input.accountId]
+  );
+  if (!account?.is_active) return { error: "That account is unavailable.", ok: null };
+
+  await exec(
+    `insert into public.capital_inflows
+       (money_account_id, inflow_type, amount, received_on, source_name, reference, note, created_by)
+     values ($1,$2,$3,$4,$5,$6,$7,$8)`,
+    [
+      input.accountId,
+      input.inflowType,
+      input.amount,
+      input.receivedOn,
+      input.sourceName,
+      input.reference,
+      input.note,
+      session.sub,
+    ]
+  );
+
+  revalidateFunds();
+  return { error: null, ok: `Added to ${account.name}. This is capital, not revenue.` };
+}
+
+export async function updateCapitalInflow(
+  _previous: FundsFormState,
+  formData: FormData
+): Promise<FundsFormState> {
+  const session = await owner();
+  const id = value(formData, "inflow_id");
+  if (!id) return { error: "That funding record was not found.", ok: null };
+  const parsed = parseCapital(formData);
+  if ("error" in parsed) return { error: parsed.error ?? "Check the funding details.", ok: null };
+  const input = parsed.value;
+
+  const changed = await exec(
+    `update public.capital_inflows
+        set money_account_id = $1, inflow_type = $2, amount = $3, received_on = $4,
+            source_name = $5, reference = $6, note = $7, updated_by = $8, updated_at = now()
+      where id = $9`,
+    [
+      input.accountId,
+      input.inflowType,
+      input.amount,
+      input.receivedOn,
+      input.sourceName,
+      input.reference,
+      input.note,
+      session.sub,
+      id,
+    ]
+  );
+  if (!changed) return { error: "That funding record no longer exists.", ok: null };
+
+  revalidateFunds();
+  return { error: null, ok: "Funding record updated." };
+}
+
+export async function deleteCapitalInflow(id: string) {
+  await owner();
+  await exec(`delete from public.capital_inflows where id = $1`, [id]);
+  revalidateFunds();
 }

@@ -8,10 +8,16 @@ import { EmptyState, PageHeader, StatTile } from "@/components/ui";
 import { requireSession } from "@/lib/auth/server";
 import { isAppOwner } from "@/lib/authz";
 import { query } from "@/lib/db";
+import ServiceBadges from "@/components/ServiceBadges";
+import StatusPill from "@/components/StatusPill";
 import {
+  AGREEMENT_STATUS_LABELS,
+  agreementServices,
   daysUntilDate,
   formatIncomeMoney,
-  serviceTypeLabel,
+  formatServiceDate,
+  hasRecurringService,
+  servicesLabel,
   summarizeIncomeAgreement,
 } from "@/lib/income";
 import type {
@@ -54,9 +60,7 @@ function expenseNpr(expense: Expense) {
 }
 
 function statusLabel(status: IncomeAgreement["status"]) {
-  if (status === "completed") return "Inactive";
-  if (status === "paused") return "Paused";
-  return "Active";
+  return AGREEMENT_STATUS_LABELS[status];
 }
 
 function dueLabel(date: string | null) {
@@ -114,7 +118,7 @@ export default async function ClientsPage({
     addTotal(collected, agreement.currency, summary.totalCollected);
     addTotal(outstanding, agreement.currency, summary.totalDueNow);
     if (agreement.status === "active") {
-      addTotal(recurring, agreement.currency, Number(agreement.recurring_amount));
+      addTotal(recurring, agreement.currency, summary.recurring.monthlyTotal);
     }
   }
   for (const expense of expenses) {
@@ -123,8 +127,11 @@ export default async function ClientsPage({
   }
 
   const active = agreements.filter((agreement) => agreement.status === "active");
+  const pending = agreements.filter((agreement) => agreement.status === "pending");
   const paused = agreements.filter((agreement) => agreement.status === "paused");
-  const former = agreements.filter((agreement) => agreement.status === "completed");
+  const former = agreements.filter(
+    (agreement) => agreement.status === "completed" || agreement.status === "cancelled"
+  );
   const selectedSummary = selected ? summaries.get(selected.id)! : null;
   const selectedPayments = selected
     ? payments.filter((payment) => payment.agreement_id === selected.id)
@@ -165,6 +172,7 @@ export default async function ClientsPage({
             <span className="client-count">{agreements.length}</span>
           </Link>
           <ChannelGroup title="Active" agreements={active} selectedId={selected?.id} />
+          {pending.length > 0 && <ChannelGroup title="Pending" agreements={pending} selectedId={selected?.id} />}
           {paused.length > 0 && <ChannelGroup title="Paused" agreements={paused} selectedId={selected?.id} />}
           {former.length > 0 && <ChannelGroup title="Inactive" agreements={former} selectedId={selected?.id} />}
           {agreements.length === 0 && <p className="px-3 py-5 text-xs muted">Add a client to create the first channel.</p>}
@@ -182,9 +190,10 @@ export default async function ClientsPage({
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <h2 className="text-xl font-bold truncate"># {selected.client_name}</h2>
-                        {Number(selected.recurring_amount) > 0 && <span className="pill">Recurring</span>}
+                        <StatusPill kind="billing" value={selectedSummary!.overallStatus} />
                       </div>
-                      <p className="text-xs muted mt-1">{serviceTypeLabel(selected.service_type)} · since {selected.agreement_date}</p>
+                      <div className="mt-1.5"><ServiceBadges services={agreementServices(selected)} /></div>
+                      <p className="text-xs muted mt-1.5">Agreement started {formatServiceDate(selected.agreement_date)}</p>
                     </div>
                   </div>
                   <div className="flex flex-wrap items-center justify-end gap-2.5">
@@ -192,10 +201,9 @@ export default async function ClientsPage({
                     {canManage && selectedSummary && (
                       <RecordIncomePayment
                         agreement={selected}
-                        setupRemaining={selectedSummary.setupRemaining}
-                        periods={selectedSummary.periods}
-                        suggestedPeriod={selectedSummary.nextRecurringPeriodStart}
+                        summary={selectedSummary}
                         moneyAccounts={moneyAccounts}
+                        compact
                       />
                     )}
                     {canManage && (
@@ -203,6 +211,8 @@ export default async function ClientsPage({
                         agreement={selected}
                         moneyAccounts={moneyAccounts}
                         paymentCount={selectedPayments.length}
+                        recurringPaymentCount={selectedPayments.filter((payment) => payment.payment_for === "recurring").length}
+                        redirectOnDelete="/clients"
                       />
                     )}
                   </div>
@@ -211,9 +221,9 @@ export default async function ClientsPage({
 
               <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-px overflow-hidden rounded-b-[17px]" style={{ background: "var(--line)" }}>
                 <Metric label="Collected" value={formatIncomeMoney(selectedSummary!.totalCollected, selected.currency)} tone="var(--green)" />
-                <Metric label="Due now" value={formatIncomeMoney(selectedSummary!.totalDueNow, selected.currency)} sub={dueLabel(selectedSummary!.nextRecurringDueDate ?? selectedSummary!.setupNextDueDate)} tone={selectedSummary!.totalDueNow > 0 ? "var(--amber)" : "var(--green)"} />
-                <Metric label="Setup left" value={formatIncomeMoney(selectedSummary!.setupRemaining, selected.currency)} />
-                <Metric label="Recurring / month" value={formatIncomeMoney(Number(selected.recurring_amount), selected.currency)} />
+                <Metric label="Due now" value={formatIncomeMoney(selectedSummary!.totalDueNow, selected.currency)} sub={dueLabel(selectedSummary!.nextDueDate)} tone={selectedSummary!.totalDueNow > 0 ? "var(--amber)" : "var(--green)"} />
+                <Metric label="Setup + website left" value={formatIncomeMoney(selectedSummary!.setup.remaining + (selectedSummary!.website?.remaining ?? 0), selected.currency)} />
+                <Metric label="Recurring / month" value={hasRecurringService(selected) ? formatIncomeMoney(selectedSummary!.recurring.monthlyTotal, selected.currency) : "—"} />
                 <Metric label="Client delivery cost" value={formatIncomeMoney(selectedAllSpend, "NPR")} sub={`${formatIncomeMoney(selectedCompanySpend, "NPR")} paid from company money`} tone="var(--red)" />
                 <Metric label="Net contribution" value={selectedNet == null ? "Mixed currencies" : formatIncomeMoney(selectedNet, "NPR")} sub="Collected minus all linked client costs" tone={selectedNet != null && selectedNet < 0 ? "var(--red)" : "var(--green)"} />
               </div>
@@ -225,7 +235,12 @@ export default async function ClientsPage({
                 empty="No payments recorded for this client."
                 items={selectedPayments.map((payment) => ({
                   id: payment.id,
-                  title: payment.payment_for === "setup" ? "Setup payment" : "Recurring payment",
+                  title:
+                    payment.payment_for === "setup"
+                      ? "Setup payment"
+                      : payment.payment_for === "website"
+                        ? "Website payment"
+                        : "Monthly recurring payment",
                   meta: `${payment.paid_on} · ${payment.account_name ?? "Company account"}${payment.reference ? ` · ${payment.reference}` : ""}`,
                   amount: `+${formatIncomeMoney(Number(payment.amount), selected.currency)}`,
                   color: "var(--green)",
@@ -250,12 +265,16 @@ export default async function ClientsPage({
               <h3 className="font-semibold">Client record</h3>
               <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-4 mt-4 text-sm">
                 <Detail label="Contact" value={selected.contact_name ?? "Not added"} />
-                <Detail label="Agreement" value={selected.agreement_name ?? "Standard agreement"} />
-                <Detail label="Service live" value={selected.ads_live_date} />
+                <Detail label="Services" value={servicesLabel(selected)} />
+                <Detail label="Ads live" value={selected.has_ads ? formatServiceDate(selected.ads_live_date, "Not live yet") : "—"} />
+                <Detail label="Automation live" value={selected.has_automation ? formatServiceDate(selected.automation_live_date, "Not live yet") : "—"} />
+                <Detail label="Website finalized" value={selected.has_website ? formatServiceDate(selected.website_completed_date, "Not finalized") : "—"} />
+                <Detail label="Recurring billing started" value={hasRecurringService(selected) ? formatServiceDate(selectedSummary!.recurring.streams[0]?.billingStartDate ?? null, "Not started") : "—"} />
+                <Detail label="Current billing period" value={selectedSummary!.recurring.streams[0]?.currentPeriodStart ? `${formatServiceDate(selectedSummary!.recurring.streams[0].currentPeriodStart)} – ${formatServiceDate(selectedSummary!.recurring.streams[0].currentPeriodEnd)}` : "—"} />
                 <Detail label="Status" value={statusLabel(selected.status)} />
               </div>
               <div className="flex flex-wrap gap-2 mt-5 pt-4 border-t" style={{ borderColor: "var(--line)" }}>
-                <Link href={`/income#client-${selected.id}`} className="btn !h-9"><Icon name="income" size={14} /> Open billing details</Link>
+                <Link href={`/income/${selected.id}`} className="btn !h-9"><Icon name="income" size={14} /> Open billing details</Link>
                 <Link href={`/expenses?client=${encodeURIComponent(selected.client_name)}`} className="btn !h-9"><Icon name="expense" size={14} /> View client expenses</Link>
               </div>
               {selected.notes && <p className="text-xs muted mt-4 pt-4 border-t" style={{ borderColor: "var(--line)" }}>{selected.notes}</p>}
@@ -276,7 +295,7 @@ function ChannelGroup({ title, agreements, selectedId }: { title: string; agreem
           <Link key={agreement.id} href={`/clients?client=${agreement.id}`} className={`client-channel ${selectedId === agreement.id ? "client-channel-active" : ""}`}>
             <span className="client-hash">#</span>
             <span className="truncate flex-1">{agreement.client_name.toLocaleLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "client"}</span>
-            {Number(agreement.recurring_amount) > 0 && <span className="client-live" title="Recurring client" />}
+            {hasRecurringService(agreement) && <span className="client-live" title="Recurring client" />}
           </Link>
         ))}
       </div>
@@ -310,14 +329,14 @@ function Portfolio({ agreements, payments, expenses, summaries }: {
               <div className="flex items-start justify-between gap-3">
                 <div className="flex items-center gap-3 min-w-0">
                   <div className="avatar">{initials(agreement.client_name)}</div>
-                  <div className="min-w-0"><h3 className="font-semibold truncate">{agreement.client_name}</h3><p className="text-xs muted mt-0.5">{serviceTypeLabel(agreement.service_type)} · {statusLabel(agreement.status)}</p></div>
+                  <div className="min-w-0"><h3 className="font-semibold truncate">{agreement.client_name}</h3><div className="mt-1"><ServiceBadges services={agreementServices(agreement)} /></div><p className="text-xs muted mt-1">{statusLabel(agreement.status)}</p></div>
                 </div>
                 <Icon name="arrow" size={15} className="muted shrink-0 mt-2" />
               </div>
               <div className="grid grid-cols-2 gap-2 mt-4">
                 <MiniMetric label="Collected" value={formatIncomeMoney(summary.totalCollected, agreement.currency)} />
                 <MiniMetric label="Due now" value={formatIncomeMoney(summary.totalDueNow, agreement.currency)} warn={summary.totalDueNow > 0} />
-                <MiniMetric label="Recurring" value={formatIncomeMoney(Number(agreement.recurring_amount), agreement.currency)} />
+                <MiniMetric label="Recurring" value={hasRecurringService(agreement) ? formatIncomeMoney(summary.recurring.monthlyTotal, agreement.currency) : "—"} />
                 <MiniMetric label="Client costs" value={formatIncomeMoney(spend, "NPR")} />
               </div>
               <p className="text-[11px] muted mt-3">{paymentCount} payment record{paymentCount === 1 ? "" : "s"} · {ownExpenses.length} linked expense{ownExpenses.length === 1 ? "" : "s"}</p>

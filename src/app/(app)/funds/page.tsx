@@ -5,13 +5,15 @@ import { EmptyState, LedgerCard, PageHeader, SectionHeader, StatTile } from "@/c
 import Icon from "@/components/Icons";
 import AddMoneyAccount from "@/components/AddMoneyAccount";
 import AddMoneyTransfer from "@/components/AddMoneyTransfer";
+import AddAccountFunds from "@/components/AddAccountFunds";
 import {
   computeMoneyAccountBalances,
   expenseAmountFromAccount,
   moneyAccountKindLabel,
 } from "@/lib/funds";
-import { formatIncomeMoney } from "@/lib/income";
+import { CAPITAL_INFLOW_LABELS, formatIncomeMoney } from "@/lib/income";
 import type {
+  CapitalInflow,
   Currency,
   Expense,
   IncomeAgreement,
@@ -35,18 +37,25 @@ function addTotal(map: Map<string, number>, currency: Currency, amount: number) 
 export default async function FundsPage() {
   const session = await requireSession();
   const canManage = isAppOwner(session);
-  const [accounts, payments, expenses, transfers, agreements] = await Promise.all([
+  const [accounts, payments, expenses, transfers, agreements, capitalInflows] = await Promise.all([
     query<MoneyAccount>(`select * from public.money_accounts where is_active = true order by currency, name`),
     query<IncomePayment>(`select * from public.income_payments order by paid_on desc, created_at desc`),
     query<Expense>(`select * from public.expenses order by expense_date desc, created_at desc`),
     query<MoneyTransfer>(`select * from public.money_transfers order by transfer_date desc, created_at desc`),
     query<IncomeAgreement>(`select * from public.income_agreements`),
+    query<CapitalInflow>(`select * from public.capital_inflows order by received_on desc, created_at desc`),
   ]);
   const companyExpenses = expenses.filter((expense) => expense.funding_source === "company_funds");
   const founderSpent = expenses
     .filter((expense) => expense.funding_source !== "company_funds")
     .reduce((total, expense) => total + Number(expense.amount_npr ?? 0), 0);
-  const balances = computeMoneyAccountBalances(accounts, payments, companyExpenses, transfers);
+  const balances = computeMoneyAccountBalances(
+    accounts,
+    payments,
+    companyExpenses,
+    transfers,
+    capitalInflows
+  );
   const primaryBalances = [
     balances.find((item) => item.account.kind === "personal_custody"),
     balances.find((item) => item.account.kind === "company_bank"),
@@ -56,6 +65,7 @@ export default async function FundsPage() {
   const held = new Map<string, number>();
   const companyIn = new Map<string, number>();
   const companyOut = new Map<string, number>();
+  const capitalIn = new Map<string, number>();
   const unassigned = new Map<string, number>();
   balances.forEach((item) => addTotal(held, item.account.currency, item.balance));
   payments.forEach((payment) => {
@@ -63,6 +73,12 @@ export default async function FundsPage() {
     const agreement = agreementById.get(payment.agreement_id);
     if (account) addTotal(companyIn, account.currency, Number(payment.amount));
     else if (agreement) addTotal(companyIn, agreement.currency, Number(payment.amount));
+  });
+  // Capital is summed apart from client receipts on purpose: it moves balances
+  // without ever being revenue.
+  capitalInflows.forEach((inflow) => {
+    const account = accountById.get(inflow.money_account_id);
+    addTotal(capitalIn, account?.currency ?? "NPR", Number(inflow.amount));
   });
   companyExpenses.forEach((expense) => {
     const account = accountById.get(expense.money_account_id ?? "");
@@ -106,6 +122,16 @@ export default async function FundsPage() {
         currency: account?.currency ?? expense.currency,
       };
     }),
+    ...capitalInflows.map((inflow) => ({
+      key: `capital-${inflow.id}`,
+      date: inflow.received_on,
+      createdAt: inflow.created_at,
+      kind: "capital" as const,
+      title: CAPITAL_INFLOW_LABELS[inflow.inflow_type],
+      detail: `${accountById.get(inflow.money_account_id)?.name ?? "Company account"}${inflow.source_name ? ` · from ${inflow.source_name}` : ""} · not revenue`,
+      amount: Number(inflow.amount),
+      currency: accountById.get(inflow.money_account_id)?.currency ?? "NPR",
+    })),
     ...transfers.map((transfer) => ({
       key: `transfer-${transfer.id}`,
       date: transfer.transfer_date,
@@ -127,15 +153,20 @@ export default async function FundsPage() {
         title="Company money"
         subtitle="Balances for the two company-money accounts. Founder/team investment remains separate under Expenses and Contributions."
         action={canManage ? (
-          <div className="flex gap-2"><AddMoneyAccount /><AddMoneyTransfer balances={balances} /></div>
+          <div className="flex flex-wrap gap-2">
+            <AddAccountFunds accounts={accounts} />
+            <AddMoneyAccount />
+            <AddMoneyTransfer balances={balances} />
+          </div>
         ) : undefined}
       />
 
-      <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-3 mb-5">
+      <div className="grid sm:grid-cols-2 xl:grid-cols-5 gap-3 mb-5">
         <StatTile label="Founder money spent" value={formatIncomeMoney(founderSpent, "NPR")} hint="Pre-registration + later own-pocket expenses" emphasis icon="contribution" tone="accent" />
-        <StatTile label="Company money in" value={totalsLabel(companyIn)} hint="All client receipts; transfers excluded" icon="income" tone="green" />
+        <StatTile label="Client revenue in" value={totalsLabel(companyIn)} hint="Client receipts only; capital and transfers excluded" icon="income" tone="green" />
+        <StatTile label="Capital added" value={totalsLabel(capitalIn)} hint="Founder investment, owner contributions, loans — never revenue" icon="contribution" tone="blue" />
         <StatTile label="Company money out" value={totalsLabel(companyOut)} hint="Operating expenses; transfers excluded" icon="expense" tone="amber" />
-        <StatTile label="Company money held" value={totalsLabel(held)} hint="Across Swornim Global IME, company Global IME, and wallets" emphasis icon="wallet" tone="green" />
+        <StatTile label="Company money held" value={totalsLabel(held)} hint="Client revenue plus capital, minus spending and transfers" emphasis icon="wallet" tone="green" />
       </div>
 
       {unassigned.size > 0 && (
@@ -168,6 +199,7 @@ export default async function FundsPage() {
                 moneyIn={formatIncomeMoney(item.received + item.transferredIn, item.account.currency)}
                 moneyOut={formatIncomeMoney(item.spent + item.transferredOut, item.account.currency)}
                 balance={formatIncomeMoney(item.balance, item.account.currency)}
+                capitalIn={item.capitalIn > 0 ? formatIncomeMoney(item.capitalIn, item.account.currency) : undefined}
                 note={personallyHeld ? "Legally held by Swornim, economically owned by Avernek. It never becomes founder investment." : "Official-account income and spending remain separate from both other ledgers."}
                 icon={personallyHeld ? "user" : "bank"}
                 tone={personallyHeld ? "blue" : "green"}
@@ -191,8 +223,11 @@ export default async function FundsPage() {
               <div className="text-xs muted mt-1">{moneyAccountKindLabel(item.account)}{item.account.holder_name ? ` · holder ${item.account.holder_name}` : ""}</div>
               <div className="tnum text-2xl font-bold mt-5" style={{ color: item.balance < 0 ? "var(--red)" : "var(--ink)" }}>{formatIncomeMoney(item.balance, item.account.currency)}</div>
               <div className="grid grid-cols-2 gap-2 mt-4 text-xs">
-                <div><span className="muted">Received</span><div className="tnum mt-0.5">{formatIncomeMoney(item.received + item.transferredIn, item.account.currency)}</div></div>
+                <div><span className="muted">Client revenue in</span><div className="tnum mt-0.5">{formatIncomeMoney(item.received + item.transferredIn, item.account.currency)}</div></div>
                 <div><span className="muted">Used / moved</span><div className="tnum mt-0.5">{formatIncomeMoney(item.spent + item.transferredOut, item.account.currency)}</div></div>
+                {item.capitalIn > 0 && (
+                  <div className="col-span-2"><span className="muted">Capital added · not revenue</span><div className="tnum mt-0.5">{formatIncomeMoney(item.capitalIn, item.account.currency)}</div></div>
+                )}
               </div>
             </div>
           ))}
@@ -205,10 +240,10 @@ export default async function FundsPage() {
           {activity.length === 0 && <EmptyState title="No fund activity yet" description="Record a client payment or account transfer to begin." icon="wallet" />}
           {activity.slice(0, 100).map((item) => (
             <div key={item.key} className="list-row p-4 flex items-center gap-3" style={{ borderColor: "var(--line)" }}>
-              <div className="stat-icon" style={{ color: item.kind === "income" ? "var(--green)" : item.kind === "expense" ? "var(--red)" : "var(--blue)" }}><Icon name={item.kind === "income" ? "income" : item.kind === "expense" ? "expense" : "arrow"} size={16} /></div>
+              <div className="stat-icon" style={{ color: item.kind === "income" ? "var(--green)" : item.kind === "expense" ? "var(--red)" : item.kind === "capital" ? "#b8a0fb" : "var(--blue)" }}><Icon name={item.kind === "income" ? "income" : item.kind === "expense" ? "expense" : item.kind === "capital" ? "contribution" : "arrow"} size={16} /></div>
               <div className="min-w-0 flex-1"><div className="font-medium truncate">{item.title}</div><div className="text-xs muted mt-0.5 truncate">{item.date} · {item.detail}</div></div>
-              <div className="tnum text-right font-semibold" style={{ color: item.kind === "income" ? "var(--green)" : item.kind === "expense" ? "var(--red)" : "var(--ink)" }}>
-                {item.kind === "income" ? "+" : item.kind === "expense" ? "−" : ""}{formatIncomeMoney(item.amount, item.currency)}
+              <div className="tnum text-right font-semibold" style={{ color: item.kind === "income" ? "var(--green)" : item.kind === "expense" ? "var(--red)" : item.kind === "capital" ? "#b8a0fb" : "var(--ink)" }}>
+                {item.kind === "income" || item.kind === "capital" ? "+" : item.kind === "expense" ? "−" : ""}{formatIncomeMoney(item.amount, item.currency)}
                 {item.kind === "transfer" && <div className="text-xs muted mt-0.5">→ {formatIncomeMoney(item.toAmount, item.toCurrency)}</div>}
               </div>
             </div>

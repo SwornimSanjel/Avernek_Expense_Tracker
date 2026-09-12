@@ -1,13 +1,20 @@
 import type {
+  CapitalInflow,
   Expense,
   IncomePayment,
   MoneyAccount,
   MoneyTransfer,
 } from "@/lib/types";
 
+/**
+ * `received` is client revenue and `capitalIn` is money the founders or a
+ * lender put in. Both raise the cash balance; only `received` is revenue, and
+ * nothing in the app may add them together under a revenue label.
+ */
 export type MoneyAccountBalance = {
   account: MoneyAccount;
   received: number;
+  capitalIn: number;
   spent: number;
   transferredIn: number;
   transferredOut: number;
@@ -34,12 +41,16 @@ export function computeMoneyAccountBalances(
   accounts: MoneyAccount[],
   payments: IncomePayment[],
   expenses: Expense[],
-  transfers: MoneyTransfer[]
+  transfers: MoneyTransfer[],
+  capitalInflows: CapitalInflow[] = []
 ): MoneyAccountBalance[] {
   return accounts.map((account) => {
     const received = payments
       .filter((payment) => payment.money_account_id === account.id)
       .reduce((sum, payment) => sum + Number(payment.amount), 0);
+    const capitalIn = capitalInflows
+      .filter((inflow) => inflow.money_account_id === account.id)
+      .reduce((sum, inflow) => sum + Number(inflow.amount), 0);
     const spent = expenses
       .filter(
         (expense) =>
@@ -57,10 +68,11 @@ export function computeMoneyAccountBalances(
     return {
       account,
       received,
+      capitalIn,
       spent,
       transferredIn,
       transferredOut,
-      balance: received + transferredIn - spent - transferredOut,
+      balance: received + capitalIn + transferredIn - spent - transferredOut,
     };
   });
 }
@@ -70,4 +82,17 @@ export function moneyAccountKindLabel(account: MoneyAccount) {
   if (account.kind === "personal_custody") return "Swornim-held account · non-VAT receipts · company-owned money";
   if (account.kind === "digital_wallet") return "Digital wallet / prepaid balance";
   return "Company cash";
+}
+
+export function capitalInflowTotals(
+  inflows: CapitalInflow[],
+  accounts: MoneyAccount[]
+): Map<string, number> {
+  const currencyByAccount = new Map(accounts.map((account) => [account.id, account.currency]));
+  const totals = new Map<string, number>();
+  for (const inflow of inflows) {
+    const currency = currencyByAccount.get(inflow.money_account_id) ?? "NPR";
+    totals.set(currency, (totals.get(currency) ?? 0) + Number(inflow.amount));
+  }
+  return totals;
 }

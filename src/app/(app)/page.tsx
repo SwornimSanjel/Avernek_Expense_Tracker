@@ -6,6 +6,7 @@ import { EmptyState, FxBadge, LedgerCard, PageHeader, SectionHeader, StatTile } 
 import { npr, usd } from "@/lib/format";
 import type {
   AppUser,
+  CapitalInflow,
   Category,
   Expense,
   IncomePayment,
@@ -25,7 +26,7 @@ export const dynamic = "force-dynamic";
 export default async function Dashboard() {
   const session = await requireSession();
 
-  const [exp, shareRows, cats, vends, recs, team, me, currentRate, accounts, payments, transfers] =
+  const [exp, shareRows, cats, vends, recs, team, me, currentRate, accounts, payments, transfers, capitalInflows] =
     await Promise.all([
       query<Expense>(
         `select * from public.expenses order by expense_date desc`
@@ -42,6 +43,7 @@ export default async function Dashboard() {
       query<MoneyAccount>(`select * from public.money_accounts where is_active = true order by currency, name`),
       query<IncomePayment>(`select * from public.income_payments order by paid_on desc, created_at desc`),
       query<MoneyTransfer>(`select * from public.money_transfers order by transfer_date desc, created_at desc`),
+      query<CapitalInflow>(`select * from public.capital_inflows order by received_on desc, created_at desc`),
     ]);
 
   const expenses = exp.map((expense) => ({
@@ -61,7 +63,15 @@ export default async function Dashboard() {
       .filter((expense) => expense.funding_source !== "company_funds")
       .map((expense) => Number(expense.amount_npr ?? 0))
   );
-  const accountBalances = computeMoneyAccountBalances(accounts, payments, expenses, transfers);
+  // Client payments are revenue; capital raises the balance without ever being
+  // revenue. Both reach the balance, only one reaches "money in".
+  const accountBalances = computeMoneyAccountBalances(
+    accounts,
+    payments,
+    expenses,
+    transfers,
+    capitalInflows
+  );
   const primaryAccountBalances = [
     accountBalances.find((item) => item.account.kind === "personal_custody"),
     accountBalances.find((item) => item.account.kind === "company_bank"),
@@ -189,6 +199,7 @@ export default async function Dashboard() {
               moneyIn={formatIncomeMoney(item.received + item.transferredIn, item.account.currency)}
               moneyOut={formatIncomeMoney(item.spent + item.transferredOut, item.account.currency)}
               balance={formatIncomeMoney(item.balance, item.account.currency)}
+              capitalIn={item.capitalIn > 0 ? formatIncomeMoney(item.capitalIn, item.account.currency) : undefined}
               note={personallyHeld ? "The account holder is Swornim, but every rupee in this ledger belongs to Avernek." : "Income, expenses, and transfers remain separate from founder investment."}
               icon={personallyHeld ? "user" : "bank"}
               tone={personallyHeld ? "blue" : "green"}
