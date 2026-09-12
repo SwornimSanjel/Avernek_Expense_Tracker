@@ -8,19 +8,32 @@
 //   -> apply schema + migrations, seed the administrator
 //   -> smoke test
 //   -> automatically restore the previous release if deployment fails
+//   -> send Slack notification if build fails
 //   -> prune old images
 //
 // One-time Jenkins host requirements:
-//   1. Add Jenkins credential:
+//
+//   1. Add Jenkins credential for production environment:
 //        Kind: Secret file
 //        ID: avernek-expense-tracker-env
 //        File: production .env
 //
-//   2. Allow Jenkins to access Docker:
+//   2. Add Jenkins credential for Slack bot:
+//        Kind: Secret text
+//        ID: avernek-slack-bot-token
+//        Secret: xoxb-xxxxxxxxxxxxxxxx
+//
+//   3. Install Jenkins plugin:
+//        Slack Notification
+//
+//   4. Make sure the Slack bot is invited to:
+//        #website-build-alert
+//
+//   5. Allow Jenkins to access Docker:
 //        sudo usermod -aG docker jenkins
 //        sudo systemctl restart jenkins
 //
-//   3. Install:
+//   6. Install:
 //        docker with Compose v2
 //        git
 //        curl
@@ -58,7 +71,7 @@ pipeline {
 
     // Host-side published port only; the container still listens on 3000
     // internally. Change this if the host port is already taken.
-    APP_PORT        = '3001'
+    APP_PORT = '3001'
 
     IMAGE        = "avernek-expense-tracker:${env.BUILD_NUMBER}"
     IMAGE_LATEST = 'avernek-expense-tracker:latest'
@@ -66,6 +79,10 @@ pipeline {
     KEEP_IMAGES = '5'
 
     DOCKER_BUILDKIT = '1'
+
+    // Slack notifications
+    SLACK_CHANNEL = '#website-build-alert'
+    SLACK_CREDENTIAL = 'avernek-slack-bot-token'
   }
 
   stages {
@@ -322,17 +339,14 @@ pipeline {
           done
 
           # ----------------------------------------------------------
-          # Baseline schema. Fully guarded with "if not exists" /
-          # "create or replace", so re-running it is a no-op.
+          # Baseline schema.
           # ----------------------------------------------------------
 
           echo "Applying db/schema.sql"
           psql_db -q < db/schema.sql
 
           # ----------------------------------------------------------
-          # Migrations, each applied exactly once and recorded in a
-          # ledger. Ordering is the filename's date prefix; the glob
-          # is already sorted.
+          # Migrations.
           # ----------------------------------------------------------
 
           psql_db -q -c "
@@ -359,8 +373,6 @@ pipeline {
 
             echo "  applying:        $name"
 
-            # -1 wraps the file in a single transaction, so a failure
-            # halfway through leaves nothing behind.
             psql_db -q -1 < "$file"
 
             psql_db -q -c \
@@ -369,8 +381,7 @@ pipeline {
           done
 
           # ----------------------------------------------------------
-          # Administrator. Idempotent: re-running resets the password
-          # to whatever ADMIN_PASSWORD currently says.
+          # Administrator.
           # ----------------------------------------------------------
 
           echo "Seeding administrator"
@@ -583,7 +594,41 @@ pipeline {
     }
 
     failure {
-      echo "Build ${env.BUILD_NUMBER} failed. Check the rollback output above."
+      script {
+        def shortCommit = env.GIT_COMMIT
+          ? env.GIT_COMMIT.take(8)
+          : 'unknown'
+
+        def branchName = env.BRANCH_NAME ?: env.GIT_BRANCH ?: 'unknown'
+
+        def buildUrl = env.BUILD_URL ?: ''
+
+        def buildLink = buildUrl
+          ? "<${buildUrl}|Open Jenkins Build>"
+          : "Jenkins build #${env.BUILD_NUMBER}"
+
+        slackSend(
+          channel: env.SLACK_CHANNEL,
+          tokenCredentialId: env.SLACK_CREDENTIAL,
+          botUser: true,
+          color: 'danger',
+          failOnError: false,
+          message: """
+:x: *Avernek Expense Tracker deployment failed*
+
+*Job:* ${env.JOB_NAME}
+*Build:* #${env.BUILD_NUMBER}
+*Branch:* ${branchName}
+*Commit:* `${shortCommit}`
+*Image:* `${env.IMAGE}`
+*Status:* FAILURE
+
+${buildLink}
+""".stripIndent().trim()
+        )
+      }
+
+      echo "Build ${env.BUILD_NUMBER} failed."
     }
 
     aborted {
