@@ -243,6 +243,7 @@ function parseAgreement(formData: FormData) {
       currency,
       status,
       defaultAccountId,
+      deductsTds: checkbox(formData, "deducts_tds"),
       setupAmount,
       recurringAmount,
       goLive,
@@ -271,6 +272,7 @@ function agreementColumns(value: AgreementValues) {
     work_start_date: value.workStart,
     contract_end_date: value.contractEndDate,
     default_money_account_id: value.defaultAccountId,
+    deducts_tds: value.deductsTds,
     currency: value.currency,
     status: value.status,
   };

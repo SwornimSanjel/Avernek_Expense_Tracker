@@ -46,3 +46,21 @@ export function billFromBankTotal(total: number, withVat: boolean, withTds: bool
   const factor = 1 + (withVat ? VAT_RATE : 0) - (withTds ? TDS_RATE : 0);
   return round2(total / factor);
 }
+
+export type PriceBreakdown = {
+  /** Our price, excluding VAT. This is Avernek's income. */
+  price: number;
+  vat: number;
+  /** What the VAT invoice asks the client for. */
+  invoice: number;
+  /** 1.5% of the price before VAT — never of the invoice total. */
+  tds: number;
+  /** What reaches the bank: invoice minus TDS when the client deducts it. */
+  bank: number;
+};
+
+export function priceBreakdown(price: number, withVat: boolean, withTds: boolean): PriceBreakdown {
+  const vat = withVat ? vatOn(price) : 0;
+  const tds = withTds ? tdsOn(price) : 0;
+  return { price, vat, invoice: round2(price + vat), tds, bank: round2(price + vat - tds) };
+}

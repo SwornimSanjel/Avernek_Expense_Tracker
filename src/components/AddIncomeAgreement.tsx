@@ -64,7 +64,26 @@ export default function AddIncomeAgreement({
 
   return (
     <div className="modal-backdrop">
-      <form ref={formRef} action={action} className="modal-panel md:max-w-3xl p-5 md:p-6 space-y-4">
+      <form
+        ref={formRef}
+        action={action}
+        // Only the "Save client" button on the last step may save. Enter in a
+        // field moves to the next step instead of saving half a client.
+        onSubmit={(event) => {
+          if (!isLast) {
+            event.preventDefault();
+            next();
+          }
+        }}
+        onKeyDown={(event) => {
+          const target = event.target as HTMLElement;
+          if (event.key === "Enter" && target.tagName === "INPUT" && !isLast) {
+            event.preventDefault();
+            next();
+          }
+        }}
+        className="modal-panel md:max-w-3xl p-5 md:p-6 space-y-4"
+      >
         <div className="modal-header">
           <div>
             <h2 className="text-lg font-bold">New client</h2>
@@ -121,12 +140,22 @@ export default function AddIncomeAgreement({
               Back
             </button>
           )}
+          {/* Distinct keys: React must not reuse the Continue <button> as the
+              submit button, or the same click both advances and saves. */}
           {!isLast ? (
-            <button type="button" onClick={next} className="btn btn-primary flex-1 !h-12">
+            <button
+              key="continue"
+              type="button"
+              onClick={(event) => {
+                event.preventDefault();
+                next();
+              }}
+              className="btn btn-primary flex-1 !h-12"
+            >
               Continue
             </button>
           ) : (
-            <button disabled={pending} className="btn btn-primary flex-1 !h-12">
+            <button key="save" type="submit" disabled={pending} className="btn btn-primary flex-1 !h-12">
               {pending ? "Saving…" : "Save client"}
             </button>
           )}

@@ -197,6 +197,7 @@ export default function RecordIncomePayment({
               key={`${paymentFor}-${periodStart}`}
               currency={agreement.currency}
               vatSuggested={account?.kind === "company_bank"}
+              tdsSuggested={agreement.deducts_tds}
               suggestedAmount={remaining > 0 ? remaining : undefined}
               remainingHint={`${formatIncomeMoney(remaining, agreement.currency)} still owed on this (excluding VAT). Paying less is fine — it stays partly paid.`}
             />

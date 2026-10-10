@@ -212,6 +212,8 @@ export interface IncomeAgreement {
   /** Optional: the day work began (preparing ads, building automation...). */
   work_start_date: string | null;
   contract_end_date: string | null;
+  /** True when the client withholds 1.5% TDS from what it pays. */
+  deducts_tds: boolean;
   /** VAT vs non-VAT classification: which account this client normally pays into. */
   default_money_account_id: string | null;
   currency: Currency;

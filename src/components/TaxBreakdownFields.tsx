@@ -23,6 +23,7 @@ export default function TaxBreakdownFields({
   suggestedAmount,
   record,
   vatSuggested,
+  tdsSuggested = false,
   remainingHint,
   onAmountChange,
 }: {
@@ -36,6 +37,8 @@ export default function TaxBreakdownFields({
   record?: { amount: number; vat: number; tds: number };
   /** True when the money arrives in the VAT account; turns VAT on by default. */
   vatSuggested: boolean;
+  /** True when this client normally deducts TDS; pre-selects 1.5%. */
+  tdsSuggested?: boolean;
   /** e.g. "NPR 15,000 still owed on this setup charge" */
   remainingHint?: string;
   onAmountChange?: (amount: number) => void;
@@ -52,7 +55,9 @@ export default function TaxBreakdownFields({
   );
   const initialTds = record?.tds ?? 0;
   const [tdsMode, setTdsMode] = useState<TdsMode>(
-    initialTds <= 0 ? "none" : initialTds === tdsOn(startAmount) ? "auto" : "custom"
+    !editing
+      ? tdsSuggested ? "auto" : "none"
+      : initialTds <= 0 ? "none" : initialTds === tdsOn(startAmount) ? "auto" : "custom"
   );
   const [tdsText, setTdsText] = useState(initialTds > 0 ? String(initialTds) : "");
 
@@ -95,7 +100,7 @@ export default function TaxBreakdownFields({
             setEntry("bill");
           }}
         >
-          I know the bill amount
+          I know our price (excl. VAT)
         </button>
         <button
           type="button"
@@ -111,7 +116,7 @@ export default function TaxBreakdownFields({
 
       {entry === "bill" ? (
         <label className="block">
-          <span className="field-label">Bill amount · excluding VAT ({currency})</span>
+          <span className="field-label">Our price · excluding VAT ({currency})</span>
           <input
             type="number"
             min="0"
@@ -213,15 +218,21 @@ export default function TaxBreakdownFields({
 
       <dl className="money-breakdown">
         <div>
-          <dt>Bill amount · our income</dt>
+          <dt>Our price · our income (excl. VAT)</dt>
           <dd>{formatIncomeMoney(billAmount, currency)}</dd>
         </div>
         <div>
-          <dt>+ VAT · keep aside, not ours</dt>
+          <dt>+ VAT {VAT_RATE * 100}% · IRD&apos;s money, don&apos;t touch</dt>
           <dd>{formatIncomeMoney(vat, currency)}</dd>
         </div>
         <div>
-          <dt>− TDS · withheld by client</dt>
+          <dt>= Invoice to client</dt>
+          <dd>{formatIncomeMoney(round2(billAmount + vat), currency)}</dd>
+        </div>
+        <div>
+          <dt>
+            − TDS {tdsMode === "auto" ? `${TDS_RATE * 100}% of ${formatIncomeMoney(billAmount, currency)} (before VAT)` : "withheld by client"}
+          </dt>
           <dd>{formatIncomeMoney(tds, currency)}</dd>
         </div>
         <div className="money-breakdown-total">

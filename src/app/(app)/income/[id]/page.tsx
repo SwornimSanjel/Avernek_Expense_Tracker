@@ -12,6 +12,7 @@ import IncomeAgreementControls from "@/components/IncomeAgreementControls";
 import EditIncomePayment from "@/components/EditIncomePayment";
 import DeleteIncomePayment from "@/components/DeleteIncomePayment";
 import MarkServiceLive from "@/components/MarkServiceLive";
+import PriceBreakdownTable from "@/components/PriceBreakdownTable";
 import { bankAmount } from "@/lib/tax";
 import { accountShortName } from "@/lib/funds";
 import {
@@ -101,6 +102,9 @@ export default async function ClientBillingPage({
   const dates = keyDates(agreement);
   const monthly = hasRecurringService(agreement);
   const dayOne = goLiveDate(agreement);
+  const usualAccount = agreement.default_money_account_id
+    ? accountById.get(agreement.default_money_account_id)
+    : undefined;
 
   return (
     <div className="income-workspace">
@@ -162,6 +166,7 @@ export default async function ClientBillingPage({
                 : "Chosen per payment"
             }
           />
+          <DetailRow label="Client deducts TDS" value={agreement.deducts_tds ? "Yes · 1.5%" : "No"} />
           <DetailRow label="VAT collected" value={formatIncomeMoney(vatCollected, currency)} />
           <DetailRow label="TDS withheld" value={formatIncomeMoney(tdsWithheld, currency)} />
           <DetailRow label="Currency" value={currency} />
@@ -218,6 +223,43 @@ export default async function ClientBillingPage({
           </ol>
         </div>
       </section>
+
+      {/* ---------------------------------------------------- price + tax */}
+      {(monthly || agreement.has_website) && (
+        <section>
+          <div className="billing-panel">
+            <div className="billing-panel-head">
+              <div>
+                <h2>Agreed prices · with VAT &amp; TDS</h2>
+                <p>
+                  {usualAccount?.kind === "company_bank"
+                    ? "Billed with 13% VAT (pays into the VAT account)."
+                    : usualAccount
+                      ? "No VAT (pays into the non-VAT account)."
+                      : "Shown with VAT; the account is chosen per payment."}{" "}
+                  {agreement.deducts_tds ? "Client deducts 1.5% TDS." : "Client does not deduct TDS."} Change either with “Edit client”.
+                </p>
+              </div>
+            </div>
+            <div className="px-5 pb-5 pt-4">
+              <PriceBreakdownTable
+                currency={currency}
+                withVat={usualAccount ? usualAccount.kind === "company_bank" : true}
+                withTds={agreement.deducts_tds}
+                charges={[
+                  ...(monthly
+                    ? [
+                        { label: "Setup · month 1", amount: Number(agreement.setup_amount) },
+                        { label: "Monthly fee", amount: Number(agreement.recurring_amount) },
+                      ]
+                    : []),
+                  ...(agreement.has_website ? [{ label: "Website", amount: Number(agreement.website_amount) }] : []),
+                ]}
+              />
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* --------------------------------------------------------------------
           Initial / setup billing. Hidden when there is no setup fee and no

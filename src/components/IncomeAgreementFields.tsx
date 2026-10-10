@@ -22,6 +22,7 @@ import {
 } from "@/lib/income";
 import { accountShortName } from "@/lib/funds";
 import TaxBreakdownFields from "./TaxBreakdownFields";
+import PriceBreakdownTable from "./PriceBreakdownTable";
 
 /**
  * Every editable field of one client, asking only for dates that exist in real
@@ -86,6 +87,9 @@ export default function IncomeAgreementFields({
   );
   const [websiteDelivered, setWebsiteDelivered] = useState(agreement?.website_completed_date ?? "");
 
+  const [deductsTds, setDeductsTds] = useState(agreement?.deducts_tds ?? false);
+  const [vatChoice, setVatChoice] = useState(true);
+  const [paidYet, setPaidYet] = useState(false);
   const [initialFor, setInitialFor] = useState<"setup" | "website">("setup");
   const [initialAccountId, setInitialAccountId] = useState("");
   const [initialAmount, setInitialAmount] = useState(0);
@@ -98,6 +102,10 @@ export default function IncomeAgreementFields({
   const openingAccountId = initialAccountId || accountId || accounts[0]?.id || "";
   const openingAccount = accounts.find((account) => account.id === openingAccountId);
   const dayOneMoved = Boolean(agreement) && monthly && dayOne !== originalDayOne;
+  const defaultAccount = accounts.find((account) => account.id === accountId);
+  // VAT follows the account they pay into; only "decide each time" asks.
+  const withVat = defaultAccount ? defaultAccount.kind === "company_bank" : vatChoice;
+  const openingPrice = Number((openingFor === "setup" ? setupAmount : websiteAmount) || 0);
 
   return (
     <div className="space-y-4">
@@ -370,6 +378,56 @@ export default function IncomeAgreementFields({
           </div>
         )}
 
+        {(monthly || hasWebsite) && (
+          <div className="service-block mt-3">
+            <div className="service-block-title">VAT &amp; TDS · worked out for you</div>
+            <div className="grid sm:grid-cols-2 gap-2 mb-3">
+              {defaultAccount ? (
+                <div className="checkbox-row !cursor-default">
+                  <span>
+                    <strong>{withVat ? "VAT bill · 13% added on top" : "No VAT · non-VAT account"}</strong>
+                    <small>Set by the account chosen in step 1 ({accountShortName(defaultAccount)}).</small>
+                  </span>
+                </div>
+              ) : (
+                <label className="checkbox-row">
+                  <input type="checkbox" checked={vatChoice} onChange={(event) => setVatChoice(event.target.checked)} />
+                  <span>
+                    <strong>Show with 13% VAT</strong>
+                    <small>Account is decided per payment — preview only.</small>
+                  </span>
+                </label>
+              )}
+              <label className="checkbox-row">
+                <input
+                  type="checkbox"
+                  name="deducts_tds"
+                  checked={deductsTds}
+                  onChange={(event) => setDeductsTds(event.target.checked)}
+                />
+                <span>
+                  <strong>Client deducts 1.5% TDS</strong>
+                  <small>Tick if they pay you less and deposit TDS themselves. Not sure? Leave it off.</small>
+                </span>
+              </label>
+            </div>
+            <PriceBreakdownTable
+              currency={currency}
+              withVat={withVat}
+              withTds={deductsTds}
+              charges={[
+                ...(monthly
+                  ? [
+                      { label: "Setup · month 1", amount: Number(setupAmount || 0) },
+                      { label: "Monthly fee", amount: Number(monthlyAmount || 0) },
+                    ]
+                  : []),
+                ...(hasWebsite ? [{ label: "Website", amount: Number(websiteAmount || 0) }] : []),
+              ]}
+            />
+          </div>
+        )}
+
         <details className="agreement-details mt-3">
           <summary>
             <span>
@@ -413,73 +471,98 @@ export default function IncomeAgreementFields({
         <FormSection
           number="3"
           title="Money received so far"
-          description="Leave the amount empty if nothing has been paid yet. Payments can be added any time."
+          description="Optional. Payments can always be added later from the client page."
           hidden={!visible(3)}
         >
-          <input type="hidden" name="initial_payment_for" value={openingFor} />
-          {monthly && hasWebsite && (
-            <div className="choice-grid mb-3">
-              {(["setup", "website"] as const).map((target) => (
-                <button
-                  key={target}
-                  type="button"
-                  onClick={() => setInitialFor(target)}
-                  className={`funding-choice ${initialFor === target ? "funding-choice-active" : ""}`}
-                >
-                  <strong>{target === "setup" ? "Setup charge" : "Website"}</strong>
-                  <span>
-                    {formatIncomeMoney(
-                      Number((target === "setup" ? setupAmount : websiteAmount) || 0),
-                      currency
-                    )}{" "}
-                    agreed
-                  </span>
-                </button>
-              ))}
-            </div>
-          )}
-
-          <span className="field-label">Landed in</span>
+          <span className="field-label">Has the client paid anything yet?</span>
           <div className="choice-grid mt-2 mb-3">
-            {accounts.map((account) => (
-              <button
-                key={account.id}
-                type="button"
-                onClick={() => setInitialAccountId(account.id)}
-                className={`funding-choice ${openingAccountId === account.id ? "funding-choice-active" : ""}`}
-              >
-                <strong>{accountShortName(account)}</strong>
-                <span>{account.name}</span>
-              </button>
-            ))}
+            <button
+              type="button"
+              onClick={() => setPaidYet(false)}
+              className={`funding-choice ${!paidYet ? "funding-choice-active" : ""}`}
+            >
+              <strong>Not yet</strong>
+              <span>Save the client now, add the payment when it arrives</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setPaidYet(true)}
+              className={`funding-choice ${paidYet ? "funding-choice-active" : ""}`}
+            >
+              <strong>Yes, money arrived</strong>
+              <span>Record it now with VAT and TDS split</span>
+            </button>
           </div>
-          <input type="hidden" name="initial_money_account_id" value={openingAccountId} />
 
-          <TaxBreakdownFields
-            currency={currency}
-            amountName="initial_paid_amount"
-            vatName="initial_vat_amount"
-            tdsName="initial_tds_amount"
-            vatSuggested={openingAccount?.kind === "company_bank"}
-            onAmountChange={setInitialAmount}
-          />
-
-          {initialAmount > 0 && (
-            <div className="grid sm:grid-cols-2 gap-3 mt-3">
-              <Field label="Date received">
-                <input name="initial_paid_on" type="date" defaultValue={today} className="input" />
-              </Field>
-              <Field label="Method (optional)">
-                <select name="initial_method" defaultValue="bank_transfer" className="input">
-                  <option value="">Not recorded</option>
-                  {Object.entries(PAYMENT_METHOD_LABELS).map(([value, label]) => (
-                    <option key={value} value={value}>
-                      {label}
-                    </option>
+          {paidYet && (
+            <>
+              <input type="hidden" name="initial_payment_for" value={openingFor} />
+              {monthly && hasWebsite && (
+                <div className="choice-grid mb-3">
+                  {(["setup", "website"] as const).map((target) => (
+                    <button
+                      key={target}
+                      type="button"
+                      onClick={() => setInitialFor(target)}
+                      className={`funding-choice ${initialFor === target ? "funding-choice-active" : ""}`}
+                    >
+                      <strong>{target === "setup" ? "Setup charge" : "Website"}</strong>
+                      <span>
+                        {formatIncomeMoney(
+                          Number((target === "setup" ? setupAmount : websiteAmount) || 0),
+                          currency
+                        )}{" "}
+                        agreed
+                      </span>
+                    </button>
                   ))}
-                </select>
-              </Field>
-            </div>
+                </div>
+              )}
+
+              <span className="field-label">Landed in</span>
+              <div className="choice-grid mt-2 mb-3">
+                {accounts.map((account) => (
+                  <button
+                    key={account.id}
+                    type="button"
+                    onClick={() => setInitialAccountId(account.id)}
+                    className={`funding-choice ${openingAccountId === account.id ? "funding-choice-active" : ""}`}
+                  >
+                    <strong>{accountShortName(account)}</strong>
+                    <span>{account.name}</span>
+                  </button>
+                ))}
+              </div>
+              <input type="hidden" name="initial_money_account_id" value={openingAccountId} />
+
+              <TaxBreakdownFields
+                key={`${openingFor}-${openingPrice}`}
+                currency={currency}
+                amountName="initial_paid_amount"
+                vatName="initial_vat_amount"
+                tdsName="initial_tds_amount"
+                suggestedAmount={openingPrice > 0 ? openingPrice : undefined}
+                vatSuggested={openingAccount?.kind === "company_bank"}
+                tdsSuggested={deductsTds}
+                onAmountChange={setInitialAmount}
+              />
+
+              <div className="grid sm:grid-cols-2 gap-3 mt-3">
+                <Field label="Date received">
+                  <input name="initial_paid_on" type="date" defaultValue={today} className="input" />
+                </Field>
+                <Field label="Method (optional)">
+                  <select name="initial_method" defaultValue="bank_transfer" className="input">
+                    <option value="">Not recorded</option>
+                    {Object.entries(PAYMENT_METHOD_LABELS).map(([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              </div>
+            </>
           )}
 
           <dl className="review-grid mt-4">
@@ -519,7 +602,7 @@ export default function IncomeAgreementFields({
             )}
             <ReviewRow
               label="Received now"
-              value={initialAmount > 0 ? formatIncomeMoney(initialAmount, currency) + " (excl. VAT)" : "Nothing yet"}
+              value={paidYet && initialAmount > 0 ? formatIncomeMoney(initialAmount, currency) + " (excl. VAT)" : "Nothing yet"}
             />
           </dl>
         </FormSection>

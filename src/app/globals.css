@@ -1053,6 +1053,21 @@ input[type="checkbox"], input[type="radio"] { width: 16px; height: 16px; accent-
   .account-split dd { font-size: 14px; }
 }
 
+/* ----- price breakdown table ----- */
+.price-table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; }
+.price-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.price-table th, .price-table td { padding: 9px 13px; border-top: 1px solid var(--line); text-align: right; white-space: nowrap; }
+.price-table thead th { border-top: 0; color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; background: var(--surface-2); }
+.price-table tbody th { text-align: left; font-weight: 620; white-space: normal; }
+.price-table tbody th small { display: block; margin-top: 2px; color: var(--muted); font-size: 10.5px; font-weight: 500; }
+.price-table td { font-variant-numeric: tabular-nums; font-weight: 620; background: var(--surface); }
+.price-table tbody th { background: var(--surface); color: var(--ink); font-size: 12.5px; letter-spacing: 0; text-transform: none; }
+.price-table-tax td { color: var(--amber); }
+.price-table-off td, .price-table-off th { color: var(--muted-2); }
+.price-table-sum td, .price-table-sum th { background: var(--surface-2) !important; }
+.price-table-total td, .price-table-total th { background: var(--accent-soft) !important; font-weight: 720; }
+.price-table-total td { font-size: 14px; }
+
 /* ----- buttons ----- */
 .btn {
   display: inline-flex;
