@@ -8,6 +8,7 @@ import {
 import { PAYMENT_METHOD_LABELS, formatIncomeMoney, periodLabel, type RecurringPeriod } from "@/lib/income";
 import type { Currency, IncomePayment, MoneyAccount } from "@/lib/types";
 import Icon from "./Icons";
+import TaxBreakdownFields from "./TaxBreakdownFields";
 
 const initialState: IncomeFormState = { error: null, ok: null };
 
@@ -29,6 +30,7 @@ export default function EditIncomePayment({
 }) {
   const [open, setOpen] = useState(false);
   const [state, action, pending] = useActionState(updateIncomePayment, initialState);
+  const [accountId, setAccountId] = useState(payment.money_account_id ?? "");
   const matchingAccounts = moneyAccounts.filter(
     (account) => account.is_active && account.currency === currency
   );
@@ -70,34 +72,32 @@ export default function EditIncomePayment({
               </button>
             </div>
 
-            <div className="grid sm:grid-cols-2 gap-3">
-              <label className="block">
-                <span className="field-label">Amount</span>
-                <input
-                  name="amount"
-                  type="number"
-                  min="0.01"
-                  step="0.01"
-                  required
-                  defaultValue={Number(payment.amount)}
-                  className="input mt-1 tnum"
-                />
-              </label>
-              <label className="block">
-                <span className="field-label">Payment received date</span>
-                <input
-                  name="paid_on"
-                  type="date"
-                  required
-                  defaultValue={payment.paid_on}
-                  className="input mt-1"
-                />
-              </label>
-            </div>
+            <TaxBreakdownFields
+              currency={currency}
+              vatSuggested={
+                moneyAccounts.find((account) => account.id === accountId)?.kind === "company_bank"
+              }
+              record={{
+                amount: Number(payment.amount),
+                vat: Number(payment.vat_amount ?? 0),
+                tds: Number(payment.tds_amount ?? 0),
+              }}
+            />
+
+            <label className="block">
+              <span className="field-label">Date received</span>
+              <input
+                name="paid_on"
+                type="date"
+                required
+                defaultValue={payment.paid_on}
+                className="input mt-1"
+              />
+            </label>
 
             {payment.payment_for === "recurring" && streamPeriods.length > 0 && (
               <label className="block">
-                <span className="field-label">Billing period covered</span>
+                <span className="field-label">Which month</span>
                 <select
                   name="billing_period_start"
                   defaultValue={payment.billing_period_start ?? ""}
@@ -117,7 +117,8 @@ export default function EditIncomePayment({
               <select
                 name="money_account_id"
                 required
-                defaultValue={payment.money_account_id ?? ""}
+                value={accountId}
+                onChange={(event) => setAccountId(event.target.value)}
                 className="input mt-1"
               >
                 <option value="" disabled>

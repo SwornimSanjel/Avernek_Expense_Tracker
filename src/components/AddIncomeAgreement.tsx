@@ -12,10 +12,9 @@ import type { MoneyAccount } from "@/lib/types";
 const initialState: IncomeFormState = { error: null, ok: null };
 
 /**
- * Adding a client stays a five-step walk even though the model underneath is
- * detailed: client → pricing → payment → service status → review. Every step is
- * part of the same form, so nothing is lost moving back and forth, and only the
- * first step really has to be filled in.
+ * Adding a client is three short steps: who → prices & dates → money received.
+ * Every step is part of the same form, so nothing is lost moving back and
+ * forth, and only the first step really has to be filled in.
  */
 export default function AddIncomeAgreement({
   moneyAccounts,
@@ -70,7 +69,7 @@ export default function AddIncomeAgreement({
           <div>
             <h2 className="text-lg font-bold">New client</h2>
             <p className="text-xs muted">
-              Only the client name and one service are needed. Prices, live dates and payments can all be added later.
+              Three short steps. Only the name and one service are required — everything else can be filled in later.
             </p>
           </div>
           <button type="button" onClick={() => setOpen(false)} className="icon-btn">

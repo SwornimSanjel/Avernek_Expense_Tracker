@@ -5,7 +5,7 @@ import { isAppOwner } from "@/lib/authz";
 import { EmptyState, PageHeader, SectionHeader, StatTile } from "@/components/ui";
 import Icon from "@/components/Icons";
 import AddIncomeAgreement from "@/components/AddIncomeAgreement";
-import AddAccountFunds from "@/components/AddAccountFunds";
+import AddOtherIncome from "@/components/AddOtherIncome";
 import RecordIncomePayment from "@/components/RecordIncomePayment";
 import IncomeAgreementControls from "@/components/IncomeAgreementControls";
 import ServiceBadges from "@/components/ServiceBadges";
@@ -15,24 +15,20 @@ import {
   ADS_STATUS_LABELS,
   AUTOMATION_STATUS_LABELS,
   WEBSITE_STATUS_LABELS,
+  OTHER_INCOME_LABELS,
   daysUntilDate,
   formatIncomeMoney,
   formatServiceDate,
+  goLiveDate,
   hasRecurringService,
+  recurringFromDate,
   summarizeIncomeAgreement,
   todayIso,
   type IncomeAgreementSummary,
 } from "@/lib/income";
-import { computeMoneyAccountBalances } from "@/lib/funds";
-import type {
-  CapitalInflow,
-  Expense,
-  IncomeAgreement,
-  IncomePayment,
-  MoneyAccount,
-  MoneyTransfer,
-  ServiceKey,
-} from "@/lib/types";
+import { loadLedger } from "@/lib/ledger";
+import { bankAmount } from "@/lib/tax";
+import type { IncomeAgreement, MoneyAccount, ServiceKey } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -80,31 +76,15 @@ export default async function IncomePage({
   const filters = await searchParams;
   const today = todayIso();
 
-  const [agreements, payments, moneyAccounts, companyExpenses, transfers, capitalInflows] =
-    await Promise.all([
-      query<IncomeAgreement>(
-        `select * from public.income_agreements
-         order by case status when 'active' then 0 when 'pending' then 1 when 'paused' then 2 else 3 end,
-                  client_name, agreement_date desc`
-      ),
-      query<IncomePayment>(
-        `select * from public.income_payments order by paid_on desc, created_at desc`
-      ),
-      query<MoneyAccount>(
-        `select * from public.money_accounts where is_active = true order by currency, name`
-      ),
-      query<Expense>(
-        `select * from public.expenses
-          where funding_source = 'company_funds'
-          order by expense_date desc, created_at desc`
-      ),
-      query<MoneyTransfer>(
-        `select * from public.money_transfers order by transfer_date desc, created_at desc`
-      ),
-      query<CapitalInflow>(
-        `select * from public.capital_inflows order by received_on desc, created_at desc`
-      ),
-    ]);
+  const [agreements, ledger] = await Promise.all([
+    query<IncomeAgreement>(
+      `select * from public.income_agreements
+       order by case status when 'active' then 0 when 'pending' then 1 when 'paused' then 2 else 3 end,
+                client_name, agreement_date desc`
+    ),
+    loadLedger(),
+  ]);
+  const { payments, accounts: moneyAccounts, balances, otherIncome, tax } = ledger;
 
   const summaries = new Map<string, IncomeAgreementSummary>(
     agreements.map((agreement) => [
@@ -112,19 +92,12 @@ export default async function IncomePage({
       summarizeIncomeAgreement(agreement, payments, today),
     ])
   );
-  const balances = computeMoneyAccountBalances(
-    moneyAccounts,
-    payments,
-    companyExpenses,
-    transfers,
-    capitalInflows
-  );
   const nonVat = balances.find((item) => item.account.kind === "personal_custody");
   const vat = balances.find((item) => item.account.kind === "company_bank");
-  const primaryAccounts = [nonVat, vat].filter(
+  const primaryAccounts = [vat, nonVat].filter(
     (item): item is NonNullable<typeof item> => Boolean(item)
   );
-  const capitalTotal = capitalInflows.reduce((sum, inflow) => sum + Number(inflow.amount), 0);
+  const accountById = new Map(moneyAccounts.map((account) => [account.id, account]));
 
   // Filters run over the computed summaries because payment status and service
   // status are derived, not stored.
@@ -159,63 +132,67 @@ export default async function IncomePage({
         eyebrow="Revenue operations"
         title="Income"
         subtitle="See where client money arrived, what remains in each account, and exactly what every client owes next."
-        action={canManage ? <AddIncomeAgreement moneyAccounts={moneyAccounts} /> : undefined}
+        action={
+          canManage ? (
+            <div className="flex flex-wrap gap-2">
+              <AddOtherIncome accounts={moneyAccounts} />
+              <AddIncomeAgreement moneyAccounts={moneyAccounts} />
+            </div>
+          ) : undefined
+        }
       />
 
       <section className="income-account-overview">
         <SectionHeader
           title="Where the money is"
-          subtitle="Money in is client income. Balance left is after company expenses, transfers and any capital added."
-          action={canManage ? <AddAccountFunds accounts={moneyAccounts} compact /> : undefined}
+          subtitle="VAT sitting in an account belongs to IRD — only “free to use” is really yours."
+          action={
+            <Link href="/funds" className="btn !h-9 text-sm">
+              <Icon name="wallet" size={14} /> Company money
+            </Link>
+          }
         />
         <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 mt-3">
           {primaryAccounts.map((item) => (
             <StatTile
               key={`${item.account.id}-in`}
-              label={`${accountLabel(item.account)} · Client money in`}
-              value={formatIncomeMoney(item.received, item.account.currency)}
-              hint={item.account.name}
+              label={`${accountLabel(item.account)} · in the account`}
+              value={formatIncomeMoney(item.balance, item.account.currency)}
+              hint={
+                item.vatReserved > 0
+                  ? `${formatIncomeMoney(item.vatReserved, item.account.currency)} of it is VAT — don't touch`
+                  : item.account.name
+              }
               emphasis
-              icon="income"
+              icon={item.account.kind === "company_bank" ? "bank" : "wallet"}
               tone={item.account.kind === "company_bank" ? "green" : "blue"}
             />
           ))}
           {primaryAccounts.map((item) => (
             <StatTile
-              key={`${item.account.id}-left`}
-              label={`${accountLabel(item.account)} · Balance left`}
-              value={formatIncomeMoney(item.balance, item.account.currency)}
-              hint={
-                item.capitalIn > 0
-                  ? `Includes ${formatIncomeMoney(item.capitalIn, item.account.currency)} capital added`
-                  : "After expenses and transfers"
-              }
-              icon={item.account.kind === "company_bank" ? "bank" : "wallet"}
+              key={`${item.account.id}-free`}
+              label={`${accountLabel(item.account)} · free to use`}
+              value={formatIncomeMoney(item.free, item.account.currency)}
+              hint="After keeping VAT aside"
+              icon="wallet"
               tone="accent"
             />
           ))}
         </div>
-
-        {capitalTotal > 0 && (
+        {(tax.vatOwed > 0 || tax.tdsCredit > 0) && (
           <div className="capital-strip mt-3">
             <div className="capital-strip-icon">
-              <Icon name="contribution" size={15} />
+              <Icon name="receipt" size={15} />
             </div>
             <div className="min-w-0">
-              <strong>Capital &amp; non-revenue funds</strong>
+              <strong>VAT owed {formatIncomeMoney(tax.vatOwed, "NPR")} · TDS credit {formatIncomeMoney(tax.tdsCredit, "NPR")}</strong>
               <p>
-                {primaryAccounts
-                  .filter((item) => item.capitalIn > 0)
-                  .map(
-                    (item) =>
-                      `${formatIncomeMoney(item.capitalIn, item.account.currency)} in the ${accountLabel(item.account).toLowerCase()}`
-                  )
-                  .join(" · ")}
-                {" — counted in account balances, never in revenue, client income, VAT sales or profit."}
+                VAT collected minus input VAT from company bills minus VAT already paid. TDS withheld by clients is
+                claimed back in the income tax return.
               </p>
             </div>
             <Link href="/funds" className="btn !h-9 shrink-0 text-xs">
-              Open ledger
+              Details
             </Link>
           </div>
         )}
@@ -379,7 +356,15 @@ export default async function IncomePage({
                 </div>
 
                 <dl className="client-summary-metrics">
-                  <MetricCell label="Agreement start" value={formatServiceDate(agreement.agreement_date)} />
+                  <MetricCell
+                    label={hasRecurringService(agreement) ? "Day 1 · launched" : "Contract signed"}
+                    value={
+                      hasRecurringService(agreement)
+                        ? formatServiceDate(goLiveDate(agreement), "Not launched yet")
+                        : formatServiceDate(agreement.agreement_date)
+                    }
+                    sub={`Signed ${formatServiceDate(agreement.agreement_date)}`}
+                  />
                   <MetricCell
                     label="Setup + website left"
                     value={formatIncomeMoney(oneOffRemaining, agreement.currency)}
@@ -397,8 +382,8 @@ export default async function IncomePage({
                       !hasRecurringService(agreement)
                         ? "One-off project only"
                         : summary.recurring.awaitingStart
-                          ? "Billing not started"
-                          : `From ${formatServiceDate(summary.recurring.streams[0]?.billingStartDate ?? null)}`
+                          ? "Starts a month after Day 1"
+                          : `From ${formatServiceDate(recurringFromDate(agreement))}`
                     }
                   />
                   <MetricCell label="Service status" value={serviceStateLabel(agreement)} small />
@@ -431,6 +416,45 @@ export default async function IncomePage({
               </article>
             );
           })}
+        </div>
+      </section>
+
+      <section>
+        <SectionHeader
+          title={`Income without a client (${otherIncome.length})`}
+          subtitle="One-off jobs and extra work that never had an agreement. Counted as income; amounts exclude VAT."
+          action={canManage ? <AddOtherIncome accounts={moneyAccounts} compact /> : undefined}
+        />
+        <div className="card mt-3 overflow-hidden">
+          {otherIncome.length === 0 ? (
+            <p className="px-5 py-5 text-sm muted">
+              Nothing yet. Use “Income without client” for extra work or a website done without an agreement.
+            </p>
+          ) : (
+            otherIncome.map((row) => {
+              const account = accountById.get(row.money_account_id);
+              return (
+                <div key={row.id} className="list-row px-4 py-3 flex items-center gap-3 border-b last:border-b-0" style={{ borderColor: "var(--line)" }}>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-medium truncate">{row.description}</div>
+                    <div className="text-[11px] muted mt-0.5 truncate">
+                      {formatServiceDate(row.received_on)} · {OTHER_INCOME_LABELS[row.category]}
+                      {row.source_name ? ` · from ${row.source_name}` : ""} · {account ? accountLabel(account) : "Account"}
+                      {Number(row.vat_amount) > 0 ? ` · VAT ${formatIncomeMoney(Number(row.vat_amount), account?.currency ?? "NPR")}` : ""}
+                      {Number(row.tds_amount) > 0 ? ` · TDS ${formatIncomeMoney(Number(row.tds_amount), account?.currency ?? "NPR")}` : ""}
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-sm font-semibold tnum" style={{ color: "var(--green)" }}>
+                      {formatIncomeMoney(Number(row.amount), account?.currency ?? "NPR")}
+                    </div>
+                    <div className="text-[10px] muted tnum">bank {formatIncomeMoney(bankAmount(row), account?.currency ?? "NPR")}</div>
+                  </div>
+                  {canManage && <AddOtherIncome accounts={moneyAccounts} record={row} />}
+                </div>
+              );
+            })
+          )}
         </div>
       </section>
     </div>

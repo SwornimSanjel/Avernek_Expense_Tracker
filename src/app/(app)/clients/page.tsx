@@ -16,7 +16,9 @@ import {
   daysUntilDate,
   formatIncomeMoney,
   formatServiceDate,
+  goLiveDate,
   hasRecurringService,
+  recurringFromDate,
   servicesLabel,
   summarizeIncomeAgreement,
 } from "@/lib/income";
@@ -158,7 +160,7 @@ export default async function ClientsPage({
 
       <div className="grid sm:grid-cols-2 xl:grid-cols-5 gap-3 mb-6">
         <StatTile label="Active clients" value={String(active.length)} hint={`${agreements.length} total · ${former.length} inactive`} icon="users" tone="accent" />
-        <StatTile label="Money in" value={totalsLabel(collected)} hint="All client receipts" icon="income" tone="green" />
+        <StatTile label="Money in" value={totalsLabel(collected)} hint="Client receipts, excluding VAT" icon="income" tone="green" />
         <StatTile label="Due now" value={totalsLabel(outstanding)} hint="Setup + recurring outstanding" icon="clock" tone="amber" />
         <StatTile label="Active recurring" value={totalsLabel(recurring)} hint="Expected every month" icon="subscription" tone="blue" />
         <StatTile label="Client money out" value={formatIncomeMoney(companyClientSpendNpr, "NPR")} hint={`${formatIncomeMoney(clientSpendNpr, "NPR")} incl. founder-paid`} icon="expense" tone="amber" />
@@ -193,7 +195,7 @@ export default async function ClientsPage({
                         <StatusPill kind="billing" value={selectedSummary!.overallStatus} />
                       </div>
                       <div className="mt-1.5"><ServiceBadges services={agreementServices(selected)} /></div>
-                      <p className="text-xs muted mt-1.5">Agreement started {formatServiceDate(selected.agreement_date)}</p>
+                      <p className="text-xs muted mt-1.5">Contract signed {formatServiceDate(selected.agreement_date)}</p>
                     </div>
                   </div>
                   <div className="flex flex-wrap items-center justify-end gap-2.5">
@@ -213,6 +215,7 @@ export default async function ClientsPage({
                         paymentCount={selectedPayments.length}
                         recurringPaymentCount={selectedPayments.filter((payment) => payment.payment_for === "recurring").length}
                         redirectOnDelete="/clients"
+                        showEditButton
                       />
                     )}
                   </div>
@@ -237,11 +240,11 @@ export default async function ClientsPage({
                   id: payment.id,
                   title:
                     payment.payment_for === "setup"
-                      ? "Setup payment"
+                      ? "Setup · month 1"
                       : payment.payment_for === "website"
                         ? "Website payment"
-                        : "Monthly recurring payment",
-                  meta: `${payment.paid_on} · ${payment.account_name ?? "Company account"}${payment.reference ? ` · ${payment.reference}` : ""}`,
+                        : "Monthly fee",
+                  meta: `${formatServiceDate(payment.paid_on)} · ${payment.account_name ?? "Company account"}${Number(payment.vat_amount) > 0 ? ` · +VAT ${formatIncomeMoney(Number(payment.vat_amount), selected.currency)}` : ""}${Number(payment.tds_amount) > 0 ? ` · −TDS ${formatIncomeMoney(Number(payment.tds_amount), selected.currency)}` : ""}${payment.reference ? ` · ${payment.reference}` : ""}`,
                   amount: `+${formatIncomeMoney(Number(payment.amount), selected.currency)}`,
                   color: "var(--green)",
                   icon: "income" as const,
@@ -266,11 +269,10 @@ export default async function ClientsPage({
               <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-4 mt-4 text-sm">
                 <Detail label="Contact" value={selected.contact_name ?? "Not added"} />
                 <Detail label="Services" value={servicesLabel(selected)} />
-                <Detail label="Ads live" value={selected.has_ads ? formatServiceDate(selected.ads_live_date, "Not live yet") : "—"} />
-                <Detail label="Automation live" value={selected.has_automation ? formatServiceDate(selected.automation_live_date, "Not live yet") : "—"} />
-                <Detail label="Website finalized" value={selected.has_website ? formatServiceDate(selected.website_completed_date, "Not finalized") : "—"} />
-                <Detail label="Recurring billing started" value={hasRecurringService(selected) ? formatServiceDate(selectedSummary!.recurring.streams[0]?.billingStartDate ?? null, "Not started") : "—"} />
-                <Detail label="Current billing period" value={selectedSummary!.recurring.streams[0]?.currentPeriodStart ? `${formatServiceDate(selectedSummary!.recurring.streams[0].currentPeriodStart)} – ${formatServiceDate(selectedSummary!.recurring.streams[0].currentPeriodEnd)}` : "—"} />
+                <Detail label="Contract signed" value={formatServiceDate(selected.agreement_date)} />
+                <Detail label="Day 1 · launched" value={hasRecurringService(selected) ? formatServiceDate(goLiveDate(selected), "Not launched yet") : "—"} />
+                <Detail label="Monthly fee from" value={hasRecurringService(selected) ? formatServiceDate(recurringFromDate(selected), "A month after Day 1") : "—"} />
+                <Detail label="Website delivered" value={selected.has_website ? formatServiceDate(selected.website_completed_date, "Not delivered yet") : "—"} />
                 <Detail label="Status" value={statusLabel(selected.status)} />
               </div>
               <div className="flex flex-wrap gap-2 mt-5 pt-4 border-t" style={{ borderColor: "var(--line)" }}>

@@ -8,6 +8,7 @@ import type {
   IncomePayment,
   IncomePaymentMethod,
   IncomeServiceType,
+  OtherIncomeCategory,
   ServiceKey,
   WebsiteStatus,
 } from "@/lib/types";
@@ -210,6 +211,98 @@ export const CAPITAL_INFLOW_LABELS: Record<CapitalInflowType, string> = {
   loan_received: "Loan received",
   other_non_revenue: "Other non-revenue funds",
 };
+
+export const OTHER_INCOME_LABELS: Record<OtherIncomeCategory, string> = {
+  website_project: "Website / one-off project",
+  extra_work: "Extra work",
+  consulting: "Consulting / training",
+  commission: "Commission / referral",
+  other: "Other income",
+};
+
+// -----------------------------------------------------------------------------
+// The dates that matter
+// -----------------------------------------------------------------------------
+
+/**
+ * Day 1: the day ads / AI automation launched. Month 1 is the setup charge;
+ * the recurring fee is billed from month 2. Null until launch.
+ */
+export function goLiveDate(agreement: IncomeAgreement): string | null {
+  const candidates = [
+    agreement.recurring_billing_start_date,
+    agreement.ads_billing_start_date,
+    agreement.automation_billing_start_date,
+    agreement.ads_live_date,
+    agreement.automation_live_date,
+  ];
+  return candidates.find((value): value is string => isValidDate(value)) ?? null;
+}
+
+/** The first day the recurring (month 2) fee is billed. */
+export function recurringFromDate(agreement: IncomeAgreement): string | null {
+  const dayOne = goLiveDate(agreement);
+  if (!dayOne) return null;
+  return agreement.setup_covers_first_cycle ? addCalendarMonths(dayOne, 1) : dayOne;
+}
+
+export type KeyDate = {
+  key: string;
+  label: string;
+  date: string | null;
+  hint: string;
+};
+
+/** The client's timeline in the order things happen. */
+export function keyDates(agreement: IncomeAgreement): KeyDate[] {
+  const dates: KeyDate[] = [
+    {
+      key: "signed",
+      label: "Contract signed",
+      date: agreement.agreement_date,
+      hint: "Paper agreement",
+    },
+  ];
+  if (isValidDate(agreement.work_start_date)) {
+    dates.push({ key: "work", label: "Work started", date: agreement.work_start_date, hint: "Preparation began" });
+  }
+  if (agreement.has_website) {
+    dates.push({
+      key: "website",
+      label: "Website delivered",
+      date: isValidDate(agreement.website_completed_date) ? agreement.website_completed_date : null,
+      hint: "One-off · done once delivered",
+    });
+  }
+  if (hasRecurringService(agreement)) {
+    const dayOne = goLiveDate(agreement);
+    dates.push({
+      key: "day1",
+      label: "Day 1 · launched",
+      date: dayOne,
+      hint: "Month 1 = setup charge",
+    });
+    dates.push({
+      key: "recurring",
+      label: "Recurring from",
+      date: recurringFromDate(agreement),
+      hint: "Monthly fee, every month after",
+    });
+  }
+  if (isValidDate(agreement.contract_end_date)) {
+    dates.push({ key: "end", label: "Contract ends", date: agreement.contract_end_date, hint: "" });
+  }
+  // Chronological; dates that have not happened yet keep their natural order at the end.
+  return dates
+    .map((item, index) => ({ item, index }))
+    .sort((a, b) => {
+      if (a.item.date && b.item.date) return a.item.date.localeCompare(b.item.date) || a.index - b.index;
+      if (a.item.date) return -1;
+      if (b.item.date) return 1;
+      return a.index - b.index;
+    })
+    .map(({ item }) => item);
+}
 
 export function setupTermsLabel(agreement: IncomeAgreement): string {
   if (agreement.setup_payment_terms === "full_upfront") return "Full setup upfront";
@@ -651,7 +744,7 @@ export function summarizeIncomeAgreement(
 
   const nextDates: { date: string; label: string }[] = [];
   if (setup.remaining > 0 && setup.dueDate) {
-    nextDates.push({ date: setup.dueDate, label: "Setup balance" });
+    nextDates.push({ date: setup.dueDate, label: "Setup charge" });
   }
   if (website && website.remaining > 0 && website.dueDate) {
     nextDates.push({ date: website.dueDate, label: "Website balance" });

@@ -1,0 +1,17 @@
+---
+source_file: "src/app/(app)/income/[id]/page.tsx"
+type: "code"
+community: "Funds & Income Pages"
+location: "L35"
+tags:
+  - graphify/code
+  - graphify/EXTRACTED
+  - community/Funds__Income_Pages
+---
+
+# dynamic
+
+## Connections
+- [[idpage.tsx]] - `contains` [EXTRACTED]
+
+#graphify/code #graphify/EXTRACTED #community/Funds__Income_Pages

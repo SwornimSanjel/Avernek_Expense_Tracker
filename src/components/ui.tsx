@@ -24,12 +24,12 @@ export function PageHeader({
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
     >
-      <div>
+      <div className="page-header-main">
         <div className="eyebrow"><Icon name="sparkles" size={12} />{eyebrow}</div>
         <h1 className="page-title">{title}</h1>
         {subtitle && <p className="page-subtitle">{subtitle}</p>}
       </div>
-      {action && <div className="shrink-0">{action}</div>}
+      {action && <div className="page-header-action">{action}</div>}
     </motion.div>
   );
 }

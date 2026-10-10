@@ -184,13 +184,14 @@ export interface Settlement {
  * automation, so every service block below is meaningful only when its own
  * has_* flag is set.
  *
- * Dates are deliberately distinct and none of them stands in for another:
- *   agreement_date                signed / contract start
- *   setup_due_date                when the setup balance is due
- *   website_*                     the website project's own timeline
- *   ads_live_date                 the day ads actually went live (nullable)
- *   automation_live_date          the day automation actually went live (nullable)
- *   recurring_billing_start_date  the anchor every monthly cycle counts from
+ * The form only asks for the dates that exist in real life:
+ *   agreement_date                contract signed (paper)
+ *   work_start_date               work started (optional)
+ *   recurring_billing_start_date  Day 1 — ads / AI automation launched. Month 1
+ *                                 is the setup charge; recurring starts month 2.
+ *   website_start_date / website_completed_date   website built / delivered
+ * ads_live_date, automation_live_date, setup_due_date and website_due_date are
+ * written from those by the app.
  *
  * Balances, payment status, current cycle and overdue state are never stored.
  * They are computed from the amounts here plus income_payments — see
@@ -206,7 +207,10 @@ export interface IncomeAgreement {
   has_ads: boolean;
   has_automation: boolean;
   contact_name: string | null;
+  /** Contract signed on paper. */
   agreement_date: string;
+  /** Optional: the day work began (preparing ads, building automation...). */
+  work_start_date: string | null;
   contract_end_date: string | null;
   /** VAT vs non-VAT classification: which account this client normally pays into. */
   default_money_account_id: string | null;
@@ -215,7 +219,8 @@ export interface IncomeAgreement {
   setup_amount: number;
   setup_payment_terms: SetupPaymentTerms;
   setup_advance_percent: number;
-  setup_due_date: string;
+  /** Due on Day 1 (go-live); null until Day 1 is known. */
+  setup_due_date: string | null;
   /** Admin override for the derived date the setup balance reached zero. */
   setup_paid_in_full_date: string | null;
   setup_notes: string | null;
@@ -269,7 +274,12 @@ export interface IncomePayment {
   /** Recurring payments only: the cycle they settle. */
   billing_period_start: string | null;
   billing_stream: BillingStream | null;
+  /** Bill amount excluding VAT. This is revenue and settles the client's balance. */
   amount: number;
+  /** VAT collected on top of the bill. Owed to IRD; never spendable. */
+  vat_amount: number;
+  /** TDS the client withheld. Never reached the bank; claimable as a tax credit. */
+  tds_amount: number;
   paid_on: string;
   received_in: IncomeAccountType;
   money_account_id: string | null;
@@ -314,13 +324,79 @@ export interface MoneyAccount {
   created_at: string;
 }
 
+export type MoneyTransferKind = "transfer" | "reimbursement";
+
 export interface MoneyTransfer {
   id: string;
+  /** reimbursement = the VAT account paying back a bill in the company's name. */
+  kind: MoneyTransferKind;
+  bill_id: string | null;
   from_account_id: string;
   to_account_id: string;
   from_amount: number;
   to_amount: number;
   transfer_date: string;
+  note: string | null;
+  created_by: string | null;
+  created_at: string;
+}
+
+export type OtherIncomeCategory =
+  | "website_project"
+  | "extra_work"
+  | "consulting"
+  | "commission"
+  | "other";
+
+/** Revenue that belongs to no client agreement: a one-off job, extra work. */
+export interface OtherIncome {
+  id: string;
+  money_account_id: string;
+  category: OtherIncomeCategory;
+  source_name: string | null;
+  description: string;
+  /** Excluding VAT. */
+  amount: number;
+  vat_amount: number;
+  tds_amount: number;
+  received_on: string;
+  method: IncomePaymentMethod | null;
+  reference: string | null;
+  note: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_by: string | null;
+  updated_at: string;
+}
+
+/**
+ * A bill in the company's name that someone paid first (lawyer, rent...).
+ * The VAT account reimburses it; its VAT is input VAT the company can claim.
+ */
+export interface CompanyBill {
+  id: string;
+  description: string;
+  vendor_name: string | null;
+  bill_number: string | null;
+  bill_date: string;
+  total_amount: number;
+  vat_amount: number;
+  paid_by: string | null;
+  note: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** VAT deposited to the Inland Revenue Department. */
+export interface TaxPayment {
+  id: string;
+  tax_type: "vat";
+  money_account_id: string;
+  amount: number;
+  paid_on: string;
+  period_label: string | null;
+  reference: string | null;
   note: string | null;
   created_by: string | null;
   created_at: string;

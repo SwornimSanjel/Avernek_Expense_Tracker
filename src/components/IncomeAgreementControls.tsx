@@ -25,12 +25,15 @@ export default function IncomeAgreementControls({
   paymentCount,
   recurringPaymentCount = 0,
   redirectOnDelete,
+  showEditButton,
 }: {
   agreement: IncomeAgreement;
   moneyAccounts: MoneyAccount[];
   paymentCount: number;
   recurringPaymentCount?: number;
   redirectOnDelete?: string;
+  /** Show a visible “Edit client” button next to the ⋯ menu. */
+  showEditButton?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -53,6 +56,11 @@ export default function IncomeAgreementControls({
 
   return (
     <>
+      {showEditButton && (
+        <button type="button" onClick={() => setEditing(true)} className="btn">
+          <Icon name="edit" size={15} /> Edit client
+        </button>
+      )}
       <div className="relative" ref={wrapper}>
         <button
           disabled={statusPending}
@@ -154,7 +162,7 @@ export default function IncomeAgreementControls({
               <div>
                 <h2 className="text-lg font-bold">Edit {agreement.client_name}</h2>
                 <p className="text-xs muted">
-                  Payments already recorded are kept. Amounts paid and remaining balances are always calculated from those records.
+                  Change anything and save. Recorded payments are kept; balances recalculate from them.
                 </p>
               </div>
               <button type="button" onClick={() => setEditing(false)} className="icon-btn">
