@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { exec, one, transaction } from "@/lib/db";
 import { requireSession } from "@/lib/auth/server";
 import { assertAppOwner } from "@/lib/authz";
-import { addCalendarMonths, isValidDate, legacyServiceType, todayIso } from "@/lib/income";
+import { addCalendarDays, addCalendarMonths, isValidDate, legacyServiceType, todayIso } from "@/lib/income";
 import type {
   AdsStatus,
   AutomationStatus,
@@ -550,7 +550,14 @@ export async function markServiceLive(
   const liveDate = stringValue(formData, "live_date");
 
   if (!id) return { error: "Client not found.", ok: null };
-  if (!isValidDate(liveDate)) return { error: "Enter the launch date (Day 1).", ok: null };
+  if (!isValidDate(liveDate)) return { error: "Pick the day the ads / AI automation went live.", ok: null };
+  // One day of slack: the server clock may run behind Nepal time.
+  if (liveDate > addCalendarDays(todayIso(), 1)) {
+    return {
+      error: "Day 1 can't be in the future. Come back and set it on the day the ads actually go live.",
+      ok: null,
+    };
+  }
 
   const agreement = await one<{
     client_name: string;
@@ -611,6 +618,39 @@ export async function markServiceLive(
 
   revalidateIncome();
   return { error: null, ok: `${agreement.client_name} launched — Day 1 is ${liveDate}.` };
+}
+
+/**
+ * "Not launched yet": remove Day 1 again, e.g. when a guessed future date was
+ * entered. Refused once monthly payments are filed against it.
+ */
+export async function clearLaunchDate(agreementId: string) {
+  await requireIncomeAdmin();
+  const row = await one<{ recurring_count: string }>(
+    `select count(*) as recurring_count from public.income_payments
+      where agreement_id = $1 and payment_for = 'recurring'`,
+    [agreementId]
+  );
+  if (Number(row?.recurring_count ?? 0) > 0) {
+    throw new Error("Monthly payments are already recorded against this Day 1. Change the date instead of clearing it.");
+  }
+  await exec(
+    `update public.income_agreements
+        set recurring_billing_start_date = null,
+            setup_due_date = null,
+            ads_live_date = case when has_ads then null else ads_live_date end,
+            automation_live_date = case when has_automation then null else automation_live_date end,
+            ads_billing_start_date = null,
+            automation_billing_start_date = null,
+            ads_status = case when not has_ads then ads_status
+                              when work_start_date is not null then 'preparation' else 'not_started' end,
+            automation_status = case when not has_automation then automation_status
+                              when work_start_date is not null then 'development' else 'not_started' end,
+            updated_at = now()
+      where id = $1`,
+    [agreementId]
+  );
+  revalidateIncome();
 }
 
 export async function setIncomeAgreementStatus(id: string, status: IncomeAgreementStatus) {

@@ -294,15 +294,33 @@ export default function IncomeAgreementFields({
                 <input
                   name="go_live_date"
                   type="date"
+                  max={today}
                   value={dayOne}
                   onChange={(event) => setDayOne(event.target.value)}
                   className="input"
                 />
+                {dayOne ? (
+                  <button
+                    type="button"
+                    onClick={() => setDayOne("")}
+                    className="field-help underline"
+                    style={{ color: "var(--accent)" }}
+                  >
+                    Not launched yet — clear
+                  </button>
+                ) : (
+                  <p className="field-help">Empty = not launched yet.</p>
+                )}
               </Field>
             </div>
+            {isValidDate(dayOne) && dayOne > today && (
+              <p className="field-help" style={{ color: "var(--amber)" }}>
+                Day 1 is in the future. Leave it empty and set it on the client page the day the ads go live.
+              </p>
+            )}
             <p className="field-help">
-              Amounts exclude VAT. Day 1 is the day ads / AI automation went live — leave it blank until launch
-              and use “Launched” on the client later.
+              Amounts exclude VAT. Don&apos;t guess Day 1 — leave it empty and press “Ads launched? Set Day 1” on
+              the client page on the day the ads / AI automation go live.
             </p>
             <BillingTimeline
               dayOne={dayOne}

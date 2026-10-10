@@ -41,6 +41,10 @@ export default function AddMoneyTransfer({ balances }: { balances: MoneyAccountB
               <div>
                 <h2 className="text-lg font-bold">Move or exchange company money</h2>
                 <p className="text-xs muted mt-1">A transfer changes account balances; it is not income or an expense.</p>
+                <p className="text-xs mt-2" style={{ color: "var(--amber)" }}>
+                  Paying back a bill in Avernek&apos;s name (lawyer, rent…)? Close this and use “Add VAT bill” →
+                  “Reimburse” under Company bills to reimburse, so the bill&apos;s VAT is counted and VAT money stays untouched.
+                </p>
               </div>
               <button type="button" onClick={() => setOpen(false)} className="icon-btn">✕</button>
             </div>

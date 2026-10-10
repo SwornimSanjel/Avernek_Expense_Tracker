@@ -1,8 +1,13 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
-import { markServiceLive, type IncomeFormState } from "@/app/(app)/income/actions";
+import { useActionState, useEffect, useState, useTransition } from "react";
 import {
+  clearLaunchDate,
+  markServiceLive,
+  type IncomeFormState,
+} from "@/app/(app)/income/actions";
+import {
+  addCalendarDays,
   addCalendarMonths,
   formatServiceDate,
   goLiveDate,
@@ -14,9 +19,10 @@ import type { IncomeAgreement } from "@/lib/types";
 const initialState: IncomeFormState = { error: null, ok: null };
 
 /**
- * "Launched · Day 1" for the monthly services. One date: month 1 is covered by
- * the setup charge, the monthly fee is due one calendar month later and every
- * month after that.
+ * Day 1 for the monthly services, set on the day ads / AI automation actually
+ * go live — never guessed ahead. Nothing is pre-filled: the person picks
+ * “Launched today” or the past date it happened. A Day 1 entered by mistake can
+ * be cleared again while no monthly payment depends on it.
  */
 export default function MarkServiceLive({
   agreement,
@@ -26,19 +32,30 @@ export default function MarkServiceLive({
   recurringPaymentCount: number;
 }) {
   const current = goLiveDate(agreement);
+  const today = todayIso();
   const [open, setOpen] = useState(false);
   const [state, action, pending] = useActionState(markServiceLive, initialState);
-  const [liveDate, setLiveDate] = useState(current ?? todayIso());
+  const [liveDate, setLiveDate] = useState(current ?? "");
+  const [clearing, startClear] = useTransition();
+  const [clearError, setClearError] = useState<string | null>(null);
   const moving = Boolean(current) && current !== liveDate;
+  const inFuture = isValidDate(liveDate) && liveDate > today;
 
   useEffect(() => {
     if (state.ok) setOpen(false);
   }, [state.ok]);
 
+  useEffect(() => {
+    if (open) {
+      setLiveDate(current ?? "");
+      setClearError(null);
+    }
+  }, [open, current]);
+
   if (!open) {
     return (
       <button type="button" onClick={() => setOpen(true)} className="btn btn-primary !h-9 text-sm">
-        {current ? "Change Day 1" : "Launched · set Day 1"}
+        {current ? "Change Day 1" : "Ads launched? Set Day 1"}
       </button>
     );
   }
@@ -57,19 +74,50 @@ export default function MarkServiceLive({
           </button>
         </div>
 
+        <p className="text-xs muted">
+          Only set this once the ads / AI automation are actually live. Until then, leave it — the client
+          simply shows “Not launched yet”.
+        </p>
+
+        <div className="choice-grid">
+          <button
+            type="button"
+            onClick={() => setLiveDate(today)}
+            className={`funding-choice ${liveDate === today ? "funding-choice-active" : ""}`}
+          >
+            <strong>Launched today</strong>
+            <span>{formatServiceDate(today)}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setLiveDate(addCalendarDays(today, -1))}
+            className={`funding-choice ${liveDate === addCalendarDays(today, -1) ? "funding-choice-active" : ""}`}
+          >
+            <strong>Launched yesterday</strong>
+            <span>{formatServiceDate(addCalendarDays(today, -1))}</span>
+          </button>
+        </div>
+
         <label className="block">
-          <span className="field-label">Ads / AI automation went live on</span>
+          <span className="field-label">Or pick the day it went live</span>
           <input
             name="live_date"
             type="date"
             required
+            max={today}
             value={liveDate}
             onChange={(event) => setLiveDate(event.target.value)}
             className="input mt-1"
           />
         </label>
 
-        {isValidDate(liveDate) && (
+        {inFuture && (
+          <p className="text-xs" style={{ color: "var(--amber)" }}>
+            That date is in the future. Come back and set Day 1 on the day the ads actually go live.
+          </p>
+        )}
+
+        {isValidDate(liveDate) && !inFuture && (
           <ol className="timeline-preview">
             <li>
               <strong>Month 1 · setup charge</strong>
@@ -96,9 +144,30 @@ export default function MarkServiceLive({
         )}
 
         {state.error && <p className="text-sm" style={{ color: "var(--red)" }}>{state.error}</p>}
-        <button disabled={pending} className="btn btn-primary w-full !h-12">
+        {clearError && <p className="text-sm" style={{ color: "var(--red)" }}>{clearError}</p>}
+        <button disabled={pending || !isValidDate(liveDate) || inFuture} className="btn btn-primary w-full !h-12">
           {pending ? "Saving…" : "Save Day 1"}
         </button>
+
+        {current && recurringPaymentCount === 0 && (
+          <button
+            type="button"
+            disabled={clearing}
+            onClick={() =>
+              startClear(async () => {
+                try {
+                  await clearLaunchDate(agreement.id);
+                  setOpen(false);
+                } catch (error) {
+                  setClearError(error instanceof Error ? error.message : "Could not clear Day 1.");
+                }
+              })
+            }
+            className="btn w-full !h-11"
+          >
+            {clearing ? "Clearing…" : "Not launched yet — remove Day 1"}
+          </button>
+        )}
       </form>
     </div>
   );

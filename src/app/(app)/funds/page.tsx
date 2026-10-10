@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { query } from "@/lib/db";
 import { requireSession } from "@/lib/auth/server";
 import { isAppOwner } from "@/lib/authz";
@@ -7,12 +8,7 @@ import AddMoneyAccount from "@/components/AddMoneyAccount";
 import AddMoneyTransfer from "@/components/AddMoneyTransfer";
 import AddAccountFunds from "@/components/AddAccountFunds";
 import AddOtherIncome from "@/components/AddOtherIncome";
-import {
-  AddCompanyBill,
-  ConfirmDelete,
-  PayVat,
-  ReimburseBill,
-} from "@/components/VatBillsActions";
+import { AddCompanyBill, ConfirmDelete } from "@/components/VatBillsActions";
 import {
   accountShortName,
   expenseAmountFromAccount,
@@ -21,11 +17,7 @@ import {
 import { loadLedger } from "@/lib/ledger";
 import { bankAmount } from "@/lib/tax";
 import { CAPITAL_INFLOW_LABELS, OTHER_INCOME_LABELS, formatIncomeMoney, formatServiceDate } from "@/lib/income";
-import {
-  deleteCompanyBill,
-  deleteMoneyTransfer,
-  deleteTaxPayment,
-} from "./actions";
+import { deleteMoneyTransfer } from "./actions";
 import type { Currency, Expense, IncomeAgreement } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -83,7 +75,6 @@ export default async function FundsPage() {
   });
   const pendingBills = billStatuses.filter((item) => item.pending > 0);
   const pendingTotal = pendingBills.reduce((sum, item) => sum + item.pending, 0);
-  const vatRoom = Math.max(0, primaryBalances.find((item) => item.account.kind === "company_bank")?.free ?? 0);
 
   const activity = [
     ...payments
@@ -143,6 +134,7 @@ export default async function FundsPage() {
     })),
     ...transfers.map((transfer) => ({
       key: `transfer-${transfer.id}`,
+      transferId: transfer.id,
       date: transfer.transfer_date,
       createdAt: transfer.created_at,
       kind: "transfer" as const,
@@ -163,6 +155,7 @@ export default async function FundsPage() {
         subtitle="What is in each account, how much of it is VAT you must not touch, and which company bills still need reimbursing."
         action={canManage ? (
           <div className="flex flex-wrap gap-2">
+            <AddCompanyBill />
             <AddOtherIncome accounts={accounts} />
             <AddAccountFunds accounts={accounts} />
             <AddMoneyTransfer balances={balances} />
@@ -223,114 +216,21 @@ export default async function FundsPage() {
         ))}
       </div>
 
-      {/* ----------------------------------------------------------- VAT & TDS */}
-      <div className="mb-6">
-        <SectionHeader
-          title="VAT & TDS"
-          subtitle="VAT you collected is the government's money. TDS clients withheld is a credit against Avernek's income tax."
-          action={canManage ? <PayVat balances={balances} vatOwed={tax.vatOwed} /> : undefined}
-        />
-        <div className="grid sm:grid-cols-2 xl:grid-cols-5 gap-3 mt-3">
-          <StatTile label="VAT collected" value={formatIncomeMoney(tax.outputVat, "NPR")} hint="13% charged on VAT bills to clients" icon="receipt" tone="blue" />
-          <StatTile label="Input VAT from bills" value={`−${formatIncomeMoney(tax.inputVat, "NPR")}`} hint="VAT inside bills in Avernek's name" icon="receipt" tone="green" />
-          <StatTile label="VAT paid to IRD" value={`−${formatIncomeMoney(tax.vatDeposited, "NPR")}`} hint="Deposits recorded so far" icon="bank" tone="accent" />
-          <StatTile
-            label="VAT still owed"
-            value={formatIncomeMoney(tax.vatOwed, "NPR")}
-            hint={tax.vatCarryForward > 0 ? `${formatIncomeMoney(tax.vatCarryForward, "NPR")} input VAT to carry forward` : "Kept aside in the VAT account · estimate"}
-            emphasis
-            icon="clock"
-            tone="amber"
-          />
-          <StatTile label="TDS credit" value={formatIncomeMoney(tax.tdsCredit, "NPR")} hint="Withheld by clients · claim in income tax" icon="contribution" tone="green" />
+      {/* ------------------------------------------------------ VAT pointer */}
+      <div className="capital-strip mb-6">
+        <div className="capital-strip-icon">
+          <Icon name="receipt" size={15} />
         </div>
-        {taxPayments.length > 0 && (
-          <div className="card mt-3 divide-y" style={{ borderColor: "var(--line)" }}>
-            {taxPayments.map((row) => (
-              <div key={row.id} className="px-4 py-3 flex items-center gap-3 text-sm" style={{ borderColor: "var(--line)" }}>
-                <span className="flex-1 min-w-0 truncate">
-                  VAT paid{row.period_label ? ` · ${row.period_label}` : ""}
-                  <span className="muted text-xs"> · {formatServiceDate(row.paid_on)}{row.reference ? ` · ${row.reference}` : ""}</span>
-                </span>
-                <strong className="tnum">{formatIncomeMoney(Number(row.amount), "NPR")}</strong>
-                {canManage && <ConfirmDelete id={row.id} action={deleteTaxPayment} message="Delete this VAT payment record?" />}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* --------------------------------------------------------------- bills */}
-      <div className="mb-6">
-        <SectionHeader
-          title="Company bills to reimburse"
-          subtitle={
-            pendingTotal > 0
-              ? `${formatIncomeMoney(pendingTotal, "NPR")} still to pay back · ${formatIncomeMoney(vatRoom, "NPR")} can be used from the VAT account right now`
-              : "Bills in Avernek's name (lawyer, rent…) that were paid first from another account."
-          }
-          action={canManage ? (
-            <div className="flex flex-wrap gap-2">
-              <AddCompanyBill compact />
-              <ReimburseBill bills={billStatuses} balances={balances} compact />
-            </div>
-          ) : undefined}
-        />
-        <div className="card mt-3 overflow-hidden">
-          {billStatuses.length === 0 && (
-            <EmptyState
-              title="No bills yet"
-              description="Add a bill issued in Avernek's name, then reimburse it from the VAT account when there is room."
-              icon="receipt"
-            />
-          )}
-          {billStatuses.map((item) => (
-            <div key={item.bill.id} className="bill-row">
-              <div className="bill-row-main">
-                <div className="min-w-0">
-                  <div className="font-medium truncate">{item.bill.description}</div>
-                  <div className="text-xs muted mt-0.5 truncate">
-                    {formatServiceDate(item.bill.bill_date)}
-                    {item.bill.vendor_name ? ` · ${item.bill.vendor_name}` : ""}
-                    {item.bill.bill_number ? ` · bill ${item.bill.bill_number}` : ""}
-                    {item.bill.paid_by ? ` · paid by ${item.bill.paid_by}` : ""}
-                  </div>
-                </div>
-                <dl className="bill-row-figures">
-                  <div><dt>Bill</dt><dd>{formatIncomeMoney(Number(item.bill.total_amount), "NPR")}</dd></div>
-                  <div><dt>VAT in it</dt><dd>{formatIncomeMoney(Number(item.bill.vat_amount), "NPR")}</dd></div>
-                  <div><dt>Paid back</dt><dd style={{ color: "var(--green)" }}>{formatIncomeMoney(item.reimbursed, "NPR")}</dd></div>
-                  <div><dt>Pending</dt><dd style={{ color: item.pending > 0 ? "var(--amber)" : "var(--green)" }}>{item.pending > 0 ? formatIncomeMoney(item.pending, "NPR") : "Done"}</dd></div>
-                </dl>
-                {canManage && (
-                  <div className="flex items-center gap-1 justify-end">
-                    {item.pending > 0 && <ReimburseBill bills={billStatuses} balances={balances} billId={item.bill.id} />}
-                    <AddCompanyBill bill={item.bill} />
-                    {item.reimbursements.length === 0 && (
-                      <ConfirmDelete id={item.bill.id} action={deleteCompanyBill} message="Delete this bill?" />
-                    )}
-                  </div>
-                )}
-              </div>
-              {item.reimbursements.length > 0 && (
-                <div className="bill-row-history">
-                  {item.reimbursements.map((transfer) => (
-                    <div key={transfer.id} className="flex items-center gap-3 text-xs">
-                      <span className="flex-1 min-w-0 truncate muted">
-                        {formatServiceDate(transfer.transfer_date)} · {accountShortName(accountById.get(transfer.from_account_id))} →{" "}
-                        {accountShortName(accountById.get(transfer.to_account_id))}
-                      </span>
-                      <strong className="tnum">{formatIncomeMoney(Number(transfer.from_amount), "NPR")}</strong>
-                      {canManage && (
-                        <ConfirmDelete id={transfer.id} action={deleteMoneyTransfer} message="Delete this reimbursement? The money goes back to the VAT account." />
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          ))}
+        <div className="min-w-0">
+          <strong>
+            VAT still owed {formatIncomeMoney(tax.vatOwed, "NPR")} · bills waiting to be reimbursed{" "}
+            {formatIncomeMoney(pendingTotal, "NPR")}
+          </strong>
+          <p>The VAT list (who paid VAT, on how much), bills in Avernek&apos;s name and reimbursements are on the VAT &amp; bills page.</p>
         </div>
+        <Link href="/vat" className="btn btn-primary !h-9 shrink-0 text-xs">
+          Open VAT &amp; bills
+        </Link>
       </div>
 
       {/* ---------------------------------------------------------- totals */}
@@ -354,6 +254,13 @@ export default async function FundsPage() {
                 {item.kind === "income" || item.kind === "capital" ? "+" : item.kind === "expense" ? "−" : ""}{formatIncomeMoney(item.amount, item.currency)}
                 {item.kind === "transfer" && item.toCurrency !== item.currency && <div className="text-xs muted mt-0.5">→ {formatIncomeMoney(item.toAmount, item.toCurrency)}</div>}
               </div>
+              {canManage && item.kind === "transfer" && "transferId" in item && (
+                <ConfirmDelete
+                  id={item.transferId}
+                  action={deleteMoneyTransfer}
+                  message="Delete this transfer? Both account balances go back to how they were."
+                />
+              )}
             </div>
           ))}
         </div>

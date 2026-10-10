@@ -1068,6 +1068,18 @@ input[type="checkbox"], input[type="radio"] { width: 16px; height: 16px; accent-
 .price-table-total td, .price-table-total th { background: var(--accent-soft) !important; font-weight: 720; }
 .price-table-total td { font-size: 14px; }
 
+/* ----- VAT register ----- */
+.register-table th, .register-table td { text-align: right; }
+.register-table th:nth-child(-n + 2), .register-table td:nth-child(-n + 2) { text-align: left; }
+.register-who { white-space: normal !important; min-width: 180px; }
+.register-who strong { display: block; font-weight: 680; }
+.register-who small { display: block; margin-top: 2px; color: var(--muted); font-size: 10.5px; font-weight: 500; }
+.register-table tbody td { font-weight: 560; }
+.register-strong { font-weight: 680 !important; }
+.register-muted { color: var(--muted); font-weight: 500 !important; white-space: normal !important; }
+.register-vat { color: var(--amber); }
+.register-month td { background: var(--surface-2) !important; color: var(--muted); font-size: 11px; font-weight: 700 !important; letter-spacing: .05em; text-transform: uppercase; }
+
 /* ----- buttons ----- */
 .btn {
   display: inline-flex;

@@ -335,7 +335,7 @@ export default async function ClientBillingPage({
             {summary.recurring.awaitingStart ? (
               <div className="billing-panel-body">
                 <p className="text-sm muted">
-                  Not launched yet. Set Day 1 with “Launched · set Day 1” above — the monthly fee
+                  Not launched yet. On the day the ads go live, press “Ads launched? Set Day 1” above — the monthly fee
                   starts one month after it.
                 </p>
               </div>
