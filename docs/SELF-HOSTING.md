@@ -1,5 +1,8 @@
 # Self-hosted Supabase
 
+> **Historical.** The app no longer uses Supabase: it talks to its own Postgres
+> with local sign-in. Current deployment: [DEPLOYMENT.md](DEPLOYMENT.md).
+
 Moves the database and auth off Supabase cloud and onto your own server, so the
 data and the backups are yours.
 

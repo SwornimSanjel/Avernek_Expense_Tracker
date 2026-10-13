@@ -1,8 +1,10 @@
-# Keep the build context small and keep secrets out of it entirely.
-# The .env is passed to the build as a BuildKit secret, never copied.
+# Keep the build context small and secrets out of it entirely. The image needs
+# no secrets: runtime configuration comes from the deployment's .env.
 .env
-.env.local
-.env*.local
+.env.*
+!.env.example
+*.pem
+*.key
 
 .git
 .gitignore
@@ -13,14 +15,24 @@ out
 *.tsbuildinfo
 next-env.d.ts
 
+# CI/CD and deployment files: never part of the image.
 Dockerfile
 .dockerignore
+compose.yaml
 docker-compose.yml
 Jenkinsfile
+deploy
+docker
+db
+docs
+diagnostics
 
+# Local tooling and other hosting targets.
 README.md
 .DS_Store
 .claude
+.vscode
+graphify-out
 netlify
 netlify.toml
 vercel.json
