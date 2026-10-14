@@ -1,5 +1,6 @@
 "use client";
 
+import { guardRequest } from "@/lib/stale-deploy";
 import { useActionState, useEffect, useState, useTransition } from "react";
 import {
   clearLaunchDate,
@@ -34,7 +35,7 @@ export default function MarkServiceLive({
   const current = goLiveDate(agreement);
   const today = todayIso();
   const [open, setOpen] = useState(false);
-  const [state, action, pending] = useActionState(markServiceLive, initialState);
+  const [state, action, pending] = useActionState(guardRequest(markServiceLive), initialState);
   const [liveDate, setLiveDate] = useState(current ?? "");
   const [clearing, startClear] = useTransition();
   const [clearError, setClearError] = useState<string | null>(null);

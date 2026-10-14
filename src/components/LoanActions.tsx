@@ -1,5 +1,6 @@
 "use client";
 
+import { guardRequest } from "@/lib/stale-deploy";
 import { useActionState, useEffect, useState, useTransition } from "react";
 import {
   markLoanRepaid,
@@ -33,7 +34,7 @@ export function LendMoney({
   compact?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const [state, action, pending] = useActionState(saveMoneyLoan, initialState);
+  const [state, action, pending] = useActionState(guardRequest(saveMoneyLoan), initialState);
   const usable = balances.filter((item) => item.account.is_active);
   const [accountId, setAccountId] = useState(
     loan?.money_account_id ??
@@ -170,7 +171,7 @@ export function MarkLoanRepaid({
   accounts: MoneyAccount[];
 }) {
   const [open, setOpen] = useState(false);
-  const [state, action, pending] = useActionState(markLoanRepaid, initialState);
+  const [state, action, pending] = useActionState(guardRequest(markLoanRepaid), initialState);
   const source = accounts.find((account) => account.id === loan.money_account_id);
   const options = accounts.filter(
     (account) => account.is_active && account.currency === (source?.currency ?? "NPR")

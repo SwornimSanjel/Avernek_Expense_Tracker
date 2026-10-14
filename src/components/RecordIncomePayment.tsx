@@ -1,5 +1,6 @@
 "use client";
 
+import { guardRequest } from "@/lib/stale-deploy";
 import { useActionState, useEffect, useMemo, useState } from "react";
 import {
   recordIncomePayment,
@@ -81,7 +82,7 @@ export default function RecordIncomePayment({
   const [periodStart, setPeriodStart] = useState(
     summary.recurring.nextDuePeriod?.periodStart ?? activeStream?.periods[0]?.periodStart ?? ""
   );
-  const [state, action, pending] = useActionState(recordIncomePayment, initialState);
+  const [state, action, pending] = useActionState(guardRequest(recordIncomePayment), initialState);
   const [filesBusy, setFilesBusy] = useState(false);
 
   const selectedPeriod = useMemo(

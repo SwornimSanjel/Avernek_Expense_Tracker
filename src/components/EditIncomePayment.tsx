@@ -1,5 +1,6 @@
 "use client";
 
+import { guardRequest } from "@/lib/stale-deploy";
 import { useActionState, useEffect, useState } from "react";
 import {
   updateIncomePayment,
@@ -34,7 +35,7 @@ export default function EditIncomePayment({
   vatBills?: Attachment[];
 }) {
   const [open, setOpen] = useState(false);
-  const [state, action, pending] = useActionState(updateIncomePayment, initialState);
+  const [state, action, pending] = useActionState(guardRequest(updateIncomePayment), initialState);
   const [accountId, setAccountId] = useState(payment.money_account_id ?? "");
   const [filesBusy, setFilesBusy] = useState(false);
   const matchingAccounts = moneyAccounts.filter(

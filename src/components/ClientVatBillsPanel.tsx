@@ -1,5 +1,6 @@
 "use client";
 
+import { guardRequest } from "@/lib/stale-deploy";
 import { useActionState, useEffect, useState } from "react";
 import { uploadClientVatBills, type AttachmentFormState } from "@/app/(app)/attachments/actions";
 import type { Attachment } from "@/lib/attachments";
@@ -24,7 +25,7 @@ export default function ClientVatBillsPanel({
   billsByPayment: Record<string, Attachment[]>;
   canManage: boolean;
 }) {
-  const [state, action, pending] = useActionState(uploadClientVatBills, initialState);
+  const [state, action, pending] = useActionState(guardRequest(uploadClientVatBills), initialState);
   const [busy, setBusy] = useState(false);
   const [count, setCount] = useState(0);
   const [saved, setSaved] = useState<string | null>(null);

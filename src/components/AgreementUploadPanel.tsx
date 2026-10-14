@@ -1,5 +1,6 @@
 "use client";
 
+import { guardRequest } from "@/lib/stale-deploy";
 import { useActionState, useEffect, useState } from "react";
 import { uploadAttachments, type AttachmentFormState } from "@/app/(app)/attachments/actions";
 import type { Attachment } from "@/lib/attachments";
@@ -21,7 +22,7 @@ export default function AgreementUploadPanel({
   files: Attachment[];
   canManage: boolean;
 }) {
-  const [state, action, pending] = useActionState(uploadAttachments, initialState);
+  const [state, action, pending] = useActionState(guardRequest(uploadAttachments), initialState);
   const [busy, setBusy] = useState(false);
   const [count, setCount] = useState(0);
   const [saved, setSaved] = useState<string | null>(null);

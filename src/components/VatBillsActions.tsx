@@ -1,5 +1,6 @@
 "use client";
 
+import { guardRequest } from "@/lib/stale-deploy";
 import { useActionState, useEffect, useState, useTransition } from "react";
 import {
   addCompanyBill,
@@ -54,7 +55,7 @@ export function AddCompanyBill({
   files?: Attachment[];
 }) {
   const [open, setOpen] = useState(false);
-  const [state, action, pending] = useActionState(addCompanyBill, initialState);
+  const [state, action, pending] = useActionState(guardRequest(addCompanyBill), initialState);
   const [total, setTotal] = useState(bill ? String(Number(bill.total_amount)) : "");
   const [isVatBill, setIsVatBill] = useState(bill ? Number(bill.vat_amount) > 0 : true);
   const [vat, setVat] = useState(bill ? String(Number(bill.vat_amount)) : "");
@@ -192,7 +193,7 @@ export function ReimburseBill({
   const [toPicked, setToId] = useState("");
   const fromId = fromPicked || vatAccount?.account.id || "";
   const toId = toPicked || nonVat?.account.id || "";
-  const [state, action, pending] = useActionState(reimburseBill, initialState);
+  const [state, action, pending] = useActionState(guardRequest(reimburseBill), initialState);
   const bill = bills.find((item) => item.bill.id === selected);
   const from = balances.find((item) => item.account.id === fromId);
   const room = Math.max(0, from?.free ?? 0);
@@ -318,7 +319,7 @@ export function ReimburseBill({
 export function PayVat({ balances, vatOwed }: { balances: MoneyAccountBalance[]; vatOwed: number }) {
   const vatAccount = balances.find((item) => item.account.kind === "company_bank") ?? balances[0];
   const [open, setOpen] = useState(false);
-  const [state, action, pending] = useActionState(addTaxPayment, initialState);
+  const [state, action, pending] = useActionState(guardRequest(addTaxPayment), initialState);
 
   useEffect(() => {
     if (state.ok) setOpen(false);

@@ -38,3 +38,36 @@ export function reloadForNewVersion(): boolean {
   window.location.reload();
   return true;
 }
+
+/** Plain-language reason for a save that never got an answer from the server. */
+export function describeFailedRequest(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  if (/failed to fetch|networkerror|load failed|network request failed/i.test(message)) {
+    return "Could not reach the server — check the internet connection and press Save again. Nothing was saved.";
+  }
+  if (/unexpected response|body exceeded|payload too large|413/i.test(message)) {
+    return `The server refused this upload (${message}). Nothing was saved — try fewer or smaller files.`;
+  }
+  return `Save failed before it reached the database: ${message || "unknown error"}. Nothing was saved — press Save again.`;
+}
+
+/**
+ * Wrap a server action for useActionState so a request that fails in transit
+ * (offline, proxy rejected it, app just redeployed) becomes a message in the
+ * form — picked files stay put — instead of an error screen.
+ */
+export function guardRequest<S extends { error: string | null; ok: string | null }>(
+  action: (previous: S, formData: FormData) => Promise<S>
+) {
+  return async (previous: S, formData: FormData): Promise<S> => {
+    try {
+      return await action(previous, formData);
+    } catch (error) {
+      console.error("[save request failed]", error);
+      if (isStaleDeployError(error) && reloadForNewVersion()) {
+        return { ...previous, ok: null, error: "The app was just updated — reloading. Please save again." };
+      }
+      return { ...previous, ok: null, error: describeFailedRequest(error) };
+    }
+  };
+}

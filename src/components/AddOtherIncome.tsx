@@ -1,5 +1,6 @@
 "use client";
 
+import { guardRequest } from "@/lib/stale-deploy";
 import { useActionState, useEffect, useState, useTransition } from "react";
 import {
   addOtherIncome,
@@ -31,7 +32,7 @@ export default function AddOtherIncome({
 }) {
   const [open, setOpen] = useState(false);
   const [state, action, pending] = useActionState(
-    record ? updateOtherIncome : addOtherIncome,
+    guardRequest(record ? updateOtherIncome : addOtherIncome),
     initialState
   );
   const active = accounts.filter((account) => account.is_active);

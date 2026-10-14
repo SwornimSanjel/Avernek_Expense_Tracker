@@ -1,5 +1,6 @@
 "use client";
 
+import { guardRequest } from "@/lib/stale-deploy";
 import { useActionState, useEffect, useMemo, useState } from "react";
 import {
   addMoneyTransfer,
@@ -20,7 +21,7 @@ export default function AddMoneyTransfer({ balances }: { balances: MoneyAccountB
   const [toId, setToId] = useState(balances[1]?.account.id ?? "");
   const [fromAmount, setFromAmount] = useState("");
   const [toAmount, setToAmount] = useState("");
-  const [state, action, pending] = useActionState(addMoneyTransfer, initialState);
+  const [state, action, pending] = useActionState(guardRequest(addMoneyTransfer), initialState);
   const from = useMemo(() => balances.find((item) => item.account.id === fromId), [balances, fromId]);
   const to = useMemo(() => balances.find((item) => item.account.id === toId), [balances, toId]);
   const effectiveRate = Number(fromAmount) > 0 && Number(toAmount) > 0

@@ -1,5 +1,6 @@
 "use client";
 
+import { guardRequest } from "@/lib/stale-deploy";
 import { useActionState, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -33,7 +34,7 @@ export default function AddIncomeAgreement({
   // can be saved from any of them without clicking through the rest.
   const saveNow = useRef(false);
   const router = useRouter();
-  const [state, action, pending] = useActionState(addIncomeAgreement, initialState);
+  const [state, action, pending] = useActionState(guardRequest(addIncomeAgreement), initialState);
 
   useEffect(() => {
     if (!state.ok) return;

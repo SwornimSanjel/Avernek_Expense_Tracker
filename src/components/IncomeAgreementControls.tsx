@@ -1,5 +1,6 @@
 "use client";
 
+import { guardRequest } from "@/lib/stale-deploy";
 import { useActionState, useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -62,7 +63,7 @@ export default function IncomeAgreementControls({
   };
   const [menuOpen, setMenuOpen] = useState(false);
   const [filesBusy, setFilesBusy] = useState(false);
-  const [state, action, pending] = useActionState(updateIncomeAgreement, initialState);
+  const [state, action, pending] = useActionState(guardRequest(updateIncomeAgreement), initialState);
   const [statusPending, startTransition] = useTransition();
   const wrapper = useRef<HTMLDivElement>(null);
   const router = useRouter();

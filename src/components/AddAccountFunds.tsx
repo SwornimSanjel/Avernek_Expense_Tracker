@@ -1,5 +1,6 @@
 "use client";
 
+import { guardRequest } from "@/lib/stale-deploy";
 import { useActionState, useEffect, useState } from "react";
 import { addCapitalInflow, type FundsFormState } from "@/app/(app)/funds/actions";
 import { CAPITAL_INFLOW_LABELS, todayIso } from "@/lib/income";
@@ -25,7 +26,7 @@ export default function AddAccountFunds({
   compact?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const [state, action, pending] = useActionState(addCapitalInflow, initialState);
+  const [state, action, pending] = useActionState(guardRequest(addCapitalInflow), initialState);
 
   useEffect(() => {
     if (state.ok) setOpen(false);

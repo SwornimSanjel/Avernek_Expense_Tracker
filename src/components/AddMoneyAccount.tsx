@@ -1,5 +1,6 @@
 "use client";
 
+import { guardRequest } from "@/lib/stale-deploy";
 import { useActionState, useEffect, useState } from "react";
 import {
   addMoneyAccount,
@@ -12,7 +13,7 @@ const initialState: FundsFormState = { error: null, ok: null };
 export default function AddMoneyAccount() {
   const [open, setOpen] = useState(false);
   const [kind, setKind] = useState<MoneyAccountKind>("digital_wallet");
-  const [state, action, pending] = useActionState(addMoneyAccount, initialState);
+  const [state, action, pending] = useActionState(guardRequest(addMoneyAccount), initialState);
 
   useEffect(() => {
     if (state.ok) setOpen(false);
