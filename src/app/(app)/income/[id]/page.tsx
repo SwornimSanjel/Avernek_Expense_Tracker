@@ -12,14 +12,20 @@ import IncomeAgreementControls from "@/components/IncomeAgreementControls";
 import EditIncomePayment from "@/components/EditIncomePayment";
 import DeleteIncomePayment from "@/components/DeleteIncomePayment";
 import MarkServiceLive from "@/components/MarkServiceLive";
+import PriceBreakdownTable from "@/components/PriceBreakdownTable";
+import { bankAmount } from "@/lib/tax";
+import { accountShortName } from "@/lib/funds";
 import {
   PAYMENT_METHOD_LABELS,
+  addCalendarDays,
   daysUntilDate,
   formatIncomeMoney,
   formatServiceDate,
+  goLiveDate,
   hasRecurringService,
+  keyDates,
   periodLabel,
-  setupTermsLabel,
+  recurringFromDate,
   summarizeIncomeAgreement,
   todayIso,
   type BillingBucket,
@@ -91,6 +97,14 @@ export default async function ClientBillingPage({
   const recurringPaymentCount = payments.filter((p) => p.payment_for === "recurring").length;
   const allPeriods = summary.recurring.streams.flatMap((stream) => stream.periods);
   const currency = agreement.currency;
+  const vatCollected = payments.reduce((sum, p) => sum + Number(p.vat_amount ?? 0), 0);
+  const tdsWithheld = payments.reduce((sum, p) => sum + Number(p.tds_amount ?? 0), 0);
+  const dates = keyDates(agreement);
+  const monthly = hasRecurringService(agreement);
+  const dayOne = goLiveDate(agreement);
+  const usualAccount = agreement.default_money_account_id
+    ? accountById.get(agreement.default_money_account_id)
+    : undefined;
 
   return (
     <div className="income-workspace">
@@ -119,6 +133,7 @@ export default async function ClientBillingPage({
                 paymentCount={payments.length}
                 recurringPaymentCount={recurringPaymentCount}
                 redirectOnDelete="/income"
+                showEditButton
               />
             </div>
           ) : undefined
@@ -142,27 +157,25 @@ export default async function ClientBillingPage({
         </div>
 
         <div className="card p-5">
-          <div className="detail-label">Agreement</div>
-          <DetailRow label="Agreement start" value={formatServiceDate(agreement.agreement_date)} />
+          <div className="detail-label">Pays into</div>
           <DetailRow
-            label="Contract end"
-            value={agreement.contract_end_date ? formatServiceDate(agreement.contract_end_date) : "Open-ended"}
-          />
-          <DetailRow
-            label="Billing account"
+            label="Usual account"
             value={
               agreement.default_money_account_id
                 ? accountKindLabel(accountById.get(agreement.default_money_account_id))
                 : "Chosen per payment"
             }
           />
+          <DetailRow label="Client deducts TDS" value={agreement.deducts_tds ? "Yes · 1.5%" : "No"} />
+          <DetailRow label="VAT collected" value={formatIncomeMoney(vatCollected, currency)} />
+          <DetailRow label="TDS withheld" value={formatIncomeMoney(tdsWithheld, currency)} />
           <DetailRow label="Currency" value={currency} />
         </div>
 
         <div className="card p-5">
           <div className="detail-label">Money</div>
           <DetailRow
-            label="Total received"
+            label="Total received (excl. VAT)"
             value={formatIncomeMoney(summary.totalCollected, currency)}
             tone="var(--green)"
           />
@@ -187,6 +200,67 @@ export default async function ClientBillingPage({
         </div>
       </section>
 
+      {/* ------------------------------------------------------- key dates */}
+      <section>
+        <div className="billing-panel">
+          <div className="billing-panel-head">
+            <div>
+              <h2>Key dates</h2>
+              <p>The only dates that matter. Everything else is worked out from these.</p>
+            </div>
+            {canManage && monthly && (
+              <MarkServiceLive agreement={agreement} recurringPaymentCount={recurringPaymentCount} />
+            )}
+          </div>
+          <ol className="key-dates">
+            {dates.map((item) => (
+              <li key={item.key} className={item.date ? "key-date-set" : ""}>
+                <span>{item.label}</span>
+                <strong>{formatServiceDate(item.date, "Not yet")}</strong>
+                {item.hint && <small>{item.hint}</small>}
+              </li>
+            ))}
+          </ol>
+        </div>
+      </section>
+
+      {/* ---------------------------------------------------- price + tax */}
+      {(monthly || agreement.has_website) && (
+        <section>
+          <div className="billing-panel">
+            <div className="billing-panel-head">
+              <div>
+                <h2>Agreed prices · with VAT &amp; TDS</h2>
+                <p>
+                  {usualAccount?.kind === "company_bank"
+                    ? "Billed with 13% VAT (pays into the VAT account)."
+                    : usualAccount
+                      ? "No VAT (pays into the non-VAT account)."
+                      : "Shown with VAT; the account is chosen per payment."}{" "}
+                  {agreement.deducts_tds ? "Client deducts 1.5% TDS." : "Client does not deduct TDS."} Change either with “Edit client”.
+                </p>
+              </div>
+            </div>
+            <div className="px-5 pb-5 pt-4">
+              <PriceBreakdownTable
+                currency={currency}
+                withVat={usualAccount ? usualAccount.kind === "company_bank" : true}
+                withTds={agreement.deducts_tds}
+                charges={[
+                  ...(monthly
+                    ? [
+                        { label: "Setup · month 1", amount: Number(agreement.setup_amount) },
+                        { label: "Monthly fee", amount: Number(agreement.recurring_amount) },
+                      ]
+                    : []),
+                  ...(agreement.has_website ? [{ label: "Website", amount: Number(agreement.website_amount) }] : []),
+                ]}
+              />
+            </div>
+          </div>
+        </section>
+      )}
+
       {/* --------------------------------------------------------------------
           Initial / setup billing. Hidden when there is no setup fee and no
           setup payment, so a website-only client is not shown an empty,
@@ -197,12 +271,12 @@ export default async function ClientBillingPage({
         <div className="billing-panel">
           <div className="billing-panel-head">
             <div>
-              <h2>Initial / setup billing</h2>
-              <p>{setupTermsLabel(agreement)}</p>
+              <h2>Setup charge · month 1</h2>
+              <p>{dayOne ? `Covers ${formatServiceDate(dayOne)} – ${formatServiceDate(addCalendarDays(recurringFromDate(agreement) ?? dayOne, -1))}` : "Due on Day 1, when ads / AI automation launch"}</p>
             </div>
             <StatusPill kind="billing" value={summary.setup.status} />
           </div>
-          <BucketBody bucket={summary.setup} currency={currency} dueLabel="Setup payment due" />
+          <BucketBody bucket={summary.setup} currency={currency} dueLabel="Due on" />
         </div>
       </section>
       )}
@@ -224,109 +298,16 @@ export default async function ClientBillingPage({
             <BucketBody
               bucket={summary.website}
               currency={currency}
-              dueLabel="Website payment due"
+              dueLabel="Due on delivery"
               extra={[
-                { label: "Project start", value: formatServiceDate(agreement.website_start_date, "Not set") },
-                { label: "Expected completion", value: formatServiceDate(agreement.website_expected_date, "Not set") },
+                { label: "Started", value: formatServiceDate(agreement.website_start_date, "Not set") },
                 {
-                  label: "Website finalized",
-                  value: formatServiceDate(agreement.website_completed_date, "Not finalized yet"),
+                  label: "Delivered",
+                  value: formatServiceDate(agreement.website_completed_date, "Not delivered yet"),
                 },
               ]}
               note={agreement.website_notes}
             />
-          </div>
-        </section>
-      )}
-
-      {/* --------------------------------------------------------------- ads */}
-      {agreement.has_ads && (
-        <section>
-          <div className="billing-panel">
-            <div className="billing-panel-head">
-              <div>
-                <h2>Ads / Marketing</h2>
-                <p>
-                  {agreement.ads_live_date
-                    ? `Live since ${formatServiceDate(agreement.ads_live_date)}`
-                    : "Not live yet — no live date is required until it really starts"}
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                <StatusPill kind="ads" value={agreement.ads_status} />
-                {canManage && agreement.ads_status !== "live" && (
-                  <MarkServiceLive
-                    agreement={agreement}
-                    service="ads"
-                    recurringPaymentCount={recurringPaymentCount}
-                  />
-                )}
-              </div>
-            </div>
-            <div className="billing-panel-body">
-              <Fact label="Ads preparation started" value={formatServiceDate(agreement.ads_prep_start_date, "Not recorded")} />
-              <Fact label="Ads live date" value={formatServiceDate(agreement.ads_live_date, "Not live yet")} />
-              {agreement.recurring_billing_mode === "separate" && (
-                <>
-                  <Fact
-                    label="Ads monthly fee"
-                    value={formatIncomeMoney(Number(agreement.ads_monthly_amount ?? 0), currency)}
-                  />
-                  <Fact
-                    label="Ads billing started"
-                    value={formatServiceDate(agreement.ads_billing_start_date, "Not started")}
-                  />
-                </>
-              )}
-              {agreement.ads_notes && <Fact label="Notes" value={agreement.ads_notes} />}
-            </div>
-          </div>
-        </section>
-      )}
-
-      {/* -------------------------------------------------------- automation */}
-      {agreement.has_automation && (
-        <section>
-          <div className="billing-panel">
-            <div className="billing-panel-head">
-              <div>
-                <h2>AI Automation</h2>
-                <p>
-                  {agreement.automation_live_date
-                    ? `Live since ${formatServiceDate(agreement.automation_live_date)}`
-                    : "Not live yet — add the live date once the automation actually runs"}
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                <StatusPill kind="automation" value={agreement.automation_status} />
-                {canManage && agreement.automation_status !== "live" && (
-                  <MarkServiceLive
-                    agreement={agreement}
-                    service="automation"
-                    recurringPaymentCount={recurringPaymentCount}
-                  />
-                )}
-              </div>
-            </div>
-            <div className="billing-panel-body">
-              <Fact
-                label="Automation live date"
-                value={formatServiceDate(agreement.automation_live_date, "Not live yet")}
-              />
-              {agreement.recurring_billing_mode === "separate" && (
-                <>
-                  <Fact
-                    label="Automation monthly fee"
-                    value={formatIncomeMoney(Number(agreement.automation_monthly_amount ?? 0), currency)}
-                  />
-                  <Fact
-                    label="Automation billing started"
-                    value={formatServiceDate(agreement.automation_billing_start_date, "Not started")}
-                  />
-                </>
-              )}
-              {agreement.automation_notes && <Fact label="Notes" value={agreement.automation_notes} />}
-            </div>
           </div>
         </section>
       )}
@@ -337,11 +318,10 @@ export default async function ClientBillingPage({
           <div className="billing-panel">
             <div className="billing-panel-head">
               <div>
-                <h2>Recurring billing</h2>
-                <p>
-                  {agreement.recurring_billing_mode === "separate"
-                    ? "Each service is billed on its own amount and start date"
-                    : "One combined monthly fee for the recurring services"}
+                <h2>Monthly fee · month 2 onwards</h2>
+                <p className="flex items-center gap-2 flex-wrap">
+                  {agreement.has_ads && <StatusPill kind="ads" value={agreement.ads_status} prefix="Ads:" />}
+                  {agreement.has_automation && <StatusPill kind="automation" value={agreement.automation_status} prefix="AI automation:" />}
                 </p>
               </div>
               <div className="text-right">
@@ -355,9 +335,8 @@ export default async function ClientBillingPage({
             {summary.recurring.awaitingStart ? (
               <div className="billing-panel-body">
                 <p className="text-sm muted">
-                  Recurring billing has not started. Mark ads or AI automation live — or set the
-                  recurring billing start date when editing the client — and monthly cycles begin
-                  from that date.
+                  Not launched yet. On the day the ads go live, press “Ads launched? Set Day 1” above — the monthly fee
+                  starts one month after it.
                 </p>
               </div>
             ) : (
@@ -390,8 +369,8 @@ export default async function ClientBillingPage({
           <div className="payment-table">
             <div className="payment-table-head">
               <span>Payment received</span>
-              <span>Type</span>
-              <span>Amount</span>
+              <span>For</span>
+              <span>Bill amount</span>
               <span>Account</span>
               <span>Note</span>
               {canManage && <span />}
@@ -416,18 +395,25 @@ export default async function ClientBillingPage({
               return (
                 <div key={payment.id} className="payment-table-row">
                   <span data-label="Payment received">{formatServiceDate(payment.paid_on)}</span>
-                  <span data-label="Type">
+                  <span data-label="For">
                     {payment.payment_for === "setup"
-                      ? "Setup"
+                      ? "Setup · month 1"
                       : payment.payment_for === "website"
                         ? "Website"
                         : period
                           ? `Monthly · ${periodLabel(period)}`
                           : "Monthly"}
                   </span>
-                  <strong className="tnum" data-label="Amount">
-                    {formatIncomeMoney(Number(payment.amount), currency)}
-                  </strong>
+                  <span className="tnum" data-label="Amount">
+                    <strong>{formatIncomeMoney(Number(payment.amount), currency)}</strong>
+                    {(Number(payment.vat_amount) > 0 || Number(payment.tds_amount) > 0) && (
+                      <small className="block muted text-[10.5px] mt-0.5">
+                        {Number(payment.vat_amount) > 0 ? `+VAT ${formatIncomeMoney(Number(payment.vat_amount), currency)} ` : ""}
+                        {Number(payment.tds_amount) > 0 ? `−TDS ${formatIncomeMoney(Number(payment.tds_amount), currency)} ` : ""}
+                        = bank {formatIncomeMoney(bankAmount(payment), currency)}
+                      </small>
+                    )}
+                  </span>
                   <span data-label="Account">
                     {account ? accountKindLabel(account) : payment.account_name ?? "—"}
                   </span>
@@ -510,10 +496,7 @@ export default async function ClientBillingPage({
 }
 
 function accountKindLabel(account: MoneyAccount | undefined) {
-  if (!account) return "Unassigned account";
-  if (account.kind === "company_bank") return "VAT account";
-  if (account.kind === "personal_custody") return "Non-VAT account";
-  return account.name;
+  return accountShortName(account);
 }
 
 function BucketBody({
@@ -589,12 +572,12 @@ function StreamBlock({
       <div className="billing-panel-body !border-t-0">
         <Fact label="Monthly fee" value={formatIncomeMoney(stream.monthlyAmount, currency)} />
         <Fact
-          label="Recurring billing started"
-          value={formatServiceDate(stream.billingStartDate, "Not started")}
-          sub={setupCoversFirstCycle ? "Setup covers the first cycle" : "Billed from the first cycle"}
+          label="Day 1"
+          value={formatServiceDate(stream.billingStartDate, "Not launched")}
+          sub={setupCoversFirstCycle ? "Month 1 paid by the setup charge" : "Billed from month 1"}
         />
         <Fact
-          label="Current billing period"
+          label="Current month"
           value={
             stream.currentPeriodStart
               ? `${formatServiceDate(stream.currentPeriodStart)} – ${formatServiceDate(stream.currentPeriodEnd)}`

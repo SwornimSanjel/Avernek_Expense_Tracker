@@ -12,10 +12,9 @@ import type { MoneyAccount } from "@/lib/types";
 const initialState: IncomeFormState = { error: null, ok: null };
 
 /**
- * Adding a client stays a five-step walk even though the model underneath is
- * detailed: client → pricing → payment → service status → review. Every step is
- * part of the same form, so nothing is lost moving back and forth, and only the
- * first step really has to be filled in.
+ * Adding a client is three short steps: who → prices & dates → money received.
+ * Every step is part of the same form, so nothing is lost moving back and
+ * forth, and only the first step really has to be filled in.
  */
 export default function AddIncomeAgreement({
   moneyAccounts,
@@ -65,12 +64,31 @@ export default function AddIncomeAgreement({
 
   return (
     <div className="modal-backdrop">
-      <form ref={formRef} action={action} className="modal-panel md:max-w-3xl p-5 md:p-6 space-y-4">
+      <form
+        ref={formRef}
+        action={action}
+        // Only the "Save client" button on the last step may save. Enter in a
+        // field moves to the next step instead of saving half a client.
+        onSubmit={(event) => {
+          if (!isLast) {
+            event.preventDefault();
+            next();
+          }
+        }}
+        onKeyDown={(event) => {
+          const target = event.target as HTMLElement;
+          if (event.key === "Enter" && target.tagName === "INPUT" && !isLast) {
+            event.preventDefault();
+            next();
+          }
+        }}
+        className="modal-panel md:max-w-3xl p-5 md:p-6 space-y-4"
+      >
         <div className="modal-header">
           <div>
             <h2 className="text-lg font-bold">New client</h2>
             <p className="text-xs muted">
-              Only the client name and one service are needed. Prices, live dates and payments can all be added later.
+              Three short steps. Only the name and one service are required — everything else can be filled in later.
             </p>
           </div>
           <button type="button" onClick={() => setOpen(false)} className="icon-btn">
@@ -122,12 +140,22 @@ export default function AddIncomeAgreement({
               Back
             </button>
           )}
+          {/* Distinct keys: React must not reuse the Continue <button> as the
+              submit button, or the same click both advances and saves. */}
           {!isLast ? (
-            <button type="button" onClick={next} className="btn btn-primary flex-1 !h-12">
+            <button
+              key="continue"
+              type="button"
+              onClick={(event) => {
+                event.preventDefault();
+                next();
+              }}
+              className="btn btn-primary flex-1 !h-12"
+            >
               Continue
             </button>
           ) : (
-            <button disabled={pending} className="btn btn-primary flex-1 !h-12">
+            <button key="save" type="submit" disabled={pending} className="btn btn-primary flex-1 !h-12">
               {pending ? "Saving…" : "Save client"}
             </button>
           )}

@@ -87,83 +87,33 @@ For Netlify deploy previews, optionally allow `https://**--YOUR-SITE.netlify.app
 
 ## Deploy (self-hosted: Docker + Jenkins)
 
-An alternative to Netlify that runs the app on your own server. Netlify keeps working
-unchanged — the standalone output is gated behind `DOCKER_BUILD=1`.
+Production runs on the Avernek VPS: a push to `main` triggers Jenkins, which
+type-checks, builds a versioned image (`avernek-expense-tracker:<sha>-<build>`),
+deploys it with Docker Compose from `/srv/deployments/avernek-expense-tracker/`,
+verifies it, rolls back automatically on failure and reports to Discord.
+Netlify keeps working unchanged (the standalone output is gated behind `DOCKER_BUILD=1`).
 
-### Files
+Setup, first deployment (including taking over the earlier deployment and its
+database), operations, rollback, backups and Discord: **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**.
+
 | File | Purpose |
 | --- | --- |
-| [`Dockerfile`](Dockerfile) | 3-stage build: `deps` → `builder` → `runner` (Next standalone server, non-root, no source or devDependencies in the final image) |
-| [`docker-compose.yml`](docker-compose.yml) | Runs the app plus an `fx-cron` sidecar that replaces the Netlify Scheduled Function |
-| [`docker/fx-cron.sh`](docker/fx-cron.sh) | busybox crond job that calls `/api/cron/fx` daily at 04:00 UTC |
-| [`Jenkinsfile`](Jenkinsfile) | Extract `.env` → build → deploy → smoke test → auto-rollback |
+| [`Jenkinsfile`](Jenkinsfile) | Checkout → Validate → install → type check → build → image → prepare → deploy → health → rollback → cleanup → Discord |
+| [`Dockerfile`](Dockerfile) | Targets `deps` → `verify` → `builder` → `runner` (Next standalone server, non-root, no secrets) |
+| [`compose.yaml`](compose.yaml) | Production stack: `web`, `db` (Postgres 16, volume `avernek-expense-tracker_pgdata`), `fx-cron` |
+| [`scripts/deploy-control.sh`](scripts/deploy-control.sh) | Operator tool on the server: status, logs, start, stop, restart, recreate, backup, rollback |
 
-### How the secrets flow
-`NEXT_PUBLIC_*` values are inlined into the client bundle by `next build`, so they must
-exist **at build time**; `SUPABASE_SERVICE_ROLE_KEY` and `CRON_SECRET` are server-only and
-are injected **at runtime**. Both come from the same `.env`:
-
-- **Build time** — the `.env` is mounted as a BuildKit secret at `/app/.env.production.local`
-  for the single `RUN npm run build` command. It exists on a tmpfs for that command only and
-  never lands in an image layer.
-- **Runtime** — compose reads the `.env` sitting in the deploy directory (mode `0600`).
-
-The `.env` is never copied into the build context ([`.dockerignore`](.dockerignore)), never
-committed, and the workspace copy is deleted in the pipeline's `post { always }` block.
-
-### Jenkins one-time setup
-1. **Credential** — *Manage Jenkins → Credentials → Add → Kind: Secret file*. Upload your
-   filled-in `.env` with ID **`avernek-expense-tracker-env`**.
-2. **Deploy directory** — on the Jenkins host:
-   ```bash
-   sudo mkdir -p /opt/avernek-expense-tracker
-   sudo chown jenkins:jenkins /opt/avernek-expense-tracker
-   ```
-3. **Docker access** — `sudo usermod -aG docker jenkins && sudo systemctl restart jenkins`.
-   The agent also needs `git` and `curl`.
-4. **Job** — new *Pipeline* job → *Pipeline script from SCM* → this repo, script path
-   `Jenkinsfile`. Add a GitHub webhook (or poll SCM) to deploy on every push to `main`.
-
-### Self-hosted Supabase (optional)
-`docker/supabase/` runs Postgres, Auth, PostgREST and the Studio admin panel on your own
-server, so the data and the backups are yours. Application code is unchanged — auth, RLS and
-every `.from()` query work as-is; only `NEXT_PUBLIC_SUPABASE_URL` moves. Full runbook,
-including migrating off Supabase cloud without orphaning anyone's expenses:
-**[docs/SELF-HOSTING.md](docs/SELF-HOSTING.md)**.
-
+### Run the production stack locally
 ```bash
-./scripts/db-backup.sh          # dump public + auth, prune old
-./scripts/db-restore-drill.sh   # prove the dump restores — non-destructive
-./scripts/db-restore.sh         # restore for real (confirms first, dumps first)
-```
-
-### What a build does
-`Checkout → Extract .env → Build image → Deploy → Smoke test → Prune`. The pipeline tags each
-image `avernek-expense-tracker:<BUILD_NUMBER>` plus `:latest`, records the previously running
-image, and if `/api/health` does not answer within ~60s it redeploys the previous tag and fails
-the build. The last 5 numbered images are kept on the host for manual rollbacks.
-
-### Networking
-Compose publishes to `127.0.0.1:3001` only — put nginx/Caddy in front for TLS, then set that
-public URL as the Supabase **Site URL** and add `https://YOUR-DOMAIN/auth/callback` to the
-redirect list. To expose the port directly instead, drop the `127.0.0.1:` prefix in
-`docker-compose.yml`.
-
-The published host port comes from `APP_PORT` (default `3001`, set in the `Jenkinsfile`). The
-container itself always listens on 3000 — that is internal to the compose network, so leave the
-right-hand side of the port mapping, the Dockerfile and `docker/fx-cron.sh` alone. Note that
-local `npm run dev` still uses 3000.
-
-### Run it locally without Jenkins
-```bash
-cp .env.local .env
-docker compose up --build -d
-docker compose ps
+docker build -t avernek-expense-tracker:local .
+cp .env.example .env && chmod 600 .env        # fill in; e.g. APP_PORT=3001
+echo "APP_IMAGE=avernek-expense-tracker:local" > .deployment.env
+mkdir -p bin && cp docker/fx-cron.sh bin/
+docker compose --env-file .env --env-file .deployment.env up -d
+docker compose --env-file .env --env-file .deployment.env exec -T db \
+  sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < db/schema.sql   # then db/migrations/*.sql
 curl localhost:3001/api/health
 ```
-
-> Values in `.env` containing a literal `$` need it doubled (`$$`) — compose treats `$` as
-> variable interpolation when reading that file.
 
 ## The money rules (why the code looks the way it does)
 - Every monetary column is Postgres `numeric` — **never float**.

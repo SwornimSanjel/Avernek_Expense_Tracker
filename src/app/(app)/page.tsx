@@ -6,17 +6,13 @@ import { EmptyState, FxBadge, LedgerCard, PageHeader, SectionHeader, StatTile } 
 import { npr, usd } from "@/lib/format";
 import type {
   AppUser,
-  CapitalInflow,
   Category,
   Expense,
-  IncomePayment,
-  MoneyAccount,
-  MoneyTransfer,
   Recurring,
   Vendor,
 } from "@/lib/types";
 import { computeIndividualSpending } from "@/lib/individual";
-import { computeMoneyAccountBalances } from "@/lib/funds";
+import { loadLedger } from "@/lib/ledger";
 import { formatIncomeMoney } from "@/lib/income";
 import { format, startOfMonth, addMonths } from "date-fns";
 import DashboardCharts from "@/components/DashboardCharts";
@@ -26,7 +22,7 @@ export const dynamic = "force-dynamic";
 export default async function Dashboard() {
   const session = await requireSession();
 
-  const [exp, shareRows, cats, vends, recs, team, me, currentRate, accounts, payments, transfers, capitalInflows] =
+  const [exp, shareRows, cats, vends, recs, team, me, currentRate, ledger] =
     await Promise.all([
       query<Expense>(
         `select * from public.expenses order by expense_date desc`
@@ -40,10 +36,7 @@ export default async function Dashboard() {
         session.sub,
       ]),
       getCachedUsdSellRate(),
-      query<MoneyAccount>(`select * from public.money_accounts where is_active = true order by currency, name`),
-      query<IncomePayment>(`select * from public.income_payments order by paid_on desc, created_at desc`),
-      query<MoneyTransfer>(`select * from public.money_transfers order by transfer_date desc, created_at desc`),
-      query<CapitalInflow>(`select * from public.capital_inflows order by received_on desc, created_at desc`),
+      loadLedger(),
     ]);
 
   const expenses = exp.map((expense) => ({
@@ -65,13 +58,7 @@ export default async function Dashboard() {
   );
   // Client payments are revenue; capital raises the balance without ever being
   // revenue. Both reach the balance, only one reaches "money in".
-  const accountBalances = computeMoneyAccountBalances(
-    accounts,
-    payments,
-    expenses,
-    transfers,
-    capitalInflows
-  );
+  const accountBalances = ledger.balances;
   const primaryAccountBalances = [
     accountBalances.find((item) => item.account.kind === "personal_custody"),
     accountBalances.find((item) => item.account.kind === "company_bank"),
@@ -196,11 +183,11 @@ export default async function Dashboard() {
               title={personallyHeld ? "Swornim Global IME" : "Avernek company Global IME"}
               subtitle={personallyHeld ? "Company-owned money from clients who do not need a VAT bill." : "Official company account for clients who need a VAT bill."}
               badge={personallyHeld ? "Non-VAT company money" : "VAT company money"}
-              moneyIn={formatIncomeMoney(item.received + item.transferredIn, item.account.currency)}
-              moneyOut={formatIncomeMoney(item.spent + item.transferredOut, item.account.currency)}
+              moneyIn={formatIncomeMoney(item.revenue + item.vatIn - item.tdsWithheld + item.transferredIn, item.account.currency)}
+              moneyOut={formatIncomeMoney(item.spent + item.transferredOut + item.vatPaid, item.account.currency)}
               balance={formatIncomeMoney(item.balance, item.account.currency)}
               capitalIn={item.capitalIn > 0 ? formatIncomeMoney(item.capitalIn, item.account.currency) : undefined}
-              note={personallyHeld ? "The account holder is Swornim, but every rupee in this ledger belongs to Avernek." : "Income, expenses, and transfers remain separate from founder investment."}
+              note={personallyHeld ? "The account holder is Swornim, but every rupee in this ledger belongs to Avernek." : item.vatReserved > 0 ? `${formatIncomeMoney(item.vatReserved, item.account.currency)} of the balance is VAT owed to IRD — free to use: ${formatIncomeMoney(item.free, item.account.currency)}.` : "Income, expenses, and transfers remain separate from founder investment."}
               icon={personallyHeld ? "user" : "bank"}
               tone={personallyHeld ? "blue" : "green"}
             />

@@ -8,3 +8,8 @@ out
 *.tsbuildinfo
 next-env.d.ts
 .env
+
+# Local runs of the production compose file, and pipeline diagnostics
+.deployment.env
+/bin/
+/diagnostics/

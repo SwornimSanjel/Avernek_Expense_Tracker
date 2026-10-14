@@ -1,64 +1,61 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
-import { markServiceLive, type IncomeFormState } from "@/app/(app)/income/actions";
-import { formatServiceDate, isValidDate, todayIso } from "@/lib/income";
+import { useActionState, useEffect, useState, useTransition } from "react";
+import {
+  clearLaunchDate,
+  markServiceLive,
+  type IncomeFormState,
+} from "@/app/(app)/income/actions";
+import {
+  addCalendarDays,
+  addCalendarMonths,
+  formatServiceDate,
+  goLiveDate,
+  isValidDate,
+  todayIso,
+} from "@/lib/income";
 import type { IncomeAgreement } from "@/lib/types";
 
 const initialState: IncomeFormState = { error: null, ok: null };
 
 /**
- * "Mark ads live" / "Mark automation live".
- *
- * The live date is the real-world day the service started running. When no
- * recurring anchor exists yet, the live date is offered as that anchor with the
- * answer pre-set to yes — but it is a question, not a silent write, and an
- * existing anchor is never moved without an explicit confirmation when cycle
- * payments already depend on it.
+ * Day 1 for the monthly services, set on the day ads / AI automation actually
+ * go live — never guessed ahead. Nothing is pre-filled: the person picks
+ * “Launched today” or the past date it happened. A Day 1 entered by mistake can
+ * be cleared again while no monthly payment depends on it.
  */
 export default function MarkServiceLive({
   agreement,
-  service,
   recurringPaymentCount,
 }: {
   agreement: IncomeAgreement;
-  service: "ads" | "automation";
   recurringPaymentCount: number;
 }) {
+  const current = goLiveDate(agreement);
+  const today = todayIso();
   const [open, setOpen] = useState(false);
   const [state, action, pending] = useActionState(markServiceLive, initialState);
-  const [liveDate, setLiveDate] = useState(
-    (service === "ads" ? agreement.ads_live_date : agreement.automation_live_date) ?? todayIso()
-  );
-  const separate = agreement.recurring_billing_mode === "separate";
-  const existingAnchor = separate
-    ? service === "ads"
-      ? agreement.ads_billing_start_date
-      : agreement.automation_billing_start_date
-    : agreement.recurring_billing_start_date;
-  const anchorExists = isValidDate(existingAnchor);
-  // Offered by default only when nothing is anchored yet. An existing anchor is
-  // never moved unless the admin deliberately asks for it.
-  const [useAsStart, setUseAsStart] = useState(!anchorExists);
-  const willMoveAnchor = useAsStart && anchorExists && existingAnchor !== liveDate;
+  const [liveDate, setLiveDate] = useState(current ?? "");
+  const [clearing, startClear] = useTransition();
+  const [clearError, setClearError] = useState<string | null>(null);
+  const moving = Boolean(current) && current !== liveDate;
+  const inFuture = isValidDate(liveDate) && liveDate > today;
 
   useEffect(() => {
     if (state.ok) setOpen(false);
   }, [state.ok]);
 
-  // Re-answer the anchor question every time the dialog opens. Without this the
-  // component keeps the answer it was first mounted with, so marking the second
-  // service live would arrive pre-set to move an anchor that now exists.
   useEffect(() => {
-    if (open) setUseAsStart(!anchorExists);
-  }, [open, anchorExists]);
-
-  const label = service === "ads" ? "ads" : "AI automation";
+    if (open) {
+      setLiveDate(current ?? "");
+      setClearError(null);
+    }
+  }, [open, current]);
 
   if (!open) {
     return (
-      <button type="button" onClick={() => setOpen(true)} className="btn !h-9 text-sm">
-        Mark {label} live
+      <button type="button" onClick={() => setOpen(true)} className="btn btn-primary !h-9 text-sm">
+        {current ? "Change Day 1" : "Ads launched? Set Day 1"}
       </button>
     );
   }
@@ -67,10 +64,9 @@ export default function MarkServiceLive({
     <div className="modal-backdrop">
       <form action={action} className="modal-panel md:max-w-md p-5 md:p-6 space-y-4">
         <input type="hidden" name="agreement_id" value={agreement.id} />
-        <input type="hidden" name="service" value={service} />
         <div className="modal-header">
           <div>
-            <h2 className="text-lg font-bold">Mark {label} live</h2>
+            <h2 className="text-lg font-bold">Day 1 · launch date</h2>
             <p className="text-xs muted">{agreement.client_name}</p>
           </div>
           <button type="button" onClick={() => setOpen(false)} className="icon-btn">
@@ -78,61 +74,100 @@ export default function MarkServiceLive({
           </button>
         </div>
 
+        <p className="text-xs muted">
+          Only set this once the ads / AI automation are actually live. Until then, leave it — the client
+          simply shows “Not launched yet”.
+        </p>
+
+        <div className="choice-grid">
+          <button
+            type="button"
+            onClick={() => setLiveDate(today)}
+            className={`funding-choice ${liveDate === today ? "funding-choice-active" : ""}`}
+          >
+            <strong>Launched today</strong>
+            <span>{formatServiceDate(today)}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setLiveDate(addCalendarDays(today, -1))}
+            className={`funding-choice ${liveDate === addCalendarDays(today, -1) ? "funding-choice-active" : ""}`}
+          >
+            <strong>Launched yesterday</strong>
+            <span>{formatServiceDate(addCalendarDays(today, -1))}</span>
+          </button>
+        </div>
+
         <label className="block">
-          <span className="field-label">{service === "ads" ? "Ads live date" : "Automation live date"}</span>
+          <span className="field-label">Or pick the day it went live</span>
           <input
             name="live_date"
             type="date"
             required
+            max={today}
             value={liveDate}
             onChange={(event) => setLiveDate(event.target.value)}
             className="input mt-1"
           />
         </label>
 
-        <label className="checkbox-row">
-          <input
-            type="checkbox"
-            name="use_as_billing_start"
-            checked={useAsStart}
-            onChange={(event) => setUseAsStart(event.target.checked)}
-          />
-          <span>
-            <strong>
-              Use {formatServiceDate(liveDate)} as the recurring billing start date?
-            </strong>
-            <small>
-              {anchorExists
-                ? `Recurring billing currently starts ${formatServiceDate(existingAnchor)}.`
-                : "Monthly cycles will count from this date."}
-            </small>
-          </span>
-        </label>
+        {inFuture && (
+          <p className="text-xs" style={{ color: "var(--amber)" }}>
+            That date is in the future. Come back and set Day 1 on the day the ads actually go live.
+          </p>
+        )}
 
-        {willMoveAnchor && recurringPaymentCount > 0 && (
+        {isValidDate(liveDate) && !inFuture && (
+          <ol className="timeline-preview">
+            <li>
+              <strong>Month 1 · setup charge</strong>
+              <span>from {formatServiceDate(liveDate)}</span>
+            </li>
+            <li>
+              <strong>First monthly fee</strong>
+              <span>due {formatServiceDate(addCalendarMonths(liveDate, 1))}</span>
+            </li>
+          </ol>
+        )}
+
+        {moving && recurringPaymentCount > 0 && (
           <label className="checkbox-row" style={{ borderColor: "var(--amber)" }}>
             <input type="checkbox" name="confirm_billing_change" />
             <span>
-              <strong>I understand this recalculates billing</strong>
+              <strong>I understand the monthly due dates will move</strong>
               <small>
-                {recurringPaymentCount} recurring payment
-                {recurringPaymentCount === 1 ? " is" : "s are"} recorded against the current
-                billing start date. Moving it changes every future due date.
+                {recurringPaymentCount} monthly payment{recurringPaymentCount === 1 ? " is" : "s are"} recorded
+                against Day 1 = {formatServiceDate(current)}.
               </small>
             </span>
           </label>
         )}
 
-        {willMoveAnchor && recurringPaymentCount === 0 && (
-          <p className="text-xs" style={{ color: "var(--amber)" }}>
-            This replaces the current billing start date of {formatServiceDate(existingAnchor)}.
-          </p>
-        )}
-
         {state.error && <p className="text-sm" style={{ color: "var(--red)" }}>{state.error}</p>}
-        <button disabled={pending} className="btn btn-primary w-full !h-12">
-          {pending ? "Saving…" : `Mark ${label} live`}
+        {clearError && <p className="text-sm" style={{ color: "var(--red)" }}>{clearError}</p>}
+        <button disabled={pending || !isValidDate(liveDate) || inFuture} className="btn btn-primary w-full !h-12">
+          {pending ? "Saving…" : "Save Day 1"}
         </button>
+
+        {current && recurringPaymentCount === 0 && (
+          <button
+            type="button"
+            disabled={clearing}
+            onClick={() =>
+              startClear(async () => {
+                try {
+                  await clearLaunchDate(agreement.id);
+                  setOpen(false);
+                } catch (error) {
+                  setClearError(error instanceof Error ? error.message : "Could not clear Day 1.");
+                }
+              })
+            }
+            className="btn w-full !h-11"
+          >
+            {clearing ? "Clearing…" : "Not launched yet — remove Day 1"}
+          </button>
+        )}
       </form>
     </div>
   );

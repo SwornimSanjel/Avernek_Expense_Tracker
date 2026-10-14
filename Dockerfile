@@ -1,55 +1,62 @@
 # syntax=docker/dockerfile:1.7
 #
-# Multi-stage build for the Avernek Expense Tracker (Next.js App Router).
+# Production image for the Avernek Expense Tracker (Next.js App Router, SSR).
 #
-# Why three stages: `deps` installs once and is cached until the lockfile
-# changes, `builder` compiles with the full devDependency toolchain, and
-# `runner` ships only Next's standalone server -- no source, no npm, no
-# devDependencies. Final image is a few hundred MB instead of ~1.5 GB.
+# Jenkins builds one target per pipeline stage. Each target reuses the layers
+# of the one before it, so dependencies are installed once and the application
+# is built once:
 #
-# The build needs NO secrets at all. Every value the app reads -- DATABASE_URL,
-# SESSION_SECRET, ADMIN_* , CRON_SECRET -- is server-side and read at runtime,
-# so nothing is compiled into the image.
+#   deps     npm ci from the lockfile                      "Install Dependencies"
+#   verify   tsc --noEmit (+ tests, if a test script exists) "Lint / Type Check / Test"
+#   builder  next build (standalone server)                 "Application Build"
+#   runner   the runtime image that is deployed             "Docker Image Build"
 #
-# That is a deliberate property: there are no NEXT_PUBLIC_* variables left, so
-# changing configuration no longer requires a rebuild. Edit the environment and
-# restart, and the change is live.
+# The build needs no secrets. Everything the app reads (DATABASE_URL,
+# SESSION_SECRET, ADMIN_*, CRON_SECRET) is server-side and read at runtime from
+# the deployment's .env, so nothing is compiled into the image.
 #
-#   docker build -t avernek-expense-tracker .
+#   docker build -t avernek-expense-tracker:local .
+
+ARG NODE_IMAGE=node:22-alpine
 
 ##############################################################################
-# Stage 1 - dependencies
+# deps: production and build dependencies, pinned by package-lock.json
 ##############################################################################
-FROM node:22-alpine AS deps
+FROM ${NODE_IMAGE} AS deps
 WORKDIR /app
 
-# sharp (Next's image optimiser) links against glibc-style symbols on musl.
+# sharp (Next's image optimiser) needs glibc-compatible symbols on musl.
 RUN apk add --no-cache libc6-compat
 
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --no-audit --no-fund
 
 ##############################################################################
-# Stage 2 - build
+# verify: type check and tests. No ESLint configuration exists in this
+# project, so there is no lint step (`next lint` would stop and ask to set one
+# up). `npm test --if-present` runs tests once a "test" script is added.
 ##############################################################################
-FROM node:22-alpine AS builder
-WORKDIR /app
-
-RUN apk add --no-cache libc6-compat
-
+FROM deps AS verify
 ENV NEXT_TELEMETRY_DISABLED=1
-# Switches next.config.ts to `output: "standalone"` without affecting Netlify.
-ENV DOCKER_BUILD=1
-
-COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+RUN npm run typecheck \
+ && npm test --if-present
 
+##############################################################################
+# builder: the standalone Next.js server bundle
+##############################################################################
+FROM deps AS builder
+ENV NEXT_TELEMETRY_DISABLED=1 \
+    # Switches next.config.ts to `output: "standalone"` (Netlify keeps the default).
+    DOCKER_BUILD=1
+COPY . .
 RUN npm run build
 
 ##############################################################################
-# Stage 3 - runtime
+# runner: only the standalone server, static assets and the admin seed script
 ##############################################################################
-FROM node:22-alpine AS runner
+FROM ${NODE_IMAGE} AS runner
 WORKDIR /app
 
 RUN apk add --no-cache libc6-compat
@@ -62,23 +69,23 @@ ENV NODE_ENV=production \
 RUN addgroup -g 1001 -S nodejs \
  && adduser -u 1001 -S nextjs -G nodejs
 
-# standalone/ already contains server.js plus a pruned node_modules; static/
-# and public/ are the two things Next expects you to copy alongside it.
+# standalone/ contains server.js and a pruned node_modules; static/ and public/
+# are what Next expects alongside it.
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 
-# seed-admin.mjs runs as `docker compose exec web node scripts/seed-admin.mjs`
-# from the Jenkins "Migrate & seed" stage. It needs `pg`, which the standalone
-# trace already includes because src/lib/db.ts imports it, and node:crypto,
-# which is built in. Nothing else from the source tree is required.
+# Run by the pipeline as `docker compose exec web node scripts/seed-admin.mjs`.
+# It needs only `pg` (already in the standalone trace) and node:crypto.
 COPY --from=builder --chown=nextjs:nodejs /app/scripts/seed-admin.mjs ./scripts/
 
-USER nextjs
+USER 1001:1001
 EXPOSE 3000
 
-# Node 22 ships a global fetch, so no curl needed in the image.
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+# Node 22 has a global fetch, so the image needs no curl.
+HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=3 \
+  CMD ["node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
 
+# Compose runs this with `init: true`: tini is PID 1, forwards SIGTERM to Node
+# and reaps zombies, so `docker compose stop` shuts the server down cleanly.
 CMD ["node", "server.js"]

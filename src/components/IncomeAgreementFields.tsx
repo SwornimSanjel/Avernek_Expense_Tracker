@@ -1,49 +1,48 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import type {
-  AdsStatus,
-  AutomationStatus,
   Currency,
   IncomeAgreement,
   IncomeAgreementStatus,
   MoneyAccount,
-  RecurringBillingMode,
-  SetupPaymentTerms,
   WebsiteStatus,
 } from "@/lib/types";
 import {
-  ADS_STATUS_LABELS,
   AGREEMENT_STATUS_LABELS,
-  AUTOMATION_STATUS_LABELS,
   PAYMENT_METHOD_LABELS,
   WEBSITE_STATUS_LABELS,
   addCalendarDays,
   addCalendarMonths,
   formatIncomeMoney,
   formatServiceDate,
+  goLiveDate,
   isValidDate,
   todayIso,
 } from "@/lib/income";
+import { accountShortName } from "@/lib/funds";
+import TaxBreakdownFields from "./TaxBreakdownFields";
+import PriceBreakdownTable from "./PriceBreakdownTable";
 
 /**
- * Every editable field of one client agreement.
+ * Every editable field of one client, asking only for dates that exist in real
+ * life:
  *
- * Sections belong to a step. The add-client wizard passes `activeStep` and the
- * rest stay mounted but hidden, so a five-step flow is still one form post and
- * nothing typed on an earlier step is lost. The edit modal passes no step and
- * shows everything.
+ *   Contract signed   the paper agreement
+ *   Work started      optional
+ *   Day 1             ads / AI automation launched → month 1 is the setup
+ *                     charge, the monthly fee is billed from month 2
+ *   Website           started / delivered — a one-off project, done once delivered
  *
- * Fields appear only for services the client actually bought: a website-only
- * client is never shown a live date or a monthly fee.
+ * Due dates, billing anchors and service statuses are worked out from those.
+ * The add-client wizard passes `activeStep` (other steps stay mounted but
+ * hidden so one form post carries everything); the edit modal shows all.
  */
 
 export const AGREEMENT_STEPS = [
-  { step: 1, title: "Client", hint: "Who they are and what they bought" },
-  { step: 2, title: "Pricing", hint: "Setup, website and monthly amounts" },
-  { step: 3, title: "Payment", hint: "Money received so far — Rs. 0 is fine" },
-  { step: 4, title: "Services", hint: "Where each service currently stands" },
-  { step: 5, title: "Review", hint: "Check and save" },
+  { step: 1, title: "Client", hint: "Who and what they bought" },
+  { step: 2, title: "Prices & dates", hint: "What was agreed and when" },
+  { step: 3, title: "Money received", hint: "Optional — Rs. 0 is fine" },
 ] as const;
 
 type Props = {
@@ -53,7 +52,7 @@ type Props = {
   includeInitialPayment?: boolean;
   /** Wizard mode: render only this step and keep the rest mounted but hidden. */
   activeStep?: number;
-  /** Warn before moving a billing anchor that already has cycle payments. */
+  /** Warn before moving Day 1 when monthly payments already depend on it. */
   recurringPaymentCount?: number;
 };
 
@@ -65,72 +64,56 @@ export default function IncomeAgreementFields({
   recurringPaymentCount = 0,
 }: Props) {
   const today = todayIso();
-
-  const [hasWebsite, setHasWebsite] = useState(agreement?.has_website ?? false);
-  const [hasAds, setHasAds] = useState(agreement?.has_ads ?? true);
-  const [hasAutomation, setHasAutomation] = useState(agreement?.has_automation ?? false);
-  const [currency, setCurrency] = useState<Currency>(agreement?.currency ?? "NPR");
-  const [clientName, setClientName] = useState(agreement?.client_name ?? "");
-  const [agreementDate, setAgreementDate] = useState(agreement?.agreement_date ?? today);
-
-  const [setupAmount, setSetupAmount] = useState(
-    agreement ? String(Number(agreement.setup_amount)) : ""
-  );
-  const [setupTerms, setSetupTerms] = useState<SetupPaymentTerms>(
-    agreement?.setup_payment_terms ?? "custom"
-  );
-  const [setupDueDate, setSetupDueDate] = useState(agreement?.setup_due_date ?? today);
-  const [websiteAmount, setWebsiteAmount] = useState(
-    agreement ? String(Number(agreement.website_amount)) : ""
-  );
-  const [billingMode, setBillingMode] = useState<RecurringBillingMode>(
-    agreement?.recurring_billing_mode ?? "combined"
-  );
-  const [recurringAmount, setRecurringAmount] = useState(
-    agreement ? String(Number(agreement.recurring_amount)) : ""
-  );
-  const [billingStart, setBillingStart] = useState(
-    agreement?.recurring_billing_start_date ?? ""
-  );
-  const [adsLiveDate, setAdsLiveDate] = useState(agreement?.ads_live_date ?? "");
-  const [automationLiveDate, setAutomationLiveDate] = useState(
-    agreement?.automation_live_date ?? ""
-  );
-  const [initialPaid, setInitialPaid] = useState("");
-  const [initialFor, setInitialFor] = useState<"setup" | "website">("setup");
-
-  const recurringService = hasAds || hasAutomation;
-  const openingPayment = Number(initialPaid || 0);
-  const activeAccounts = moneyAccounts.filter(
-    (account) => account.is_active && account.currency === currency
-  );
   const visible = (step: number) => activeStep == null || activeStep === step;
 
-  const firstCycle = useMemo(() => {
-    if (!isValidDate(billingStart)) return null;
-    return {
-      start: billingStart,
-      end: addCalendarDays(addCalendarMonths(billingStart, 1), -1),
-      firstInvoice: addCalendarMonths(billingStart, 1),
-    };
-  }, [billingStart]);
+  const [clientName, setClientName] = useState(agreement?.client_name ?? "");
+  const [hasWebsite, setHasWebsite] = useState(agreement?.has_website ?? false);
+  const [hasAds, setHasAds] = useState(agreement?.has_ads ?? true);
+  const [hasAutomation, setHasAutomation] = useState(agreement?.has_automation ?? true);
+  const [currency, setCurrency] = useState<Currency>(agreement?.currency ?? "NPR");
+  const [accountId, setAccountId] = useState(agreement?.default_money_account_id ?? "");
 
-  const setupLeft = Math.max(
-    0,
-    Number(setupAmount || 0) - (initialFor === "setup" ? openingPayment : 0)
+  const [signed, setSigned] = useState(agreement?.agreement_date ?? today);
+  const [setupAmount, setSetupAmount] = useState(
+    agreement && Number(agreement.setup_amount) > 0 ? String(Number(agreement.setup_amount)) : ""
   );
-  const websiteLeft = Math.max(
-    0,
-    Number(websiteAmount || 0) - (initialFor === "website" ? openingPayment : 0)
+  const [monthlyAmount, setMonthlyAmount] = useState(
+    agreement && Number(agreement.recurring_amount) > 0 ? String(Number(agreement.recurring_amount)) : ""
   );
+  const originalDayOne = agreement ? goLiveDate(agreement) ?? "" : "";
+  const [dayOne, setDayOne] = useState(originalDayOne);
+  const [websiteAmount, setWebsiteAmount] = useState(
+    agreement && Number(agreement.website_amount) > 0 ? String(Number(agreement.website_amount)) : ""
+  );
+  const [websiteDelivered, setWebsiteDelivered] = useState(agreement?.website_completed_date ?? "");
+
+  const [deductsTds, setDeductsTds] = useState(agreement?.deducts_tds ?? false);
+  const [vatChoice, setVatChoice] = useState(true);
+  const [paidYet, setPaidYet] = useState(false);
+  const [initialFor, setInitialFor] = useState<"setup" | "website">("setup");
+  const [initialAccountId, setInitialAccountId] = useState("");
+  const [initialAmount, setInitialAmount] = useState(0);
+
+  const monthly = hasAds || hasAutomation;
+  const accounts = moneyAccounts.filter(
+    (account) => account.is_active && account.currency === currency
+  );
+  const openingFor = monthly ? (hasWebsite ? initialFor : "setup") : "website";
+  const openingAccountId = initialAccountId || accountId || accounts[0]?.id || "";
+  const openingAccount = accounts.find((account) => account.id === openingAccountId);
+  const dayOneMoved = Boolean(agreement) && monthly && dayOne !== originalDayOne;
+  const defaultAccount = accounts.find((account) => account.id === accountId);
+  // VAT follows the account they pay into; only "decide each time" asks.
+  const withVat = defaultAccount ? defaultAccount.kind === "company_bank" : vatChoice;
+  const openingPrice = Number((openingFor === "setup" ? setupAmount : websiteAmount) || 0);
 
   return (
     <div className="space-y-4">
-      {/* ---------------------------------------------------------------- 01 */}
+      {/* ------------------------------------------------------------ step 1 */}
       <FormSection
-        number="01"
-        title="Client & agreement"
-        description="Who the client is, when the agreement started, and which services they bought."
+        number="1"
+        title="Client"
+        description="Who they are, what they bought, and which account they pay into."
         hidden={!visible(1)}
       >
         <div className="grid sm:grid-cols-2 gap-3">
@@ -140,63 +123,87 @@ export default function IncomeAgreementFields({
               autoFocus={!agreement}
               value={clientName}
               onChange={(event) => setClientName(event.target.value)}
-              placeholder="e.g. Nepal Comfort Tour Service"
+              placeholder="e.g. Hotel President"
               className="input"
             />
           </Field>
-          <Field label="Agreement start date">
+          <Field label="Contact person (optional)">
             <input
-              name="agreement_date"
-              type="date"
-              value={agreementDate}
-              onChange={(event) => setAgreementDate(event.target.value)}
+              name="contact_name"
+              defaultValue={agreement?.contact_name ?? ""}
+              placeholder="Who you deal with"
               className="input"
             />
-            <p className="field-help">
-              The day the contract was signed or agreed. Not a payment date and not a service-live date.
-            </p>
           </Field>
         </div>
 
-        <div className="service-picker mt-3">
-          <span className="field-label">Services purchased</span>
+        <div className="mt-4">
+          <span className="field-label">What did they buy?</span>
           <div className="service-picker-grid mt-2">
-            <ServiceToggle
-              name="has_website"
-              label="Website"
-              hint="One-off project billing"
-              checked={hasWebsite}
-              onChange={setHasWebsite}
-            />
             <ServiceToggle
               name="has_ads"
               label="Ads / Marketing"
-              hint="Monthly recurring service"
+              hint="Monthly"
               checked={hasAds}
               onChange={setHasAds}
             />
             <ServiceToggle
               name="has_automation"
               label="AI Automation"
-              hint="Monthly recurring service"
+              hint="Monthly"
               checked={hasAutomation}
               onChange={setHasAutomation}
             />
+            <ServiceToggle
+              name="has_website"
+              label="Website"
+              hint="One-off project"
+              checked={hasWebsite}
+              onChange={setHasWebsite}
+            />
           </div>
-          {!hasWebsite && !hasAds && !hasAutomation && (
+          {!hasWebsite && !monthly && (
             <p className="field-help" style={{ color: "var(--amber)" }}>
-              Choose at least one service. Any combination is allowed.
+              Choose at least one. No agreement at all? Use “Add income (no client)” instead.
             </p>
           )}
         </div>
 
-        <div className="grid sm:grid-cols-2 gap-3 mt-3">
-          <Field label="Agreement status">
-            <select
-              name="status"
-              defaultValue={agreement?.status ?? "active"}
-              className="input"
+        <div className="mt-4">
+          <span className="field-label">Which account do they usually pay into?</span>
+          <div className="choice-grid mt-2">
+            {accounts.map((account) => (
+              <button
+                key={account.id}
+                type="button"
+                onClick={() => setAccountId(account.id)}
+                className={`funding-choice ${accountId === account.id ? "funding-choice-active" : ""}`}
+              >
+                <strong>{accountShortName(account)}</strong>
+                <span>
+                  {account.kind === "company_bank"
+                    ? "Avernek official · VAT bill (13%)"
+                    : account.kind === "personal_custody"
+                      ? "Swornim Global IME · no VAT"
+                      : account.name}
+                </span>
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={() => setAccountId("")}
+              className={`funding-choice ${accountId === "" ? "funding-choice-active" : ""}`}
             >
+              <strong>Decide each time</strong>
+              <span>Choose on every payment</span>
+            </button>
+          </div>
+          <input type="hidden" name="default_money_account_id" value={accountId} />
+        </div>
+
+        <div className="grid sm:grid-cols-2 gap-3 mt-4">
+          <Field label="Status">
+            <select name="status" defaultValue={agreement?.status ?? "active"} className="input">
               {(Object.keys(AGREEMENT_STATUS_LABELS) as IncomeAgreementStatus[]).map((status) => (
                 <option key={status} value={status}>
                   {AGREEMENT_STATUS_LABELS[status]}
@@ -208,102 +215,139 @@ export default function IncomeAgreementFields({
             <select
               name="currency"
               value={currency}
-              onChange={(event) => setCurrency(event.target.value as Currency)}
+              onChange={(event) => {
+                setCurrency(event.target.value as Currency);
+                setAccountId("");
+              }}
               className="input"
             >
               <option value="NPR">NPR</option>
               <option value="USD">USD</option>
             </select>
           </Field>
-          <Field label="Billing account · VAT / non-VAT">
-            <select
-              name="default_money_account_id"
-              defaultValue={agreement?.default_money_account_id ?? ""}
-              className="input"
-            >
-              <option value="">Decide per payment</option>
-              {activeAccounts.map((account) => (
-                <option key={account.id} value={account.id}>
-                  {accountShortLabel(account)}
-                </option>
-              ))}
-            </select>
-            <p className="field-help">
-              The account this client normally pays into. It only pre-selects the receiving account; every payment can still choose its own.
-            </p>
-          </Field>
-          <Field label="Contract end date (optional)">
-            <input
-              name="contract_end_date"
-              type="date"
-              defaultValue={agreement?.contract_end_date ?? ""}
-              className="input"
-            />
-          </Field>
-          <Field label="Contact person (optional)">
-            <input
-              name="contact_name"
-              defaultValue={agreement?.contact_name ?? ""}
-              placeholder="Client contact"
-              className="input"
-            />
-          </Field>
-          <Field label="Agreement title (optional)">
-            <input
-              name="agreement_name"
-              defaultValue={agreement?.agreement_name ?? ""}
-              placeholder="e.g. Growth partnership"
-              className="input"
-            />
-          </Field>
         </div>
-
-        <Field label="Agreement notes (optional)">
-          <textarea
-            name="notes"
-            defaultValue={agreement?.notes ?? ""}
-            placeholder="Scope, special conditions, invoice details…"
-            className="input !h-20 py-3 resize-none"
-          />
-        </Field>
       </FormSection>
 
-      {/* ---------------------------------------------------------------- 02 */}
+      {/* ------------------------------------------------------------ step 2 */}
       <FormSection
-        number="02"
-        title="Pricing"
-        description="What was agreed. Amounts paid are never typed here — they come from the payment records."
+        number="2"
+        title="Prices & dates"
+        description="Only the dates that are on paper or really happened. Leave a date blank until it happens."
         hidden={!visible(2)}
       >
-        <div className="grid sm:grid-cols-2 gap-3">
-          <Field label="Initial / setup agreed amount">
-            <input
-              name="setup_amount"
-              type="number"
-              step="0.01"
-              min="0"
-              value={setupAmount}
-              onChange={(event) => setSetupAmount(event.target.value)}
-              placeholder="0"
-              className="input tnum"
-            />
-          </Field>
-          <Field label="Initial / setup payment due date">
-            <input
-              name="setup_due_date"
-              type="date"
-              value={setupDueDate}
-              onChange={(event) => setSetupDueDate(event.target.value)}
-              className="input"
-            />
-          </Field>
+        <div className="service-block">
+          <div className="service-block-title">Contract</div>
+          <div className="grid sm:grid-cols-2 gap-3">
+            <Field label="Contract signed on">
+              <input
+                name="agreement_date"
+                type="date"
+                value={signed}
+                onChange={(event) => setSigned(event.target.value)}
+                className="input"
+              />
+              <p className="field-help">The date on the paper agreement.</p>
+            </Field>
+            <Field label="Work started on (optional)">
+              <input
+                name="work_start_date"
+                type="date"
+                defaultValue={agreement?.work_start_date ?? ""}
+                className="input"
+              />
+              <p className="field-help">When the team began preparing. Just for the record.</p>
+            </Field>
+          </div>
         </div>
+
+        {monthly && (
+          <div className="service-block mt-3">
+            <div className="service-block-title">
+              {hasAds && hasAutomation ? "Ads + AI automation" : hasAds ? "Ads / marketing" : "AI automation"} · monthly
+            </div>
+            <div className="grid sm:grid-cols-3 gap-3">
+              <Field label="Setup charge · month 1">
+                <input
+                  name="setup_amount"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={setupAmount}
+                  onChange={(event) => setSetupAmount(event.target.value)}
+                  placeholder="0"
+                  className="input tnum"
+                />
+              </Field>
+              <Field label="Monthly fee · month 2 onwards">
+                <input
+                  name="recurring_amount"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={monthlyAmount}
+                  onChange={(event) => setMonthlyAmount(event.target.value)}
+                  placeholder="0"
+                  className="input tnum"
+                />
+              </Field>
+              <Field label="Day 1 · launched on">
+                <input
+                  name="go_live_date"
+                  type="date"
+                  max={today}
+                  value={dayOne}
+                  onChange={(event) => setDayOne(event.target.value)}
+                  className="input"
+                />
+                {dayOne ? (
+                  <button
+                    type="button"
+                    onClick={() => setDayOne("")}
+                    className="field-help underline"
+                    style={{ color: "var(--accent)" }}
+                  >
+                    Not launched yet — clear
+                  </button>
+                ) : (
+                  <p className="field-help">Empty = not launched yet.</p>
+                )}
+              </Field>
+            </div>
+            {isValidDate(dayOne) && dayOne > today && (
+              <p className="field-help" style={{ color: "var(--amber)" }}>
+                Day 1 is in the future. Leave it empty and set it on the client page the day the ads go live.
+              </p>
+            )}
+            <p className="field-help">
+              Amounts exclude VAT. Don&apos;t guess Day 1 — leave it empty and press “Ads launched? Set Day 1” on
+              the client page on the day the ads / AI automation go live.
+            </p>
+            <BillingTimeline
+              dayOne={dayOne}
+              setup={Number(setupAmount || 0)}
+              monthly={Number(monthlyAmount || 0)}
+              currency={currency}
+            />
+            {dayOneMoved && recurringPaymentCount > 0 && (
+              <label className="checkbox-row mt-3" style={{ borderColor: "var(--amber)" }}>
+                <input type="checkbox" name="confirm_billing_change" />
+                <span>
+                  <strong>I understand the monthly due dates will move</strong>
+                  <small>
+                    {recurringPaymentCount} monthly payment{recurringPaymentCount === 1 ? " is" : "s are"} already
+                    recorded against the old Day 1.
+                  </small>
+                </span>
+              </label>
+            )}
+          </div>
+        )}
 
         {hasWebsite && (
           <div className="service-block mt-3">
-            <div className="service-block-title">Website · one-off project billing</div>
+            <div className="service-block-title">Website · one-off project</div>
             <div className="grid sm:grid-cols-2 gap-3">
-              <Field label="Website agreed price">
+              <Field label="Website price">
                 <input
                   name="website_amount"
                   type="number"
@@ -315,350 +359,7 @@ export default function IncomeAgreementFields({
                   className="input tnum"
                 />
               </Field>
-              <Field label="Website payment due date">
-                <input
-                  name="website_due_date"
-                  type="date"
-                  defaultValue={agreement?.website_due_date ?? ""}
-                  className="input"
-                />
-              </Field>
-            </div>
-          </div>
-        )}
-
-        {recurringService && (
-          <div className="service-block mt-3">
-            <div className="service-block-title">Monthly recurring billing</div>
-            <div className="grid sm:grid-cols-2 gap-3">
-              <Field label="Billing arrangement">
-                <select
-                  name="recurring_billing_mode"
-                  value={billingMode}
-                  onChange={(event) => setBillingMode(event.target.value as RecurringBillingMode)}
-                  className="input"
-                >
-                  <option value="combined">One combined monthly fee</option>
-                  <option value="separate">Bill each service separately</option>
-                </select>
-              </Field>
-              {billingMode === "combined" ? (
-                <Field label="Monthly recurring amount">
-                  <input
-                    name="recurring_amount"
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={recurringAmount}
-                    onChange={(event) => setRecurringAmount(event.target.value)}
-                    placeholder="0"
-                    className="input tnum"
-                  />
-                </Field>
-              ) : (
-                <div />
-              )}
-            </div>
-
-            {billingMode === "combined" ? (
-              <Field label="Recurring billing start date">
-                <input
-                  name="recurring_billing_start_date"
-                  type="date"
-                  value={billingStart}
-                  onChange={(event) => setBillingStart(event.target.value)}
-                  className="input"
-                />
-                <p className="field-help">
-                  Leave blank until the service actually goes live. Marking ads or automation live offers this date automatically, and it stays editable.
-                </p>
-              </Field>
-            ) : (
-              <>
-                <input
-                  type="hidden"
-                  name="recurring_billing_start_date"
-                  value={billingStart}
-                />
-                <div className="grid sm:grid-cols-2 gap-3 mt-3">
-                  {hasAds && (
-                    <>
-                      <Field label="Ads monthly amount">
-                        <input
-                          name="ads_monthly_amount"
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          defaultValue={
-                            agreement?.ads_monthly_amount != null
-                              ? Number(agreement.ads_monthly_amount)
-                              : ""
-                          }
-                          className="input tnum"
-                        />
-                      </Field>
-                      <Field label="Ads billing start date">
-                        <input
-                          name="ads_billing_start_date"
-                          type="date"
-                          defaultValue={agreement?.ads_billing_start_date ?? ""}
-                          className="input"
-                        />
-                      </Field>
-                    </>
-                  )}
-                  {hasAutomation && (
-                    <>
-                      <Field label="AI automation monthly amount">
-                        <input
-                          name="automation_monthly_amount"
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          defaultValue={
-                            agreement?.automation_monthly_amount != null
-                              ? Number(agreement.automation_monthly_amount)
-                              : ""
-                          }
-                          className="input tnum"
-                        />
-                      </Field>
-                      <Field label="AI automation billing start date">
-                        <input
-                          name="automation_billing_start_date"
-                          type="date"
-                          defaultValue={agreement?.automation_billing_start_date ?? ""}
-                          className="input"
-                        />
-                      </Field>
-                    </>
-                  )}
-                </div>
-              </>
-            )}
-
-            {billingMode === "combined" && firstCycle && (
-              <div className="agreement-balance-preview mt-3">
-                <span>First cycle {formatServiceDate(firstCycle.start)} – {formatServiceDate(firstCycle.end)}</span>
-                <strong className="!text-sm">
-                  Next payment due {formatServiceDate(firstCycle.firstInvoice)}
-                </strong>
-              </div>
-            )}
-
-            <label className="checkbox-row mt-3">
-              <input
-                type="checkbox"
-                name="setup_covers_first_cycle"
-                defaultChecked={agreement?.setup_covers_first_cycle ?? true}
-              />
-              <span>
-                <strong>The setup fee covers the first month of service</strong>
-                <small>
-                  On: the first recurring invoice falls one calendar month after the billing start date. Off: the first invoice is the billing start date itself.
-                </small>
-              </span>
-            </label>
-
-            {recurringPaymentCount > 0 && (
-              <label className="checkbox-row mt-2" style={{ borderColor: "var(--amber)" }}>
-                <input type="checkbox" name="confirm_billing_change" />
-                <span>
-                  <strong>I understand this recalculates billing</strong>
-                  <small>
-                    {recurringPaymentCount} recurring payment
-                    {recurringPaymentCount === 1 ? " is" : "s are"} already recorded. Changing the billing start date or arrangement moves every future due date.
-                  </small>
-                </span>
-              </label>
-            )}
-          </div>
-        )}
-
-        <details className="agreement-details mt-3">
-          <summary>
-            <span>
-              <strong>Payment terms &amp; corrections</strong>
-              <small>Advance split, due-date lead time, paid-in-full overrides</small>
-            </span>
-          </summary>
-          <div className="p-4 space-y-3 border-t" style={{ borderColor: "var(--line)" }}>
-            <div className="grid sm:grid-cols-2 gap-3">
-              <Field label="Setup payment arrangement">
-                <select
-                  name="setup_payment_terms"
-                  value={setupTerms}
-                  onChange={(event) => setSetupTerms(event.target.value as SetupPaymentTerms)}
-                  className="input"
-                >
-                  <option value="full_upfront">Full setup upfront</option>
-                  <option value="half_advance">Advance + rest on the service-live day</option>
-                  <option value="custom">Custom / partial payments</option>
-                </select>
-              </Field>
-              {setupTerms === "half_advance" ? (
-                <Field label="Advance percentage">
-                  <input
-                    name="setup_advance_percent"
-                    type="number"
-                    min="0"
-                    max="100"
-                    step="0.01"
-                    defaultValue={agreement ? Number(agreement.setup_advance_percent) : 50}
-                    className="input tnum"
-                  />
-                </Field>
-              ) : (
-                <input type="hidden" name="setup_advance_percent" value="100" />
-              )}
-              <Field label="Setup paid-in-full date (override)">
-                <input
-                  name="setup_paid_in_full_date"
-                  type="date"
-                  defaultValue={agreement?.setup_paid_in_full_date ?? ""}
-                  className="input"
-                />
-                <p className="field-help">
-                  Left blank, this is calculated from the payment that cleared the balance.
-                </p>
-              </Field>
-              {recurringService && (
-                <Field label="Send the monthly invoice this many days early">
-                  <input
-                    name="recurring_due_days_before"
-                    type="number"
-                    min="0"
-                    max="30"
-                    step="1"
-                    defaultValue={agreement ? Number(agreement.recurring_due_days_before) : 0}
-                    className="input tnum"
-                  />
-                </Field>
-              )}
-              {hasWebsite && (
-                <Field label="Website paid-in-full date (override)">
-                  <input
-                    name="website_paid_in_full_date"
-                    type="date"
-                    defaultValue={agreement?.website_paid_in_full_date ?? ""}
-                    className="input"
-                  />
-                </Field>
-              )}
-            </div>
-            <Field label="Setup / billing notes (optional)">
-              <input
-                name="setup_notes"
-                defaultValue={agreement?.setup_notes ?? ""}
-                placeholder="e.g. 50% advance agreed over the phone"
-                className="input"
-              />
-            </Field>
-          </div>
-        </details>
-      </FormSection>
-
-      {/* ---------------------------------------------------------------- 03 */}
-      {includeInitialPayment && (
-        <FormSection
-          number="03"
-          title="Payment received so far"
-          description="Record money already in hand, or leave it at zero and add payments later."
-          hidden={!visible(3)}
-        >
-          <div className="grid sm:grid-cols-2 gap-3">
-            <Field label="Amount received now">
-              <input
-                name="initial_paid_amount"
-                type="number"
-                min="0"
-                step="0.01"
-                value={initialPaid}
-                onChange={(event) => setInitialPaid(event.target.value)}
-                placeholder="0"
-                className="input tnum"
-              />
-              <p className="field-help">Rs. 0 is valid. More payments can be added any time.</p>
-            </Field>
-            {hasWebsite ? (
-              <Field label="This payment is for">
-                <select
-                  name="initial_payment_for"
-                  value={initialFor}
-                  onChange={(event) => setInitialFor(event.target.value as "setup" | "website")}
-                  className="input"
-                >
-                  <option value="setup">Initial / setup billing</option>
-                  <option value="website">Website project billing</option>
-                </select>
-              </Field>
-            ) : (
-              <input type="hidden" name="initial_payment_for" value="setup" />
-            )}
-          </div>
-
-          {openingPayment > 0 && (
-            <div className="grid sm:grid-cols-2 gap-3 mt-3">
-              <Field label="Payment received date">
-                <input
-                  name="initial_paid_on"
-                  type="date"
-                  defaultValue={today}
-                  className="input"
-                />
-              </Field>
-              <Field label={`Received into (${currency})`}>
-                <select name="initial_money_account_id" defaultValue="" className="input">
-                  <option value="" disabled>
-                    Choose receiving account
-                  </option>
-                  {activeAccounts.map((account) => (
-                    <option key={account.id} value={account.id}>
-                      {accountShortLabel(account)}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <Field label="Payment method (optional)">
-                <select name="initial_method" defaultValue="" className="input">
-                  <option value="">Not recorded</option>
-                  {Object.entries(PAYMENT_METHOD_LABELS).map(([value, label]) => (
-                    <option key={value} value={value}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <div className="agreement-balance-preview">
-                <span>Remaining after this payment</span>
-                <strong className="tnum">
-                  {formatIncomeMoney(
-                    initialFor === "setup" ? setupLeft : websiteLeft,
-                    currency
-                  )}
-                </strong>
-              </div>
-            </div>
-          )}
-        </FormSection>
-      )}
-
-      {/* ---------------------------------------------------------------- 04 */}
-      <FormSection
-        number={includeInitialPayment ? "04" : "03"}
-        title="Service status"
-        description="Where each service stands today. Live dates stay blank until the service really goes live."
-        hidden={!visible(4)}
-      >
-        {!hasWebsite && !hasAds && !hasAutomation && (
-          <p className="text-xs muted">Select a service on the first step to set its status.</p>
-        )}
-
-        {hasWebsite && (
-          <div className="service-block">
-            <div className="service-block-title">Website</div>
-            <div className="grid sm:grid-cols-2 gap-3">
-              <Field label="Website status">
+              <Field label="Progress">
                 <select
                   name="website_status"
                   defaultValue={agreement?.website_status ?? "not_started"}
@@ -671,7 +372,7 @@ export default function IncomeAgreementFields({
                   ))}
                 </select>
               </Field>
-              <Field label="Website project start date">
+              <Field label="Started on (optional)">
                 <input
                   name="website_start_date"
                   type="date"
@@ -679,194 +380,247 @@ export default function IncomeAgreementFields({
                   className="input"
                 />
               </Field>
-              <Field label="Expected completion date">
-                <input
-                  name="website_expected_date"
-                  type="date"
-                  defaultValue={agreement?.website_expected_date ?? ""}
-                  className="input"
-                />
-              </Field>
-              <Field label="Website finalized / completed date">
+              <Field label="Delivered / launched on">
                 <input
                   name="website_completed_date"
                   type="date"
-                  defaultValue={agreement?.website_completed_date ?? ""}
+                  value={websiteDelivered}
+                  onChange={(event) => setWebsiteDelivered(event.target.value)}
                   className="input"
                 />
               </Field>
             </div>
-            <Field label="Website notes (optional)">
-              <input
-                name="website_notes"
-                defaultValue={agreement?.website_notes ?? ""}
-                className="input"
+            <p className="field-help">
+              Once delivered the website is done; the remaining balance becomes due on that day.
+            </p>
+          </div>
+        )}
+
+        {(monthly || hasWebsite) && (
+          <div className="service-block mt-3">
+            <div className="service-block-title">VAT &amp; TDS · worked out for you</div>
+            <div className="grid sm:grid-cols-2 gap-2 mb-3">
+              {defaultAccount ? (
+                <div className="checkbox-row !cursor-default">
+                  <span>
+                    <strong>{withVat ? "VAT bill · 13% added on top" : "No VAT · non-VAT account"}</strong>
+                    <small>Set by the account chosen in step 1 ({accountShortName(defaultAccount)}).</small>
+                  </span>
+                </div>
+              ) : (
+                <label className="checkbox-row">
+                  <input type="checkbox" checked={vatChoice} onChange={(event) => setVatChoice(event.target.checked)} />
+                  <span>
+                    <strong>Show with 13% VAT</strong>
+                    <small>Account is decided per payment — preview only.</small>
+                  </span>
+                </label>
+              )}
+              <label className="checkbox-row">
+                <input
+                  type="checkbox"
+                  name="deducts_tds"
+                  checked={deductsTds}
+                  onChange={(event) => setDeductsTds(event.target.checked)}
+                />
+                <span>
+                  <strong>Client deducts 1.5% TDS</strong>
+                  <small>Tick if they pay you less and deposit TDS themselves. Not sure? Leave it off.</small>
+                </span>
+              </label>
+            </div>
+            <PriceBreakdownTable
+              currency={currency}
+              withVat={withVat}
+              withTds={deductsTds}
+              charges={[
+                ...(monthly
+                  ? [
+                      { label: "Setup · month 1", amount: Number(setupAmount || 0) },
+                      { label: "Monthly fee", amount: Number(monthlyAmount || 0) },
+                    ]
+                  : []),
+                ...(hasWebsite ? [{ label: "Website", amount: Number(websiteAmount || 0) }] : []),
+              ]}
+            />
+          </div>
+        )}
+
+        <details className="agreement-details mt-3">
+          <summary>
+            <span>
+              <strong>More details (optional)</strong>
+              <small>Contract end date, agreement title, notes</small>
+            </span>
+          </summary>
+          <div className="p-4 space-y-3 border-t" style={{ borderColor: "var(--line)" }}>
+            <div className="grid sm:grid-cols-2 gap-3">
+              <Field label="Contract ends on">
+                <input
+                  name="contract_end_date"
+                  type="date"
+                  defaultValue={agreement?.contract_end_date ?? ""}
+                  className="input"
+                />
+              </Field>
+              <Field label="Agreement title">
+                <input
+                  name="agreement_name"
+                  defaultValue={agreement?.agreement_name ?? ""}
+                  placeholder="e.g. Growth partnership"
+                  className="input"
+                />
+              </Field>
+            </div>
+            <Field label="Notes">
+              <textarea
+                name="notes"
+                defaultValue={agreement?.notes ?? ""}
+                placeholder="Scope, special conditions, invoice details…"
+                className="input !h-20 py-3 resize-none"
               />
             </Field>
           </div>
-        )}
-
-        {hasAds && (
-          <div className="service-block mt-3">
-            <div className="service-block-title">Ads / Marketing</div>
-            <div className="grid sm:grid-cols-2 gap-3">
-              <Field label="Ads status">
-                <select
-                  name="ads_status"
-                  defaultValue={agreement?.ads_status ?? "not_started"}
-                  className="input"
-                >
-                  {(Object.keys(ADS_STATUS_LABELS) as AdsStatus[]).map((status) => (
-                    <option key={status} value={status}>
-                      {ADS_STATUS_LABELS[status]}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <Field label="Ads preparation start date (optional)">
-                <input
-                  name="ads_prep_start_date"
-                  type="date"
-                  defaultValue={agreement?.ads_prep_start_date ?? ""}
-                  className="input"
-                />
-              </Field>
-              <Field label="Ads live date — leave blank until live">
-                <input
-                  name="ads_live_date"
-                  type="date"
-                  value={adsLiveDate}
-                  onChange={(event) => setAdsLiveDate(event.target.value)}
-                  className="input"
-                />
-                <p className="field-help">
-                  Ads often go live 15–20 days after signing. This is never required up front.
-                </p>
-              </Field>
-              <Field label="Ads notes (optional)">
-                <input
-                  name="ads_notes"
-                  defaultValue={agreement?.ads_notes ?? ""}
-                  className="input"
-                />
-              </Field>
-            </div>
-          </div>
-        )}
-
-        {hasAutomation && (
-          <div className="service-block mt-3">
-            <div className="service-block-title">AI Automation</div>
-            <div className="grid sm:grid-cols-2 gap-3">
-              <Field label="Automation status">
-                <select
-                  name="automation_status"
-                  defaultValue={agreement?.automation_status ?? "not_started"}
-                  className="input"
-                >
-                  {(Object.keys(AUTOMATION_STATUS_LABELS) as AutomationStatus[]).map((status) => (
-                    <option key={status} value={status}>
-                      {AUTOMATION_STATUS_LABELS[status]}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <Field label="Automation live date — leave blank until live">
-                <input
-                  name="automation_live_date"
-                  type="date"
-                  value={automationLiveDate}
-                  onChange={(event) => setAutomationLiveDate(event.target.value)}
-                  className="input"
-                />
-              </Field>
-              <Field label="Automation notes (optional)">
-                <input
-                  name="automation_notes"
-                  defaultValue={agreement?.automation_notes ?? ""}
-                  className="input"
-                />
-              </Field>
-            </div>
-          </div>
-        )}
-
-        {recurringService && !isValidDate(billingStart) && billingMode === "combined" && (
-          <p className="field-help mt-3">
-            Recurring billing has no start date yet. Add one on the pricing step, or use
-            “Mark live” on the client once the service actually starts.
-          </p>
-        )}
+        </details>
       </FormSection>
 
-      {/* ---------------------------------------------------------------- 05 */}
+      {/* ------------------------------------------------------------ step 3 */}
       {includeInitialPayment && (
         <FormSection
-          number="05"
-          title="Review"
-          description="Confirm what will be saved. Everything here stays editable afterwards."
-          hidden={!visible(5)}
+          number="3"
+          title="Money received so far"
+          description="Optional. Payments can always be added later from the client page."
+          hidden={!visible(3)}
         >
-          <dl className="review-grid">
+          <span className="field-label">Has the client paid anything yet?</span>
+          <div className="choice-grid mt-2 mb-3">
+            <button
+              type="button"
+              onClick={() => setPaidYet(false)}
+              className={`funding-choice ${!paidYet ? "funding-choice-active" : ""}`}
+            >
+              <strong>Not yet</strong>
+              <span>Save the client now, add the payment when it arrives</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setPaidYet(true)}
+              className={`funding-choice ${paidYet ? "funding-choice-active" : ""}`}
+            >
+              <strong>Yes, money arrived</strong>
+              <span>Record it now with VAT and TDS split</span>
+            </button>
+          </div>
+
+          {paidYet && (
+            <>
+              <input type="hidden" name="initial_payment_for" value={openingFor} />
+              {monthly && hasWebsite && (
+                <div className="choice-grid mb-3">
+                  {(["setup", "website"] as const).map((target) => (
+                    <button
+                      key={target}
+                      type="button"
+                      onClick={() => setInitialFor(target)}
+                      className={`funding-choice ${initialFor === target ? "funding-choice-active" : ""}`}
+                    >
+                      <strong>{target === "setup" ? "Setup charge" : "Website"}</strong>
+                      <span>
+                        {formatIncomeMoney(
+                          Number((target === "setup" ? setupAmount : websiteAmount) || 0),
+                          currency
+                        )}{" "}
+                        agreed
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <span className="field-label">Landed in</span>
+              <div className="choice-grid mt-2 mb-3">
+                {accounts.map((account) => (
+                  <button
+                    key={account.id}
+                    type="button"
+                    onClick={() => setInitialAccountId(account.id)}
+                    className={`funding-choice ${openingAccountId === account.id ? "funding-choice-active" : ""}`}
+                  >
+                    <strong>{accountShortName(account)}</strong>
+                    <span>{account.name}</span>
+                  </button>
+                ))}
+              </div>
+              <input type="hidden" name="initial_money_account_id" value={openingAccountId} />
+
+              <TaxBreakdownFields
+                key={`${openingFor}-${openingPrice}`}
+                currency={currency}
+                amountName="initial_paid_amount"
+                vatName="initial_vat_amount"
+                tdsName="initial_tds_amount"
+                suggestedAmount={openingPrice > 0 ? openingPrice : undefined}
+                vatSuggested={openingAccount?.kind === "company_bank"}
+                tdsSuggested={deductsTds}
+                onAmountChange={setInitialAmount}
+              />
+
+              <div className="grid sm:grid-cols-2 gap-3 mt-3">
+                <Field label="Date received">
+                  <input name="initial_paid_on" type="date" defaultValue={today} className="input" />
+                </Field>
+                <Field label="Method (optional)">
+                  <select name="initial_method" defaultValue="bank_transfer" className="input">
+                    <option value="">Not recorded</option>
+                    {Object.entries(PAYMENT_METHOD_LABELS).map(([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              </div>
+            </>
+          )}
+
+          <dl className="review-grid mt-4">
             <ReviewRow label="Client" value={clientName || "—"} />
             <ReviewRow
               label="Services"
               value={
-                [hasWebsite && "Website", hasAds && "Ads / Marketing", hasAutomation && "AI Automation"]
+                [hasAds && "Ads", hasAutomation && "AI automation", hasWebsite && "Website"]
                   .filter(Boolean)
                   .join(" + ") || "None selected"
               }
             />
-            <ReviewRow label="Agreement start" value={formatServiceDate(agreementDate)} />
-            <ReviewRow
-              label="Setup agreed"
-              value={formatIncomeMoney(Number(setupAmount || 0), currency)}
-            />
+            <ReviewRow label="Contract signed" value={formatServiceDate(signed)} />
+            {monthly && (
+              <ReviewRow
+                label="Day 1"
+                value={isValidDate(dayOne) ? formatServiceDate(dayOne) : "Not launched yet"}
+              />
+            )}
+            {monthly && (
+              <ReviewRow
+                label="Setup · month 1"
+                value={formatIncomeMoney(Number(setupAmount || 0), currency)}
+              />
+            )}
+            {monthly && (
+              <ReviewRow
+                label="Monthly fee"
+                value={`${formatIncomeMoney(Number(monthlyAmount || 0), currency)} / month`}
+              />
+            )}
             {hasWebsite && (
               <ReviewRow
                 label="Website price"
                 value={formatIncomeMoney(Number(websiteAmount || 0), currency)}
               />
             )}
-            {recurringService && billingMode === "combined" && (
-              <ReviewRow
-                label="Monthly recurring"
-                value={`${formatIncomeMoney(Number(recurringAmount || 0), currency)} / month`}
-              />
-            )}
-            {recurringService && (
-              <ReviewRow
-                label="Recurring billing start"
-                value={
-                  billingMode === "separate"
-                    ? "Set per service"
-                    : isValidDate(billingStart)
-                      ? formatServiceDate(billingStart)
-                      : "Not started yet"
-                }
-              />
-            )}
             <ReviewRow
-              label="Payment recorded now"
-              value={
-                openingPayment > 0
-                  ? `${formatIncomeMoney(openingPayment, currency)} · ${initialFor === "setup" ? "setup" : "website"}`
-                  : "None"
-              }
-            />
-            <ReviewRow
-              label="Ads live"
-              value={hasAds ? (isValidDate(adsLiveDate) ? formatServiceDate(adsLiveDate) : "Not live yet") : "—"}
-            />
-            <ReviewRow
-              label="Automation live"
-              value={
-                hasAutomation
-                  ? isValidDate(automationLiveDate)
-                    ? formatServiceDate(automationLiveDate)
-                    : "Not live yet"
-                  : "—"
-              }
+              label="Received now"
+              value={paidYet && initialAmount > 0 ? formatIncomeMoney(initialAmount, currency) + " (excl. VAT)" : "Nothing yet"}
             />
           </dl>
         </FormSection>
@@ -875,10 +629,59 @@ export default function IncomeAgreementFields({
   );
 }
 
-function accountShortLabel(account: MoneyAccount) {
-  if (account.kind === "company_bank") return `VAT account · ${account.name}`;
-  if (account.kind === "personal_custody") return `Non-VAT account · ${account.name}`;
-  return account.name;
+/** Day 1 → month 1 (setup) → month 2 (first monthly fee) → every month after. */
+function BillingTimeline({
+  dayOne,
+  setup,
+  monthly,
+  currency,
+}: {
+  dayOne: string;
+  setup: number;
+  monthly: number;
+  currency: Currency;
+}) {
+  if (!isValidDate(dayOne)) {
+    return (
+      <div className="timeline-preview mt-3">
+        <span className="muted text-xs">
+          Not launched yet. Setup is collected for month 1 and the monthly fee starts one month after Day 1.
+        </span>
+      </div>
+    );
+  }
+  const monthTwo = addCalendarMonths(dayOne, 1);
+  const monthThree = addCalendarMonths(dayOne, 2);
+  const day = Number(dayOne.slice(8, 10));
+  return (
+    <ol className="timeline-preview mt-3">
+      <li>
+        <strong>Month 1 · setup</strong>
+        <span>
+          {formatServiceDate(dayOne)} – {formatServiceDate(addCalendarDays(monthTwo, -1))}
+        </span>
+        <em>{formatIncomeMoney(setup, currency)}</em>
+      </li>
+      <li>
+        <strong>Month 2 · first monthly fee</strong>
+        <span>due {formatServiceDate(monthTwo)}</span>
+        <em>{formatIncomeMoney(monthly, currency)}</em>
+      </li>
+      <li>
+        <strong>Then every month</strong>
+        <span>
+          on the {day}
+          {ordinal(day)} · next {formatServiceDate(monthThree)}
+        </span>
+        <em>{formatIncomeMoney(monthly, currency)}</em>
+      </li>
+    </ol>
+  );
+}
+
+function ordinal(day: number) {
+  if (day >= 11 && day <= 13) return "th";
+  return ["th", "st", "nd", "rd"][day % 10] ?? "th";
 }
 
 function ServiceToggle({

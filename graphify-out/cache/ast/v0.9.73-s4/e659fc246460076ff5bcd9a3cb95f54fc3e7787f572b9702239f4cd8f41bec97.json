@@ -1,0 +1,1 @@
+{"nodes": [{"id": "$graphify-root$_docker_supabase_init_00_roles_sql", "label": "00-roles.sql", "file_type": "code", "source_file": "docker/supabase/init/00-roles.sql", "source_location": null}], "edges": []}

@@ -12,14 +12,16 @@ import {
   todayIso,
   type IncomeAgreementSummary,
 } from "@/lib/income";
+import { accountShortName } from "@/lib/funds";
 import type { IncomeAgreement, IncomePaymentFor, MoneyAccount } from "@/lib/types";
+import TaxBreakdownFields from "./TaxBreakdownFields";
 
 const initialState: IncomeFormState = { error: null, ok: null };
 
 /**
- * Record any client payment — a partial setup instalment, a website payment, or
- * a monthly cycle. Nothing is ever recreated: each payment is its own record
- * and the balances recalculate from the set of them.
+ * Record money from a client the way it happened: which account it landed in,
+ * what it paid for, and how it splits into bill amount, VAT and TDS. Each
+ * payment is its own record; balances recalculate from the set of them.
  */
 export default function RecordIncomePayment({
   agreement,
@@ -33,29 +35,47 @@ export default function RecordIncomePayment({
   compact?: boolean;
 }) {
   const streams = summary.recurring.streams.filter((stream) => stream.billingStartDate);
-  const targets: { value: IncomePaymentFor; label: string; remaining: number }[] = [
-    { value: "setup", label: "Initial / setup billing", remaining: summary.setup.remaining },
-    ...(summary.website
-      ? [
-          {
-            value: "website" as const,
-            label: "Website project billing",
-            remaining: summary.website.remaining,
-          },
-        ]
+  const hasMonthly = agreement.has_ads || agreement.has_automation;
+  const targets: { value: IncomePaymentFor; label: string; sub: string; remaining: number }[] = [
+    ...(hasMonthly || summary.setup.agreed > 0
+      ? [{
+          value: "setup" as const,
+          label: "Setup · month 1",
+          sub: `${formatIncomeMoney(summary.setup.remaining, agreement.currency)} left`,
+          remaining: summary.setup.remaining,
+        }]
       : []),
     ...(streams.length
-      ? [{ value: "recurring" as const, label: "Monthly recurring cycle", remaining: summary.recurring.dueNow }]
+      ? [{
+          value: "recurring" as const,
+          label: "Monthly fee",
+          sub: summary.recurring.dueNow > 0
+            ? `${formatIncomeMoney(summary.recurring.dueNow, agreement.currency)} due now`
+            : "Pay a month",
+          remaining: summary.recurring.dueNow,
+        }]
+      : []),
+    ...(summary.website
+      ? [{
+          value: "website" as const,
+          label: "Website",
+          sub: `${formatIncomeMoney(summary.website.remaining, agreement.currency)} left`,
+          remaining: summary.website.remaining,
+        }]
       : []),
   ];
 
+  const matchingAccounts = moneyAccounts.filter(
+    (account) => account.is_active && account.currency === agreement.currency
+  );
   const [open, setOpen] = useState(false);
   const [paymentFor, setPaymentFor] = useState<IncomePaymentFor>(
     targets.find((target) => target.remaining > 0)?.value ?? targets[0]?.value ?? "setup"
   );
-  const [streamKey, setStreamKey] = useState(
-    summary.recurring.nextDuePeriod?.stream ?? streams[0]?.key ?? "combined"
+  const [accountId, setAccountId] = useState(
+    agreement.default_money_account_id ?? matchingAccounts[0]?.id ?? ""
   );
+  const streamKey = summary.recurring.nextDuePeriod?.stream ?? streams[0]?.key ?? "combined";
   const activeStream = streams.find((stream) => stream.key === streamKey) ?? streams[0] ?? null;
   const [periodStart, setPeriodStart] = useState(
     summary.recurring.nextDuePeriod?.periodStart ?? activeStream?.periods[0]?.periodStart ?? ""
@@ -66,9 +86,7 @@ export default function RecordIncomePayment({
     () => activeStream?.periods.find((period) => period.periodStart === periodStart) ?? null,
     [activeStream, periodStart]
   );
-  const matchingAccounts = moneyAccounts.filter(
-    (account) => account.is_active && account.currency === agreement.currency
-  );
+  const account = matchingAccounts.find((item) => item.id === accountId);
 
   useEffect(() => {
     if (state.ok) setOpen(false);
@@ -85,7 +103,7 @@ export default function RecordIncomePayment({
     );
   }
 
-  const suggested =
+  const remaining =
     paymentFor === "setup"
       ? summary.setup.remaining
       : paymentFor === "website"
@@ -94,8 +112,12 @@ export default function RecordIncomePayment({
 
   return (
     <div className="modal-backdrop">
-      <form action={action} className="modal-panel md:max-w-lg p-5 md:p-6 space-y-4">
+      <form action={action} className="modal-panel md:max-w-xl p-5 md:p-6 space-y-4">
         <input type="hidden" name="agreement_id" value={agreement.id} />
+        <input type="hidden" name="payment_for" value={paymentFor} />
+        {paymentFor === "recurring" && activeStream && (
+          <input type="hidden" name="billing_stream" value={activeStream.key} />
+        )}
         <div className="modal-header">
           <div>
             <h2 className="text-lg font-bold">Add payment</h2>
@@ -106,129 +128,90 @@ export default function RecordIncomePayment({
           </button>
         </div>
 
-        <div className="grid grid-cols-2 gap-2">
-          <label className="block text-xs muted">
-            Payment for
-            <select
-              name="payment_for"
-              value={paymentFor}
-              onChange={(event) => setPaymentFor(event.target.value as IncomePaymentFor)}
-              className="input mt-1"
-            >
-              {targets.map((target) => (
-                <option key={target.value} value={target.value}>
-                  {target.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="block text-xs muted">
-            Amount ({agreement.currency})
-            <input
-              key={`${paymentFor}-${periodStart}-${streamKey}`}
-              name="amount"
-              type="number"
-              min="0.01"
-              step="0.01"
-              required
-              defaultValue={suggested > 0 ? suggested : ""}
-              placeholder="Amount received"
-              className="input tnum mt-1"
-            />
-          </label>
+        <div>
+          <span className="field-label">1 · What is this payment for?</span>
+          <div className="choice-grid mt-2">
+            {targets.map((target) => (
+              <button
+                key={target.value}
+                type="button"
+                onClick={() => setPaymentFor(target.value)}
+                className={`funding-choice ${paymentFor === target.value ? "funding-choice-active" : ""}`}
+              >
+                <strong>{target.label}</strong>
+                <span>{target.sub}</span>
+              </button>
+            ))}
+          </div>
+          {!streams.length && hasMonthly && (
+            <p className="field-help">
+              Monthly payments open once Day 1 (launch date) is set on this client.
+            </p>
+          )}
         </div>
 
         {paymentFor === "recurring" && (
-          <>
-            {summary.recurring.mode === "separate" && streams.length > 1 && (
-              <label className="block text-xs muted">
-                Which monthly service
-                <select
-                  name="billing_stream"
-                  value={streamKey}
-                  onChange={(event) => {
-                    const key = event.target.value as typeof streamKey;
-                    setStreamKey(key);
-                    const stream = streams.find((item) => item.key === key);
-                    setPeriodStart(
-                      stream?.nextDuePeriod?.periodStart ?? stream?.periods[0]?.periodStart ?? ""
-                    );
-                  }}
-                  className="input mt-1"
-                >
-                  {streams.map((stream) => (
-                    <option key={stream.key} value={stream.key}>
-                      {stream.label} · {formatIncomeMoney(stream.monthlyAmount, agreement.currency)} / month
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
-            {summary.recurring.mode === "separate" && streams.length <= 1 && (
-              <input type="hidden" name="billing_stream" value={streamKey} />
-            )}
-            <label className="block text-xs muted">
-              Billing period covered
-              <select
-                name="billing_period_start"
-                value={periodStart}
-                onChange={(event) => setPeriodStart(event.target.value)}
-                required
-                className="input mt-1"
-              >
-                {(activeStream?.periods ?? []).map((period) => (
-                  <option key={period.periodStart} value={period.periodStart}>
-                    {periodLabel(period)} ·{" "}
-                    {period.remaining > 0
-                      ? `${formatIncomeMoney(period.remaining, agreement.currency)} left`
-                      : "settled"}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </>
-        )}
-
-        <div className="grid grid-cols-2 gap-2">
-          <label className="block text-xs muted">
-            Payment received date
-            <input
-              name="paid_on"
-              type="date"
-              required
-              defaultValue={todayIso()}
-              className="input mt-1"
-            />
-          </label>
-          <label className="block text-xs muted">
-            Received into
+          <label className="block">
+            <span className="field-label">Which month</span>
             <select
-              name="money_account_id"
+              name="billing_period_start"
+              value={periodStart}
+              onChange={(event) => setPeriodStart(event.target.value)}
               required
-              defaultValue={agreement.default_money_account_id ?? ""}
               className="input mt-1"
             >
-              <option value="" disabled>
-                Choose account
-              </option>
-              {matchingAccounts.map((account) => (
-                <option key={account.id} value={account.id}>
-                  {account.kind === "company_bank"
-                    ? "VAT account"
-                    : account.kind === "personal_custody"
-                      ? "Non-VAT account"
-                      : account.name}{" "}
-                  · {account.name}
+              {(activeStream?.periods ?? []).map((period, index) => (
+                <option key={period.periodStart} value={period.periodStart}>
+                  Month {index + (agreement.setup_covers_first_cycle ? 2 : 1)} · {periodLabel(period)} ·{" "}
+                  {period.remaining > 0
+                    ? `${formatIncomeMoney(period.remaining, agreement.currency)} left`
+                    : "paid"}
                 </option>
               ))}
             </select>
           </label>
+        )}
+
+        <div>
+          <span className="field-label">2 · Which account did it land in?</span>
+          <div className="choice-grid mt-2">
+            {matchingAccounts.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setAccountId(item.id)}
+                className={`funding-choice ${accountId === item.id ? "funding-choice-active" : ""}`}
+              >
+                <strong>{accountShortName(item)}</strong>
+                <span>{item.name}</span>
+              </button>
+            ))}
+          </div>
+          <input type="hidden" name="money_account_id" value={accountId} />
+        </div>
+
+        <div>
+          <span className="field-label">3 · How much?</span>
+          <div className="mt-2">
+            <TaxBreakdownFields
+              key={`${paymentFor}-${periodStart}`}
+              currency={agreement.currency}
+              vatSuggested={account?.kind === "company_bank"}
+              tdsSuggested={agreement.deducts_tds}
+              suggestedAmount={remaining > 0 ? remaining : undefined}
+              remainingHint={`${formatIncomeMoney(remaining, agreement.currency)} still owed on this (excluding VAT). Paying less is fine — it stays partly paid.`}
+            />
+          </div>
         </div>
 
         <div className="grid grid-cols-2 gap-2">
-          <label className="block text-xs muted">
-            Method (optional)
-            <select name="method" defaultValue="" className="input mt-1">
+          <label className="block">
+            <span className="field-label">Date received</span>
+            <input name="paid_on" type="date" required defaultValue={todayIso()} className="input mt-1" />
+          </label>
+          <label className="block">
+            <span className="field-label">Method (optional)</span>
+            <select name="method" defaultValue="bank_transfer" className="input mt-1">
               <option value="">Not recorded</option>
               {Object.entries(PAYMENT_METHOD_LABELS).map(([value, label]) => (
                 <option key={value} value={value}>
@@ -237,23 +220,18 @@ export default function RecordIncomePayment({
               ))}
             </select>
           </label>
-          <label className="block text-xs muted">
-            Reference (optional)
-            <input name="reference" placeholder="Transaction / invoice ID" className="input mt-1" />
+          <label className="block">
+            <span className="field-label">Reference / VAT bill no. (optional)</span>
+            <input name="reference" placeholder="Transaction or bill no." className="input mt-1" />
+          </label>
+          <label className="block">
+            <span className="field-label">Note (optional)</span>
+            <input name="note" placeholder="Advance, second instalment…" className="input mt-1" />
           </label>
         </div>
 
-        <label className="block text-xs muted">
-          Note (optional)
-          <input name="note" placeholder="Advance, second instalment, cash…" className="input mt-1" />
-        </label>
-
-        <p className="text-xs muted">
-          This is client revenue and raises the selected account balance. Founder money belongs under “Add funds”, not here.
-        </p>
-
         {state.error && <p className="text-sm" style={{ color: "var(--red)" }}>{state.error}</p>}
-        <button disabled={pending} className="btn btn-primary w-full !h-12">
+        <button disabled={pending || !accountId} className="btn btn-primary w-full !h-12">
           {pending ? "Recording…" : "Record payment"}
         </button>
       </form>

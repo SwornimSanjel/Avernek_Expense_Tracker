@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { exec, one } from "@/lib/db";
+import { loadLedger } from "@/lib/ledger";
 import { requireSession } from "@/lib/auth/server";
 import { assertAppOwner } from "@/lib/authz";
 import type { CapitalInflowType, Currency, MoneyAccountKind } from "@/lib/types";
@@ -94,28 +95,11 @@ export async function addMoneyTransfer(
     return { error: "One of those accounts is unavailable.", ok: null };
   }
 
-  const balanceRow = await one<{ balance: number | string }>(
-    `select
-       coalesce((select sum(p.amount) from public.income_payments p where p.money_account_id = $1), 0)
-       + coalesce((select sum(t.to_amount) from public.money_transfers t where t.to_account_id = $1), 0)
-       - coalesce((
-           select sum(
-             case
-               when e.currency = a.currency then e.amount
-               when a.currency = 'NPR' then e.amount_npr
-               else 0
-             end
-           )
-           from public.expenses e
-           join public.money_accounts a on a.id = $1
-           where e.money_account_id = $1 and e.funding_source = 'company_funds'
-         ), 0)
-       - coalesce((select sum(t.from_amount) from public.money_transfers t where t.from_account_id = $1), 0)
-       as balance`,
-    [fromAccountId]
+  const fromBalance = (await loadLedger()).balances.find(
+    (item) => item.account.id === fromAccountId
   );
-  if (fromAmount > Number(balanceRow?.balance ?? 0) + 0.001) {
-    return { error: `Only ${Number(balanceRow?.balance ?? 0).toLocaleString("en-NP")} is available in ${fromAccount.name}.`, ok: null };
+  if (fromAmount > (fromBalance?.balance ?? 0) + 0.001) {
+    return { error: `Only ${(fromBalance?.balance ?? 0).toLocaleString("en-NP")} is available in ${fromAccount.name}.`, ok: null };
   }
 
   await exec(
@@ -125,8 +109,7 @@ export async function addMoneyTransfer(
     [fromAccountId, toAccountId, fromAmount, toAmount, transferDate, note, session.sub]
   );
 
-  revalidatePath("/funds");
-  revalidatePath("/");
+  revalidateFunds();
   return { error: null, ok: `Moved money from ${fromAccount.name} to ${toAccount.name}.` };
 }
 
@@ -256,5 +239,186 @@ export async function updateCapitalInflow(
 export async function deleteCapitalInflow(id: string) {
   await owner();
   await exec(`delete from public.capital_inflows where id = $1`, [id]);
+  revalidateFunds();
+}
+
+// -----------------------------------------------------------------------------
+// VAT bills in the company's name, and reimbursing them
+//
+// A lawyer or rent bill issued to Avernek is often paid first from Swornim's
+// non-VAT account. Recording the bill here and reimbursing it from the VAT
+// account moves the money back AND books the bill as a company expense, so the
+// VAT the bill carries counts as input VAT. A reimbursement can never touch the
+// VAT reserved for IRD.
+// -----------------------------------------------------------------------------
+
+function money2(raw: FormDataEntryValue | null) {
+  const text = String(raw ?? "").trim();
+  if (!text) return 0;
+  const amount = Number(text);
+  return Number.isFinite(amount) ? Math.round(amount * 100) / 100 : NaN;
+}
+
+export async function addCompanyBill(
+  _previous: FundsFormState,
+  formData: FormData
+): Promise<FundsFormState> {
+  const session = await owner();
+  const id = value(formData, "bill_id");
+  const description = value(formData, "description");
+  const total = money2(formData.get("total_amount"));
+  const vat = money2(formData.get("vat_amount"));
+  const billDate = value(formData, "bill_date");
+
+  if (!description) return { error: "Say what the bill is for, e.g. Lawyer service charge.", ok: null };
+  if (!Number.isFinite(total) || total <= 0) return { error: "Enter the bill total.", ok: null };
+  if (!Number.isFinite(vat) || vat < 0 || vat > total) {
+    return { error: "VAT must be between zero and the bill total.", ok: null };
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(billDate)) return { error: "Enter the bill date.", ok: null };
+
+  const params = [
+    description,
+    value(formData, "vendor_name") || null,
+    value(formData, "bill_number") || null,
+    billDate,
+    total,
+    vat,
+    value(formData, "paid_by") || null,
+    value(formData, "note") || null,
+  ];
+
+  if (id) {
+    const reimbursed = await one<{ total: string }>(
+      `select coalesce(sum(from_amount), 0) as total from public.money_transfers
+        where kind = 'reimbursement' and bill_id = $1`,
+      [id]
+    );
+    if (Number(reimbursed?.total ?? 0) > total + 0.001) {
+      return { error: "The bill total cannot be less than what was already reimbursed.", ok: null };
+    }
+    await exec(
+      `update public.company_bills
+          set description = $1, vendor_name = $2, bill_number = $3, bill_date = $4,
+              total_amount = $5, vat_amount = $6, paid_by = $7, note = $8, updated_at = now()
+        where id = $9`,
+      [...params, id]
+    );
+  } else {
+    await exec(
+      `insert into public.company_bills
+         (description, vendor_name, bill_number, bill_date, total_amount, vat_amount, paid_by, note, created_by)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [...params, session.sub]
+    );
+  }
+
+  revalidateFunds();
+  return { error: null, ok: id ? "Bill updated." : "Bill added. Reimburse it when the VAT account has room." };
+}
+
+export async function deleteCompanyBill(id: string) {
+  await owner();
+  const used = await one<{ count: string }>(
+    `select count(*) from public.money_transfers where bill_id = $1`,
+    [id]
+  );
+  if (Number(used?.count ?? 0) > 0) {
+    throw new Error("Delete this bill's reimbursements first.");
+  }
+  await exec(`delete from public.company_bills where id = $1`, [id]);
+  revalidateFunds();
+}
+
+export async function reimburseBill(
+  _previous: FundsFormState,
+  formData: FormData
+): Promise<FundsFormState> {
+  const session = await owner();
+  const billId = value(formData, "bill_id");
+  const fromAccountId = value(formData, "from_account_id");
+  const toAccountId = value(formData, "to_account_id");
+  const amount = money2(formData.get("amount"));
+  const date = value(formData, "transfer_date");
+
+  if (!billId) return { error: "Choose the bill being reimbursed.", ok: null };
+  if (!fromAccountId || !toAccountId || fromAccountId === toAccountId) {
+    return { error: "Choose two different accounts.", ok: null };
+  }
+  if (!Number.isFinite(amount) || amount <= 0) return { error: "Enter the amount reimbursed.", ok: null };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return { error: "Enter the reimbursement date.", ok: null };
+
+  const ledger = await loadLedger();
+  const bill = ledger.billStatuses.find((item) => item.bill.id === billId);
+  if (!bill) return { error: "That bill no longer exists.", ok: null };
+  if (amount > bill.pending + 0.001) {
+    return { error: `Only ${bill.pending.toLocaleString("en-NP")} of this bill is still unreimbursed.`, ok: null };
+  }
+  const from = ledger.balances.find((item) => item.account.id === fromAccountId);
+  const to = ledger.balances.find((item) => item.account.id === toAccountId);
+  if (!from || !to) return { error: "One of those accounts is unavailable.", ok: null };
+  if (from.account.currency !== to.account.currency) {
+    return { error: "Reimburse between accounts in the same currency.", ok: null };
+  }
+  if (amount > from.free + 0.001) {
+    return {
+      error: `Only ${Math.max(0, from.free).toLocaleString("en-NP")} can be used from ${from.account.name}. The rest is VAT kept aside for IRD${from.balance < amount ? " or not in the account" : ""}. Reimburse part now and the rest later.`,
+      ok: null,
+    };
+  }
+
+  await exec(
+    `insert into public.money_transfers
+       (kind, bill_id, from_account_id, to_account_id, from_amount, to_amount, transfer_date, note, created_by)
+     values ('reimbursement',$1,$2,$3,$4,$4,$5,$6,$7)`,
+    [billId, fromAccountId, toAccountId, amount, date,
+     value(formData, "note") || `Reimbursed: ${bill.bill.description}`, session.sub]
+  );
+
+  revalidateFunds();
+  return { error: null, ok: "Reimbursement recorded." };
+}
+
+export async function deleteMoneyTransfer(id: string) {
+  await owner();
+  await exec(`delete from public.money_transfers where id = $1`, [id]);
+  revalidateFunds();
+}
+
+// -----------------------------------------------------------------------------
+// VAT deposited to IRD
+// -----------------------------------------------------------------------------
+
+export async function addTaxPayment(
+  _previous: FundsFormState,
+  formData: FormData
+): Promise<FundsFormState> {
+  const session = await owner();
+  const accountId = value(formData, "money_account_id");
+  const amount = money2(formData.get("amount"));
+  const paidOn = value(formData, "paid_on");
+  if (!accountId) return { error: "Choose the account the VAT was paid from.", ok: null };
+  if (!Number.isFinite(amount) || amount <= 0) return { error: "Enter the VAT amount paid.", ok: null };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(paidOn)) return { error: "Enter the date VAT was paid.", ok: null };
+
+  const balance = (await loadLedger()).balances.find((item) => item.account.id === accountId);
+  if (!balance) return { error: "That account is unavailable.", ok: null };
+  if (amount > balance.balance + 0.001) {
+    return { error: `Only ${balance.balance.toLocaleString("en-NP")} is in ${balance.account.name}.`, ok: null };
+  }
+
+  await exec(
+    `insert into public.tax_payments (tax_type, money_account_id, amount, paid_on, period_label, reference, note, created_by)
+     values ('vat',$1,$2,$3,$4,$5,$6,$7)`,
+    [accountId, amount, paidOn, value(formData, "period_label") || null,
+     value(formData, "reference") || null, value(formData, "note") || null, session.sub]
+  );
+  revalidateFunds();
+  return { error: null, ok: "VAT payment recorded." };
+}
+
+export async function deleteTaxPayment(id: string) {
+  await owner();
+  await exec(`delete from public.tax_payments where id = $1`, [id]);
   revalidateFunds();
 }

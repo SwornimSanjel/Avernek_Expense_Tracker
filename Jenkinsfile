@@ -1,631 +1,278 @@
-// CI/CD pipeline for the Avernek Expense Tracker.
+// Avernek Expense Tracker: CI/CD pipeline (Avernek Technologies deployment standard).
 //
-// Flow:
-//   Checkout
-//   -> extract .env from Jenkins credentials
-//   -> build versioned Docker image
-//   -> deploy through Docker Compose
-//   -> apply schema + migrations, seed the administrator
-//   -> smoke test
-//   -> automatically restore the previous release if deployment fails
-//   -> send Slack notification if build fails
-//   -> prune old images
+//   GitHub push -> Checkout -> Validate -> Install Dependencies -> Lint / Type Check / Test
+//   -> Application Build -> Docker Image Build -> Prepare Deployment -> Deploy
+//   -> Health Check -> Rollback on Failure -> Cleanup -> Notification (post)
 //
-// One-time Jenkins host requirements:
+// The app runs from /srv/deployments/avernek-expense-tracker/ (compose.yaml, .env,
+// .deployment.env), never from this workspace, which is wiped after every build.
+// Only the DEPLOY_BRANCH deploys; other branches stop after the image build.
 //
-//   1. Add Jenkins credential for production environment:
-//        Kind: Secret file
-//        ID: avernek-expense-tracker-env
-//        File: production .env
+// Server and Jenkins setup, the first-deployment approval, operations and
+// recovery: docs/DEPLOYMENT.md. The deployment logic itself is in
+// scripts/ci/release.sh; images are built by scripts/ci/build.sh.
 //
-//   2. Install Jenkins plugin:
-//        Slack Notification
-//
-//   3. Configure Slack globally (Manage Jenkins -> System -> Slack):
-//        Workspace, credential (bot token) and default channel are all set
-//        there. This Jenkinsfile does not pass channel or tokenCredentialId
-//        to slackSend, so it always uses those global defaults.
-//
-//   4. Make sure the Slack bot is invited to the channel configured above.
-//
-//   5. Allow Jenkins to access Docker:
-//        sudo usermod -aG docker jenkins
-//        sudo systemctl restart jenkins
-//
-//   6. Install:
-//        docker with Compose v2
-//        git
-//        curl
-//
-// Deployment files are stored inside JENKINS_HOME, so Jenkins creates and
-// manages the deployment directory without root permissions.
-//
-// `next build` type-checks the application. TypeScript errors fail the build.
-//
-// NOTE: every sh step keeps the bash shebang on the same line as the opening
-// triple quote. Jenkins honours a shebang only when it is the first byte of
-// the script; if the shebang is moved onto its own indented line, Jenkins
-// silently runs the script with /bin/sh -xe (dash on Debian/Ubuntu) and it
-// fails on `set -o pipefail`, `[[ ]]`, arrays and `mapfile`.
-// Do not re-indent those lines.
+// Jenkins plugins: Pipeline, Git, GitHub, Credentials Binding, Workspace Cleanup,
+// Timestamper, Discord Notifier.
+// Credentials: 'avernek-expense-tracker-env' (Secret file, bootstraps .env only),
+//              'discord-webhook-avernek' (Secret text, Discord webhook URL).
 
 pipeline {
   agent any
 
   options {
-    timestamps()
+    skipDefaultCheckout(true)
     disableConcurrentBuilds()
-    timeout(time: 30, unit: 'MINUTES')
-    buildDiscarder(logRotator(numToKeepStr: '20'))
+    timestamps()
+    timeout(time: 45, unit: 'MINUTES')
+    buildDiscarder(logRotator(numToKeepStr: '30', artifactNumToKeepStr: '10'))
+  }
+
+  triggers {
+    githubPush()
+  }
+
+  parameters {
+    booleanParam(
+      name: 'SYNC_ENV_FROM_CREDENTIAL',
+      defaultValue: false,
+      description: 'Replace the server .env with the Jenkins credential "avernek-expense-tracker-env" (the current .env is backed up first). Off: the server .env is kept as it is.'
+    )
   }
 
   environment {
-    APP_NAME = 'avernek-expense-tracker'
-
-    // Relative to JENKINS_HOME. Do not use /opt unless Jenkins is explicitly
-    // granted root-level permission to write there.
-    DEPLOY_SUBDIR = 'deployments/avernek-expense-tracker'
-
-    ENV_CREDENTIAL = 'avernek-expense-tracker-env'
-
-    // Host-side published port only; the container still listens on 3000
-    // internally. Change this if the host port is already taken.
-    APP_PORT = '3001'
-
-    IMAGE        = "avernek-expense-tracker:${env.BUILD_NUMBER}"
-    IMAGE_LATEST = 'avernek-expense-tracker:latest'
-
-    KEEP_IMAGES = '5'
-
-    DOCKER_BUILDKIT = '1'
+    PROJECT_NAME        = 'avernek-expense-tracker'
+    IMAGE_REPO          = 'avernek-expense-tracker'
+    DEPLOY_ROOT         = '/srv/deployments'
+    DEPLOY_DIR          = '/srv/deployments/avernek-expense-tracker'
+    DEPLOY_BRANCH       = 'main'
+    ENV_CREDENTIAL_ID   = 'avernek-expense-tracker-env'
+    KEEP_RELEASE_IMAGES = '5'
+    HEALTH_TIMEOUT      = '180'
+    DOCKER_BUILDKIT     = '1'
+    // Mutable state (ROLLBACK_STATUS, DEPLOY_*) is set in script blocks, not
+    // here: values declared in this block cannot be reassigned later.
   }
 
   stages {
 
     stage('Checkout') {
       steps {
-        checkout scm
-
-        sh '''#!/usr/bin/env bash
-          set -Eeuo pipefail
-
-          git --no-pager log -1 \
-            --pretty="Building %h  %s  (%an)"
-        '''
-      }
-    }
-
-    stage('Extract .env') {
-      steps {
-        withCredentials([
-          file(
-            credentialsId: env.ENV_CREDENTIAL,
-            variable: 'ENV_FILE'
-          )
-        ]) {
-          sh '''#!/usr/bin/env bash
-            set -Eeuo pipefail
-
-            install -m 600 "$ENV_FILE" .env
-
-            # Remove Windows CRLF characters.
-            sed -i 's/\\r$//' .env
-
-            required_keys=(
-              DATABASE_URL
-              SESSION_SECRET
-              ADMIN_EMAIL
-              ADMIN_PASSWORD
-              CRON_SECRET
-            )
-
-            for key in "${required_keys[@]}"; do
-              if ! grep -qE "^${key}=.+" .env; then
-                echo "ERROR: ${key} is missing or empty in the Jenkins .env credential."
-                exit 1
-              fi
-            done
-
-            variable_count="$(
-              grep -cE '^[A-Za-z_][A-Za-z0-9_]*=' .env || true
-            )"
-
-            echo "Extracted .env with ${variable_count} variables."
-          '''
+        script {
+          def scmVars = checkout scm
+          env.GIT_COMMIT = scmVars.GIT_COMMIT
+          env.GIT_URL = scmVars.GIT_URL ?: ''
+          def branch = env.BRANCH_NAME ?: (scmVars.GIT_BRANCH ?: '')
+          env.SOURCE_BRANCH = branch.replaceFirst(/^origin\//, '').replaceFirst(/^refs\/heads\//, '')
+          env.GIT_SHORT = sh(script: 'git rev-parse --short=12 HEAD', returnStdout: true).trim()
+          env.IMAGE_TAG = "${env.GIT_SHORT}-${env.BUILD_NUMBER}"
+          env.APP_IMAGE = "${env.IMAGE_REPO}:${env.IMAGE_TAG}"
+          env.DEPLOY_ENABLED = (env.SOURCE_BRANCH == env.DEPLOY_BRANCH) ? 'true' : 'false'
+          env.DEPLOY_STARTED = 'false'
+          env.DEPLOY_FAILED = 'false'
+          env.ROLLBACK_ATTEMPTED = 'false'
+          env.ROLLBACK_STATUS = 'not required'
         }
+        sh 'git --no-pager log -1 --pretty="Building %h  %s  (%an)"'
+        echo "Branch ${env.SOURCE_BRANCH}; image ${env.APP_IMAGE}; deploy: ${env.DEPLOY_ENABLED}"
       }
     }
 
-    stage('Build image') {
+    stage('Validate') {
       steps {
-        sh '''#!/usr/bin/env bash
-          set -Eeuo pipefail
+        sh 'bash scripts/ci/validate.sh'
+      }
+    }
 
-          echo "Building image: $IMAGE"
+    stage('Install Dependencies') {
+      steps {
+        sh 'bash scripts/ci/build.sh deps'
+      }
+    }
 
-          docker compose build web
+    stage('Lint / Type Check / Test') {
+      steps {
+        // tsc --noEmit and `npm test` when a test script exists. The project has
+        // no ESLint configuration, so there is no lint step (see the Dockerfile).
+        sh 'bash scripts/ci/build.sh verify'
+      }
+    }
 
-          docker image tag \
-            "$IMAGE" \
-            "$IMAGE_LATEST"
+    stage('Application Build') {
+      steps {
+        sh 'bash scripts/ci/build.sh builder'
+      }
+    }
 
-          docker image inspect "$IMAGE" \
-            --format 'Built {{join .RepoTags ", "}} — {{.Size}} bytes'
-        '''
+    stage('Docker Image Build') {
+      steps {
+        sh 'bash scripts/ci/build.sh runner "$APP_IMAGE"'
+      }
+    }
+
+    stage('Prepare Deployment') {
+      when { expression { env.DEPLOY_ENABLED == 'true' } }
+      steps {
+        script {
+          deployStep('Prepare Deployment') {
+            sh 'bash scripts/ci/release.sh preflight'
+            boolean hasEnv = sh(script: 'test -f "$DEPLOY_DIR/.env"', returnStatus: true) == 0
+            if (!hasEnv || params.SYNC_ENV_FROM_CREDENTIAL) {
+              withCredentials([file(credentialsId: env.ENV_CREDENTIAL_ID, variable: 'ENV_SOURCE')]) {
+                withEnv(["SYNC_ENV_FROM_CREDENTIAL=${params.SYNC_ENV_FROM_CREDENTIAL}"]) {
+                  sh 'bash scripts/ci/release.sh env-install "$ENV_SOURCE"'
+                }
+              }
+            }
+            env.DEPLOY_STARTED = 'true'
+            sh 'bash scripts/ci/release.sh prepare'
+          }
+        }
       }
     }
 
     stage('Deploy') {
+      when { expression { env.DEPLOY_ENABLED == 'true' && env.DEPLOY_FAILED != 'true' } }
       steps {
-        sh '''#!/usr/bin/env bash
-          set -Eeuo pipefail
-
-          : "${JENKINS_HOME:?JENKINS_HOME is not defined}"
-
-          DEPLOY_DIR="${JENKINS_HOME}/${DEPLOY_SUBDIR}"
-
-          echo "Deployment directory: $DEPLOY_DIR"
-
-          # Jenkins owns JENKINS_HOME, so this requires no sudo.
-          mkdir -p \
-            "$DEPLOY_DIR/docker"
-
-          # Remove any marker left by an interrupted older build.
-          rm -f "$DEPLOY_DIR/.deployment-attempted"
-
-          # ----------------------------------------------------------
-          # Save the currently deployed configuration for rollback.
-          # ----------------------------------------------------------
-
-          ROLLBACK_TMP="$DEPLOY_DIR/.rollback.tmp"
-          ROLLBACK_DIR="$DEPLOY_DIR/.rollback"
-
-          rm -rf "$ROLLBACK_TMP"
-          mkdir -p "$ROLLBACK_TMP/docker"
-
-          if [[ -f "$DEPLOY_DIR/docker-compose.yml" ]]; then
-            install -m 644 \
-              "$DEPLOY_DIR/docker-compose.yml" \
-              "$ROLLBACK_TMP/docker-compose.yml"
-          fi
-
-          if [[ -f "$DEPLOY_DIR/.env" ]]; then
-            install -m 600 \
-              "$DEPLOY_DIR/.env" \
-              "$ROLLBACK_TMP/.env"
-          fi
-
-          if [[ -f "$DEPLOY_DIR/docker/fx-cron.sh" ]]; then
-            install -m 755 \
-              "$DEPLOY_DIR/docker/fx-cron.sh" \
-              "$ROLLBACK_TMP/docker/fx-cron.sh"
-          fi
-
-          rm -rf "$ROLLBACK_DIR"
-          mv "$ROLLBACK_TMP" "$ROLLBACK_DIR"
-
-          # ----------------------------------------------------------
-          # Determine the currently deployed image.
-          # ----------------------------------------------------------
-
-          CURRENT_IMAGE=""
-
-          CURRENT_CONTAINER="$(
-            docker ps -aq \
-              --filter "label=com.docker.compose.project=$APP_NAME" \
-              --filter "label=com.docker.compose.service=web" \
-              | head -n 1
-          )"
-
-          if [[ -n "$CURRENT_CONTAINER" ]]; then
-            CURRENT_IMAGE="$(
-              docker inspect \
-                --format '{{.Config.Image}}' \
-                "$CURRENT_CONTAINER"
-            )"
-          elif [[ -s "$DEPLOY_DIR/.current-image" ]]; then
-            CURRENT_IMAGE="$(
-              cat "$DEPLOY_DIR/.current-image"
-            )"
-          fi
-
-          if [[ -n "$CURRENT_IMAGE" ]] \
-             && [[ "$CURRENT_IMAGE" != "$IMAGE" ]] \
-             && docker image inspect "$CURRENT_IMAGE" >/dev/null 2>&1; then
-
-            printf '%s\\n' "$CURRENT_IMAGE" \
-              > "$DEPLOY_DIR/.previous-image"
-
-            echo "Current release:  $CURRENT_IMAGE"
-            echo "Rollback target:  $CURRENT_IMAGE"
-          else
-            rm -f "$DEPLOY_DIR/.previous-image"
-            echo "No valid rollback image found."
-          fi
-
-          # ----------------------------------------------------------
-          # Install the new release configuration.
-          # ----------------------------------------------------------
-
-          install -m 644 \
-            docker-compose.yml \
-            "$DEPLOY_DIR/docker-compose.yml"
-
-          install -m 755 \
-            docker/fx-cron.sh \
-            "$DEPLOY_DIR/docker/fx-cron.sh"
-
-          install -m 600 \
-            .env \
-            "$DEPLOY_DIR/.env"
-
-          dc() {
-            docker compose \
-              -f "$DEPLOY_DIR/docker-compose.yml" \
-              --project-directory "$DEPLOY_DIR" \
-              -p "$APP_NAME" \
-              "$@"
+        script {
+          deployStep('Deploy') {
+            sh 'bash scripts/ci/release.sh deploy'
           }
-
-          # The global `post unsuccessful` block checks this marker before
-          # attempting a rollback.
-          touch "$DEPLOY_DIR/.deployment-attempted"
-
-          echo "Deploying $IMAGE"
-
-          dc up -d --remove-orphans
-          dc ps
-        '''
+        }
       }
     }
 
-    stage('Migrate & seed') {
+    stage('Health Check') {
+      when { expression { env.DEPLOY_ENABLED == 'true' && env.DEPLOY_FAILED != 'true' } }
       steps {
-        sh '''#!/usr/bin/env bash
-          set -Eeuo pipefail
-
-          DEPLOY_DIR="${JENKINS_HOME}/${DEPLOY_SUBDIR}"
-
-          dc() {
-            docker compose \
-              -f "$DEPLOY_DIR/docker-compose.yml" \
-              --project-directory "$DEPLOY_DIR" \
-              -p "$APP_NAME" \
-              "$@"
+        script {
+          deployStep('Health Check') {
+            sh 'bash scripts/ci/release.sh verify'
+            // Success: this release becomes the verified one (the next rollback target).
+            sh 'bash scripts/ci/release.sh finalize'
           }
-
-          # Read from the workspace .env, which is the same file installed into
-          # DEPLOY_DIR by the Deploy stage.
-          env_value() {
-            grep -E "^$1=" .env | head -n 1 | cut -d= -f2-
-          }
-
-          DB_USER="$(env_value POSTGRES_USER)"
-          DB_NAME="$(env_value POSTGRES_DB)"
-
-          : "${DB_USER:?POSTGRES_USER is missing from .env}"
-          : "${DB_NAME:?POSTGRES_DB is missing from .env}"
-
-          psql_db() {
-            dc exec -T db \
-              psql -v ON_ERROR_STOP=1 -U "$DB_USER" -d "$DB_NAME" "$@"
-          }
-
-          # ----------------------------------------------------------
-          # Wait for Postgres to accept connections.
-          # ----------------------------------------------------------
-
-          echo "Waiting for Postgres ..."
-
-          for attempt in $(seq 1 30); do
-            if dc exec -T db \
-                 pg_isready -U "$DB_USER" -d "$DB_NAME" >/dev/null 2>&1; then
-              echo "Postgres ready after ${attempt} attempt(s)."
-              break
-            fi
-
-            if [[ "$attempt" -eq 30 ]]; then
-              echo "ERROR: Postgres did not become ready within 60 seconds."
-              dc logs --tail 40 db || true
-              exit 1
-            fi
-
-            sleep 2
-          done
-
-          # ----------------------------------------------------------
-          # Baseline schema.
-          # ----------------------------------------------------------
-
-          echo "Applying db/schema.sql"
-          psql_db -q < db/schema.sql
-
-          # ----------------------------------------------------------
-          # Migrations.
-          # ----------------------------------------------------------
-
-          psql_db -q -c "
-            create table if not exists public.schema_migrations (
-              filename   text primary key,
-              applied_at timestamptz not null default now()
-            );
-          "
-
-          for file in db/migrations/*.sql; do
-            name="$(basename "$file")"
-
-            applied="$(
-              psql_db -tAc \
-                "select 1 from public.schema_migrations
-                  where filename = '$name'" \
-                | tr -d '[:space:]'
-            )"
-
-            if [[ -n "$applied" ]]; then
-              echo "  already applied: $name"
-              continue
-            fi
-
-            echo "  applying:        $name"
-
-            psql_db -q -1 < "$file"
-
-            psql_db -q -c \
-              "insert into public.schema_migrations (filename)
-               values ('$name')"
-          done
-
-          # ----------------------------------------------------------
-          # Administrator.
-          # ----------------------------------------------------------
-
-          echo "Seeding administrator"
-
-          dc exec -T web node scripts/seed-admin.mjs
-
-          echo "Database is up to date."
-        '''
+        }
       }
     }
 
-    stage('Smoke test') {
+    stage('Rollback on Failure') {
+      when { expression { env.DEPLOY_FAILED == 'true' } }
       steps {
-        sh '''#!/usr/bin/env bash
-          set -Eeuo pipefail
-
-          DEPLOY_DIR="${JENKINS_HOME}/${DEPLOY_SUBDIR}"
-
-          dc() {
-            docker compose \
-              -f "$DEPLOY_DIR/docker-compose.yml" \
-              --project-directory "$DEPLOY_DIR" \
-              -p "$APP_NAME" \
-              "$@"
-          }
-
-          HEALTH_URL="http://127.0.0.1:${APP_PORT}/api/health"
-
-          echo "Waiting for $HEALTH_URL ..."
-
-          for attempt in $(seq 1 30); do
-            if curl -fsS "$HEALTH_URL" >/dev/null 2>&1; then
-              echo "Application became healthy after ${attempt} attempt(s)."
-
-              curl -fsS "$HEALTH_URL"
-              echo
-
-              # Record the successful release atomically.
-              printf '%s\\n' "$IMAGE" \
-                > "$DEPLOY_DIR/.current-image.tmp"
-
-              mv \
-                "$DEPLOY_DIR/.current-image.tmp" \
-                "$DEPLOY_DIR/.current-image"
-
-              rm -f "$DEPLOY_DIR/.deployment-attempted"
-
-              echo "Release confirmed: $IMAGE"
-              exit 0
-            fi
-
-            sleep 2
-          done
-
-          echo "ERROR: Health check did not pass within 60 seconds."
-          echo "Last 80 container log lines:"
-
-          dc logs --tail 80 web || true
-
-          exit 1
-        '''
+        script {
+          performRollback()
+        }
       }
     }
 
-    stage('Prune old images') {
+    stage('Cleanup') {
       steps {
-        sh '''#!/usr/bin/env bash
-          set -Eeuo pipefail
-
-          DEPLOY_DIR="${JENKINS_HOME}/${DEPLOY_SUBDIR}"
-
-          CURRENT_IMAGE=""
-          PREVIOUS_IMAGE=""
-
-          if [[ -s "$DEPLOY_DIR/.current-image" ]]; then
-            CURRENT_IMAGE="$(cat "$DEPLOY_DIR/.current-image")"
-          fi
-
-          if [[ -s "$DEPLOY_DIR/.previous-image" ]]; then
-            PREVIOUS_IMAGE="$(cat "$DEPLOY_DIR/.previous-image")"
-          fi
-
-          mapfile -t NUMBERED_TAGS < <(
-            docker images "$APP_NAME" \
-              --format '{{.Tag}}' \
-              | grep -E '^[0-9]+$' \
-              | sort -rn \
-              || true
-          )
-
-          for ((index = KEEP_IMAGES; index < ${#NUMBERED_TAGS[@]}; index++)); do
-            tag="${NUMBERED_TAGS[$index]}"
-            candidate="$APP_NAME:$tag"
-
-            if [[ "$candidate" == "$CURRENT_IMAGE" ]] \
-               || [[ "$candidate" == "$PREVIOUS_IMAGE" ]]; then
-              echo "Keeping rollback-related image: $candidate"
-              continue
-            fi
-
-            echo "Removing old image: $candidate"
-            docker image rm "$candidate" >/dev/null 2>&1 || true
-          done
-
-          docker image prune -f >/dev/null
-
-          echo "Retained application images:"
-          docker images "$APP_NAME" \
-            --format '  {{.Repository}}:{{.Tag}}  {{.Size}}'
-        '''
+        // This project's old release images only; every rollback image is kept.
+        // Build cache is trimmed by the central maintenance job, not here.
+        sh 'bash scripts/ci/release.sh retain-images || echo "WARNING: image retention did not complete."'
       }
     }
+
+    // Stage 12, Notification, is the top-level post block below: it runs even
+    // when a stage fails or the build is aborted, after rollback has finished.
   }
 
   post {
-
-    unsuccessful {
-      sh '''#!/usr/bin/env bash
-        set -Eeuo pipefail
-
-        DEPLOY_DIR="${JENKINS_HOME}/${DEPLOY_SUBDIR}"
-        ATTEMPT_MARKER="$DEPLOY_DIR/.deployment-attempted"
-
-        # The failure happened before deployment started.
-        if [[ ! -f "$ATTEMPT_MARKER" ]]; then
-          echo "Deployment was not started; rollback is unnecessary."
-          exit 0
-        fi
-
-        if [[ ! -s "$DEPLOY_DIR/.previous-image" ]]; then
-          echo "No previous image exists."
-          echo "Leaving the failed deployment available for inspection."
-
-          rm -f "$ATTEMPT_MARKER"
-          exit 0
-        fi
-
-        PREVIOUS_IMAGE="$(
-          cat "$DEPLOY_DIR/.previous-image"
-        )"
-
-        if ! docker image inspect "$PREVIOUS_IMAGE" >/dev/null 2>&1; then
-          echo "ERROR: Rollback image no longer exists: $PREVIOUS_IMAGE"
-          exit 1
-        fi
-
-        ROLLBACK_DIR="$DEPLOY_DIR/.rollback"
-
-        if [[ ! -f "$ROLLBACK_DIR/docker-compose.yml" ]] \
-           || [[ ! -f "$ROLLBACK_DIR/.env" ]]; then
-          echo "ERROR: Previous deployment configuration is unavailable."
-          echo "Cannot safely roll back using only the previous image."
-          exit 1
-        fi
-
-        echo "Restoring previous configuration."
-
-        install -m 644 \
-          "$ROLLBACK_DIR/docker-compose.yml" \
-          "$DEPLOY_DIR/docker-compose.yml"
-
-        install -m 600 \
-          "$ROLLBACK_DIR/.env" \
-          "$DEPLOY_DIR/.env"
-
-        rm -f "$DEPLOY_DIR/docker/fx-cron.sh"
-
-        if [[ -f "$ROLLBACK_DIR/docker/fx-cron.sh" ]]; then
-          install -m 755 \
-            "$ROLLBACK_DIR/docker/fx-cron.sh" \
-            "$DEPLOY_DIR/docker/fx-cron.sh"
-        fi
-
-        dc() {
-          docker compose \
-            -f "$DEPLOY_DIR/docker-compose.yml" \
-            --project-directory "$DEPLOY_DIR" \
-            -p "$APP_NAME" \
-            "$@"
+    always {
+      script {
+        // An aborted or timed-out deployment is rolled back here, before the report.
+        if (env.DEPLOY_STARTED == 'true' && env.ROLLBACK_ATTEMPTED != 'true'
+            && currentBuild.currentResult != 'SUCCESS') {
+          try {
+            performRollback()
+          } catch (Exception rollbackError) {
+            env.ROLLBACK_STATUS = 'failed'
+            echo 'WARNING: rollback after an interrupted deployment did not complete.'
+          }
         }
 
-        echo "Rolling back to $PREVIOUS_IMAGE"
+        // Diagnostics are archived before the workspace is wiped.
+        try {
+          archiveArtifacts artifacts: 'diagnostics/**', allowEmptyArchive: true, fingerprint: false
+        } catch (Exception archiveError) {
+          echo 'WARNING: diagnostics could not be archived.'
+        }
 
-        export IMAGE="$PREVIOUS_IMAGE"
-
-        dc up -d --remove-orphans
-        dc ps
-
-        printf '%s\\n' "$PREVIOUS_IMAGE" \
-          > "$DEPLOY_DIR/.current-image.tmp"
-
-        mv \
-          "$DEPLOY_DIR/.current-image.tmp" \
-          "$DEPLOY_DIR/.current-image"
-
-        rm -f "$ATTEMPT_MARKER"
-
-        echo "Rollback completed: $PREVIOUS_IMAGE"
-      '''
-    }
-
-    always {
-      sh '''#!/usr/bin/env bash
-        rm -f .env
-      '''
-    }
-
-    success {
-      echo "Deployed ${env.IMAGE} -> http://127.0.0.1:${env.APP_PORT}"
-    }
-
-    failure {
-      script {
-        def shortCommit = env.GIT_COMMIT
-          ? env.GIT_COMMIT.take(8)
-          : 'unknown'
-
-        def branchName = env.BRANCH_NAME ?: env.GIT_BRANCH ?: 'unknown'
-
-        def buildUrl = env.BUILD_URL ?: ''
-
-        def buildLink = buildUrl
-          ? "<${buildUrl}|Open Jenkins Build>"
-          : "Jenkins build #${env.BUILD_NUMBER}"
-
-        slackSend(
-          botUser: true,
-          color: 'danger',
-          failOnError: false,
-          message: """
-:x: *Avernek Expense Tracker deployment failed*
-
-*Job:* ${env.JOB_NAME}
-*Build:* #${env.BUILD_NUMBER}
-*Branch:* ${branchName}
-*Commit:* `${shortCommit}`
-*Image:* `${env.IMAGE}`
-*Status:* FAILURE
-
-${buildLink}
-""".stripIndent().trim()
-        )
+        try {
+          withCredentials([
+            string(credentialsId: 'discord-webhook-avernek', variable: 'DISCORD_WEBHOOK_URL')
+          ]) {
+            def outcome = currentBuild.currentResult
+            def deployment = env.DEPLOY_ENABLED == 'true'
+              ? (env.DEPLOY_FAILED == 'true' ? "failed at ${env.FAILED_STEP ?: 'deployment'}" : (outcome == 'SUCCESS' ? 'deployed and verified' : 'not completed'))
+              : "skipped (branch ${env.SOURCE_BRANCH ?: 'unknown'})"
+            discordSend(
+              webhookURL: env.DISCORD_WEBHOOK_URL,
+              title: "${env.JOB_NAME} #${env.BUILD_NUMBER}",
+              description: "Result: ${outcome}\n" +
+                "Branch: ${env.SOURCE_BRANCH ?: env.BRANCH_NAME ?: 'main'}\n" +
+                "Commit: ${env.GIT_SHORT ?: 'unknown'}\n" +
+                "Release: ${env.IMAGE_TAG ?: 'not built'}\n" +
+                "Deployment: ${deployment}\n" +
+                "Rollback: ${env.ROLLBACK_STATUS ?: 'not required / not attempted'}",
+              result: outcome,
+              link: env.BUILD_URL,
+              footer: 'Avernek Technologies | Jenkins Deployment'
+            )
+          }
+        } catch (Exception notificationError) {
+          // Reporting failure must never conceal or overwrite a build failure.
+          echo 'WARNING: Discord notification could not be sent. Check the credential, plugin and Jenkins egress.'
+        } finally {
+          cleanWs(deleteDirs: true,
+                  disableDeferredWipeout: true,
+                  notFailBuild: true)
+        }
       }
-
-      echo "Build ${env.BUILD_NUMBER} failed."
     }
+  }
+}
 
-    aborted {
-      echo "Build ${env.BUILD_NUMBER} was aborted."
-    }
+// Runs one deployment step. A failure is recorded (not thrown), so the
+// Rollback on Failure stage still runs; the build is marked FAILURE and stays
+// failed whatever the rollback outcome. Aborts are rethrown and rolled back in
+// the post block.
+def deployStep(String name, Closure body) {
+  try {
+    body()
+  } catch (org.jenkinsci.plugins.workflow.steps.FlowInterruptedException interrupted) {
+    env.DEPLOY_FAILED = 'true'
+    env.FAILED_STEP = name
+    throw interrupted
+  } catch (Exception error) {
+    env.DEPLOY_FAILED = 'true'
+    env.FAILED_STEP = name
+    currentBuild.result = 'FAILURE'
+    echo "${name} failed: ${error.getClass().simpleName}. Rolling back."
+  }
+}
+
+// Captures diagnostics, then restores the verified release and records the
+// outcome in ROLLBACK_STATUS for the Discord report.
+def performRollback() {
+  env.ROLLBACK_ATTEMPTED = 'true'
+  sh 'bash scripts/ci/release.sh diagnostics diagnostics || true'
+  int code = sh(script: 'bash scripts/ci/release.sh rollback', returnStatus: true)
+  switch (code) {
+    case 0:
+      env.ROLLBACK_STATUS = 'restored and verified'
+      break
+    case 3:
+      env.ROLLBACK_STATUS = 'no prior release'
+      break
+    case 4:
+      env.ROLLBACK_STATUS = 'not required (server unchanged)'
+      break
+    default:
+      env.ROLLBACK_STATUS = 'failed'
+  }
+  echo "Rollback: ${env.ROLLBACK_STATUS}"
+  // A rollback never turns a failed deployment into a success; an abort stays ABORTED.
+  if (currentBuild.currentResult != 'ABORTED') {
+    currentBuild.result = 'FAILURE'
   }
 }
