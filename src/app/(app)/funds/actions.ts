@@ -1,7 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { exec, one } from "@/lib/db";
+import { exec, one, transaction } from "@/lib/db";
+import { assertRoomFor, insertAttachments, readUploads } from "@/lib/attachments.server";
 import { loadLedger } from "@/lib/ledger";
 import { requireSession } from "@/lib/auth/server";
 import { assertAppOwner } from "@/lib/authz";
@@ -277,6 +278,15 @@ export async function addCompanyBill(
   }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(billDate)) return { error: "Enter the bill date.", ok: null };
 
+  // A scan or photo of the bill is optional, and can be added to old bills too.
+  let files: Awaited<ReturnType<typeof readUploads>>;
+  try {
+    files = await readUploads(formData, "bill_files");
+    if (id) await assertRoomFor({ kind: "company_bill", id }, files.length);
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Could not read the files.", ok: null };
+  }
+
   const params = [
     description,
     value(formData, "vendor_name") || null,
@@ -297,20 +307,27 @@ export async function addCompanyBill(
     if (Number(reimbursed?.total ?? 0) > total + 0.001) {
       return { error: "The bill total cannot be less than what was already reimbursed.", ok: null };
     }
-    await exec(
-      `update public.company_bills
-          set description = $1, vendor_name = $2, bill_number = $3, bill_date = $4,
-              total_amount = $5, vat_amount = $6, paid_by = $7, note = $8, updated_at = now()
-        where id = $9`,
-      [...params, id]
-    );
+    await transaction(async (client) => {
+      await client.query(
+        `update public.company_bills
+            set description = $1, vendor_name = $2, bill_number = $3, bill_date = $4,
+                total_amount = $5, vat_amount = $6, paid_by = $7, note = $8, updated_at = now()
+          where id = $9`,
+        [...params, id]
+      );
+      await insertAttachments(client, { kind: "company_bill", id }, files, session.sub);
+    });
   } else {
-    await exec(
-      `insert into public.company_bills
-         (description, vendor_name, bill_number, bill_date, total_amount, vat_amount, paid_by, note, created_by)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-      [...params, session.sub]
-    );
+    await transaction(async (client) => {
+      const inserted = await client.query<{ id: string }>(
+        `insert into public.company_bills
+           (description, vendor_name, bill_number, bill_date, total_amount, vat_amount, paid_by, note, created_by)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+         returning id`,
+        [...params, session.sub]
+      );
+      await insertAttachments(client, { kind: "company_bill", id: inserted.rows[0].id }, files, session.sub);
+    });
   }
 
   revalidateFunds();

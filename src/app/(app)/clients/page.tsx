@@ -22,6 +22,7 @@ import {
   servicesLabel,
   summarizeIncomeAgreement,
 } from "@/lib/income";
+import { ATTACHMENT_COLUMNS, type Attachment } from "@/lib/attachments";
 import type {
   Currency,
   Expense,
@@ -109,6 +110,14 @@ export default async function ClientsPage({
     agreements.map((agreement) => [agreement.id, summarizeIncomeAgreement(agreement, payments)])
   );
   const selected = agreements.find((agreement) => agreement.id === selectedId) ?? null;
+  const selectedAgreementFiles = selected
+    ? await query<Attachment>(
+        `select ${ATTACHMENT_COLUMNS} from public.attachments
+          where kind = 'client_agreement' and agreement_id = $1
+          order by created_at`,
+        [selected.id]
+      )
+    : [];
   const collected = new Map<string, number>();
   const outstanding = new Map<string, number>();
   const recurring = new Map<string, number>();
@@ -216,6 +225,7 @@ export default async function ClientsPage({
                         recurringPaymentCount={selectedPayments.filter((payment) => payment.payment_for === "recurring").length}
                         redirectOnDelete="/clients"
                         showEditButton
+                        agreementFiles={selectedAgreementFiles}
                       />
                     )}
                   </div>

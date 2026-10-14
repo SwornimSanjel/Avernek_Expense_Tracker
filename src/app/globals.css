@@ -1451,3 +1451,52 @@ details > summary:hover { background: rgb(255 255 255 / 0.018); }
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ----- expense bills ----- */
+.bill-drop {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 11px 13px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 13px;
+  background: var(--surface-2);
+  cursor: pointer;
+  transition: border-color 140ms ease, background 140ms ease;
+}
+.bill-drop:hover,
+.bill-drop:focus-within { border-color: color-mix(in srgb, var(--accent) 45%, transparent); background: var(--accent-soft); }
+.bill-drop-full { cursor: not-allowed; opacity: .6; }
+.bill-drop-icon {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  place-items: center;
+  border-radius: 10px;
+  color: color-mix(in srgb, var(--accent) 70%, var(--ink));
+  background: var(--surface);
+}
+.bill-drop strong { display: block; font-size: 12.5px; font-weight: 650; }
+.bill-drop small { display: block; margin-top: 2px; color: var(--muted); font-size: 10.5px; }
+.bill-list { display: flex; flex-direction: column; gap: 5px; }
+.bill-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  font-size: 12px;
+}
+.bill-pill { display: inline-flex; align-items: center; gap: 4px; }
+.bill-pill:hover { border-color: color-mix(in srgb, var(--accent) 40%, transparent); color: var(--ink); }
+
+/* ----- multi-page documents (signed agreements) ----- */
+.page-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.page-tile { min-width: 0; margin: 0; overflow: hidden; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface); transition: opacity 140ms ease; }
+.page-thumb { display: block; aspect-ratio: 3 / 4; overflow: hidden; background: var(--surface-2); }
+.page-thumb img { width: 100%; height: 100%; object-fit: cover; object-position: top; }
+.page-thumb-doc { display: flex; height: 100%; flex-direction: column; align-items: center; justify-content: center; gap: 6px; color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .08em; }
+.page-tile figcaption { display: flex; align-items: center; gap: 4px; padding: 6px 6px 6px 9px; border-top: 1px solid var(--line); font-size: 11px; }

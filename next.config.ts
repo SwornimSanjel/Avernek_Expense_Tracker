@@ -7,6 +7,12 @@ const nextConfig: NextConfig = {
   // The Docker image runs Next's self-contained server bundle. Gated on
   // DOCKER_BUILD so Netlify's Next.js plugin keeps seeing the default output.
   output: process.env.DOCKER_BUILD === "1" ? "standalone" : undefined,
+  experimental: {
+    // Forms can carry up to 40 MB of bills / agreement pages
+    // (lib/attachments.ts) plus the other fields. The 1 MB default would
+    // reject a single phone photo of a receipt.
+    serverActions: { bodySizeLimit: "45mb" },
+  },
   images: {
     remotePatterns: [
       // Supabase Storage public bucket for receipt images

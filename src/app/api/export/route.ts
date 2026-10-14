@@ -7,7 +7,7 @@ export async function GET() {
   const session = await getSession();
   if (!session) return new Response("Unauthorized", { status: 401 });
 
-  const [exp, shareRows, cats, vends, team, accounts] = await Promise.all([
+  const [exp, shareRows, cats, vends, team, accounts, billCounts] = await Promise.all([
     query<Expense>(
       `select * from public.expenses order by expense_date desc`
     ),
@@ -18,7 +18,12 @@ export async function GET() {
     query<Vendor>(`select * from public.vendors`),
     query<AppUser>(`select id, name, email, is_core_member, is_admin from public.users`),
     query<MoneyAccount>(`select * from public.money_accounts`),
+    query<{ expense_id: string; bills: string }>(
+      `select expense_id, count(*) as bills from public.attachments
+        where kind = 'expense_bill' group by expense_id`
+    ),
   ]);
+  const billsByExpense = new Map(billCounts.map((row) => [row.expense_id, Number(row.bills)]));
 
   const categories = cats as Category[];
   const vendors = vends as Vendor[];
@@ -55,6 +60,7 @@ export async function GET() {
     "is_reimbursed",
     "note",
     "shares",
+    "bills_attached",
   ];
 
   const escape = (v: unknown) => {
@@ -87,6 +93,7 @@ export async function GET() {
         (e.expense_shares ?? [])
           .map((share) => `${name(users, share.user_id)}: ${share.amount} ${e.currency}`)
           .join("; "),
+        billsByExpense.get(e.id) ?? 0,
       ]
         .map(escape)
         .join(",")

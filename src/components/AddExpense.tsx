@@ -11,6 +11,7 @@ import type {
   Vendor,
 } from "@/lib/types";
 import ShareAllocationFields from "./ShareAllocationFields";
+import AttachmentField from "./AttachmentField";
 
 const today = () => {
   const date = new Date();
@@ -45,6 +46,7 @@ export default function AddExpense({
   const [rate, setRate] = useState<{ rate: number; rateDate: string } | null>(null);
   const [rateLoading, setRateLoading] = useState(false);
   const [pending, startTransition] = useTransition();
+  const [filesBusy, setFilesBusy] = useState(false);
 
   useEffect(() => {
     if (currency !== "USD") {
@@ -80,7 +82,11 @@ export default function AddExpense({
   function submit(formData: FormData) {
     startTransition(async () => {
       try {
-        await addExpense(formData);
+        const result = await addExpense(formData);
+        if (result.error) {
+          window.alert(result.error);
+          return;
+        }
         setAmount("");
         setActualNpr("");
         setShowActual(false);
@@ -356,8 +362,15 @@ export default function AddExpense({
           <input name="note" className="input" />
         </Field>
 
-        <button type="submit" disabled={pending} className="btn btn-primary w-full !h-12">
-          {pending ? "Saving…" : "Save expense"}
+        <AttachmentField
+          name="bills"
+          label="Bill / receipt"
+          emptyHelp="No bill yet? Save without one and add it later from Edit."
+          onBusyChange={setFilesBusy}
+        />
+
+        <button type="submit" disabled={pending || filesBusy} className="btn btn-primary w-full !h-12">
+          {pending ? "Saving…" : filesBusy ? "Preparing photos…" : "Save expense"}
         </button>
       </form>
     </div>

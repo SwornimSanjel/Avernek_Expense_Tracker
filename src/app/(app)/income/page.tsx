@@ -29,6 +29,7 @@ import {
 import { loadLedger } from "@/lib/ledger";
 import { bankAmount } from "@/lib/tax";
 import type { IncomeAgreement, MoneyAccount, ServiceKey } from "@/lib/types";
+import { ATTACHMENT_COLUMNS, type Attachment } from "@/lib/attachments";
 
 export const dynamic = "force-dynamic";
 
@@ -76,14 +77,25 @@ export default async function IncomePage({
   const filters = await searchParams;
   const today = todayIso();
 
-  const [agreements, ledger] = await Promise.all([
+  const [agreements, ledger, agreementFileRows] = await Promise.all([
     query<IncomeAgreement>(
       `select * from public.income_agreements
        order by case status when 'active' then 0 when 'pending' then 1 when 'paused' then 2 else 3 end,
                 client_name, agreement_date desc`
     ),
     loadLedger(),
+    query<Attachment>(
+      `select ${ATTACHMENT_COLUMNS} from public.attachments
+        where kind = 'client_agreement'
+        order by created_at`
+    ),
   ]);
+  const agreementFilesById = new Map<string, Attachment[]>();
+  for (const file of agreementFileRows) {
+    const list = agreementFilesById.get(file.agreement_id!) ?? [];
+    list.push(file);
+    agreementFilesById.set(file.agreement_id!, list);
+  }
   const { payments, accounts: moneyAccounts, balances, otherIncome, tax } = ledger;
 
   const summaries = new Map<string, IncomeAgreementSummary>(
@@ -328,6 +340,11 @@ export default async function IncomePage({
                         <h2 className="text-base font-bold truncate">{agreement.client_name}</h2>
                         <StatusPill kind="agreement" value={agreement.status} />
                         <StatusPill kind="billing" value={summary.overallStatus} />
+                        {!agreementFilesById.has(agreement.id) && (
+                          <span className="status-pill status-pill-danger" title="No signed agreement uploaded yet">
+                            Agreement missing
+                          </span>
+                        )}
                       </div>
                       <div className="mt-1.5">
                         <ServiceBadges services={summary.services} />
@@ -349,6 +366,7 @@ export default async function IncomePage({
                           moneyAccounts={moneyAccounts}
                           paymentCount={agreementPayments.length}
                           recurringPaymentCount={recurringPaymentCount}
+                          agreementFiles={agreementFilesById.get(agreement.id) ?? []}
                         />
                       </>
                     )}

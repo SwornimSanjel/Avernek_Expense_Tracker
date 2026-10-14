@@ -4,6 +4,7 @@ import { EmptyState, PageHeader, FxBadge, SectionHeader } from "@/components/ui"
 import AddExpense from "@/components/AddExpense";
 import { npr, usd } from "@/lib/format";
 import type { AppUser, Category, Expense, MoneyAccount, Vendor } from "@/lib/types";
+import { ATTACHMENT_COLUMNS, attachmentUrl, type Attachment } from "@/lib/attachments";
 import ExpenseRowActions from "@/components/ExpenseRowActions";
 import {
   assignedShareNpr,
@@ -85,7 +86,7 @@ export default async function ExpensesPage({
   // expenses with silently missing splits.
   const shareError = null;
 
-  const [expenses, shareRows] = await Promise.all([
+  const [expenses, shareRows, billRows] = await Promise.all([
     query<Expense>(
       `select * from public.expenses
        ${where}
@@ -94,6 +95,12 @@ export default async function ExpensesPage({
       params
     ),
     query<{ expense_id: string }>(`select * from public.expense_shares`),
+    // Metadata only: the bytes are fetched one bill at a time by /api/bills/[id].
+    query<Attachment>(
+      `select ${ATTACHMENT_COLUMNS} from public.attachments
+        where kind = 'expense_bill'
+        order by created_at`
+    ),
   ]);
 
   const categories = cats as Category[];
@@ -106,6 +113,7 @@ export default async function ExpensesPage({
     expense_shares: shareRows.filter(
       (share) => share.expense_id === expense.id
     ),
+    attachments: billRows.filter((bill) => bill.expense_id === expense.id),
   })) as Expense[];
   const selectedPersonId = sp.person ?? sp.payer ?? "";
   const basis = sp.basis ?? (sp.payer ? "paid" : "share");
@@ -309,6 +317,19 @@ export default async function ExpensesPage({
                   <FxBadge source={e.fx_source} status={e.conversion_status} />
                 )}
                 {e.is_reimbursed && <span className="pill ok">reimbursed</span>}
+                {e.attachments?.map((bill, index) => (
+                  <a
+                    key={bill.id}
+                    href={attachmentUrl(bill.id)}
+                    target="_blank"
+                    rel="noopener"
+                    className="pill bill-pill"
+                    title={bill.file_name}
+                  >
+                    <Icon name="receipt" size={11} />
+                    {e.attachments!.length > 1 ? `Bill ${index + 1}` : "Bill"}
+                  </a>
+                ))}
                 {e.funding_source === "company_funds"
                   ? <span className="pill accent">{accountLedgerLabel(e.money_account_id)}</span>
                   : <span className="pill">founder/team investment</span>}

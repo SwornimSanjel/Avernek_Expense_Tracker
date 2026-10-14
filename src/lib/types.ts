@@ -1,3 +1,5 @@
+import type { Attachment } from "@/lib/attachments";
+
 export type Currency = "NPR" | "USD";
 export type FxSource = "actual" | "nrb" | "manual" | "estimated" | "pending";
 export type ConversionStatus =
@@ -139,6 +141,8 @@ export interface Expense {
   created_by: string | null;
   created_at: string;
   expense_shares?: ExpenseShare[];
+  /** Bills / receipts — metadata only, the bytes are served by /api/files/[id]. */
+  attachments?: Attachment[];
 }
 
 export interface ExpenseShare {

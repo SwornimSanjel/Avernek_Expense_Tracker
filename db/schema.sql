@@ -363,6 +363,10 @@ create index if not exists income_payments_by_period
 create index if not exists income_payments_by_money_account
   on public.income_payments (money_account_id, paid_on desc);
 
+-- Files attached to records (expense bills, agreement pages, VAT bills) live
+-- in public.attachments, created by db/migrations/20261014_attachments.sql
+-- because it references tables that only the migrations create.
+
 -- Money that arrives without being earned: founder capital, owner
 -- contributions, loans. It raises an account balance and is NEVER client
 -- income, sales, service revenue, VAT-taxable sales or profit — which is why it

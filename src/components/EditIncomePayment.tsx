@@ -9,6 +9,9 @@ import { PAYMENT_METHOD_LABELS, formatIncomeMoney, periodLabel, type RecurringPe
 import type { Currency, IncomePayment, MoneyAccount } from "@/lib/types";
 import Icon from "./Icons";
 import TaxBreakdownFields from "./TaxBreakdownFields";
+import AttachmentField from "./AttachmentField";
+import AttachmentList from "./AttachmentList";
+import type { Attachment } from "@/lib/attachments";
 
 const initialState: IncomeFormState = { error: null, ok: null };
 
@@ -22,15 +25,19 @@ export default function EditIncomePayment({
   currency,
   moneyAccounts,
   periods = [],
+  vatBills = [],
 }: {
   payment: IncomePayment;
   currency: Currency;
   moneyAccounts: MoneyAccount[];
   periods?: RecurringPeriod[];
+  /** VAT bills already saved on this payment. */
+  vatBills?: Attachment[];
 }) {
   const [open, setOpen] = useState(false);
   const [state, action, pending] = useActionState(updateIncomePayment, initialState);
   const [accountId, setAccountId] = useState(payment.money_account_id ?? "");
+  const [filesBusy, setFilesBusy] = useState(false);
   const matchingAccounts = moneyAccounts.filter(
     (account) => account.is_active && account.currency === currency
   );
@@ -160,9 +167,25 @@ export default function EditIncomePayment({
               <input name="note" defaultValue={payment.note ?? ""} className="input mt-1" />
             </label>
 
+            {vatBills.length > 0 && (
+              <div>
+                <span className="field-label">VAT bill · {vatBills.length} saved</span>
+                <div className="mt-1">
+                  <AttachmentList files={vatBills} canRemove />
+                </div>
+              </div>
+            )}
+            <AttachmentField
+              name="vat_bill_files"
+              label={vatBills.length ? "Add more VAT bill pages" : "VAT bill"}
+              hint="Only if a VAT bill was cut for this payment · photos or PDF"
+              existingCount={vatBills.length}
+              onBusyChange={setFilesBusy}
+            />
+
             {state.error && <p className="text-sm" style={{ color: "var(--red)" }}>{state.error}</p>}
-            <button disabled={pending} className="btn btn-primary w-full !h-12">
-              {pending ? "Saving…" : "Save payment changes"}
+            <button disabled={pending || filesBusy} className="btn btn-primary w-full !h-12">
+              {pending ? "Saving…" : filesBusy ? "Preparing photos…" : "Save payment changes"}
             </button>
           </form>
         </div>

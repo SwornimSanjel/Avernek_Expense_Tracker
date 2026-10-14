@@ -12,6 +12,9 @@ import IncomeAgreementControls from "@/components/IncomeAgreementControls";
 import EditIncomePayment from "@/components/EditIncomePayment";
 import DeleteIncomePayment from "@/components/DeleteIncomePayment";
 import MarkServiceLive from "@/components/MarkServiceLive";
+import AttachmentList from "@/components/AttachmentList";
+import AttachmentUpload from "@/components/AttachmentUpload";
+import { ATTACHMENT_COLUMNS, attachmentUrl, type Attachment } from "@/lib/attachments";
 import PriceBreakdownTable from "@/components/PriceBreakdownTable";
 import { bankAmount } from "@/lib/tax";
 import { accountShortName } from "@/lib/funds";
@@ -70,7 +73,7 @@ export default async function ClientBillingPage({
   );
   if (!agreement) notFound();
 
-  const [payments, moneyAccounts, clientExpenses] = await Promise.all([
+  const [payments, moneyAccounts, clientExpenses, agreementFiles, vatBills] = await Promise.all([
     query<IncomePayment>(
       `select * from public.income_payments
         where agreement_id = $1
@@ -90,7 +93,27 @@ export default async function ClientBillingPage({
         order by e.expense_date desc, e.created_at desc`,
       [agreement.client_name]
     ),
+    query<Attachment>(
+      `select ${ATTACHMENT_COLUMNS} from public.attachments
+        where kind = 'client_agreement' and agreement_id = $1
+        order by created_at`,
+      [id]
+    ),
+    query<Attachment>(
+      `select ${ATTACHMENT_COLUMNS.split(", ").map((column) => `a.${column}`).join(", ")}
+         from public.attachments a
+         join public.income_payments p on p.id = a.payment_id
+        where a.kind = 'vat_bill' and p.agreement_id = $1
+        order by a.created_at`,
+      [id]
+    ),
   ]);
+  const vatBillsByPayment = new Map<string, Attachment[]>();
+  for (const bill of vatBills) {
+    const list = vatBillsByPayment.get(bill.payment_id!) ?? [];
+    list.push(bill);
+    vatBillsByPayment.set(bill.payment_id!, list);
+  }
 
   const summary = summarizeIncomeAgreement(agreement, payments, today);
   const accountById = new Map(moneyAccounts.map((account) => [account.id, account]));
@@ -134,6 +157,7 @@ export default async function ClientBillingPage({
                 recurringPaymentCount={recurringPaymentCount}
                 redirectOnDelete="/income"
                 showEditButton
+                agreementFiles={agreementFiles}
               />
             </div>
           ) : undefined
@@ -147,6 +171,9 @@ export default async function ClientBillingPage({
           <div className="mt-2 flex items-center gap-2 flex-wrap">
             <StatusPill kind="agreement" value={agreement.status} />
             <StatusPill kind="billing" value={summary.overallStatus} prefix="Billing:" />
+            {agreementFiles.length === 0 && (
+              <a href="#agreement-papers" className="status-pill status-pill-danger">Agreement missing</a>
+            )}
           </div>
           <div className="mt-3">
             <ServiceBadges services={summary.services} size="md" />
@@ -197,6 +224,45 @@ export default async function ClientBillingPage({
                 : "Nothing scheduled"
             }
           />
+        </div>
+      </section>
+
+      {/* ------------------------------------------------- agreement papers */}
+      <section id="agreement-papers">
+        <div className="billing-panel">
+          <div className="billing-panel-head">
+            <div>
+              <h2>Signed agreement</h2>
+              <p>
+                {agreementFiles.length > 0
+                  ? `${agreementFiles.length} page${agreementFiles.length === 1 ? "" : "s"} on file · open any page to read or print it`
+                  : "Not uploaded yet — every client needs its signed agreement on file"}
+              </p>
+            </div>
+            {agreementFiles.length > 0 ? (
+              <span className="status-pill status-pill-ok">On file</span>
+            ) : (
+              <span className="status-pill status-pill-danger">Agreement missing</span>
+            )}
+          </div>
+          <div className="border-t p-5 space-y-4" style={{ borderColor: "var(--line)" }}>
+            <AttachmentList
+              files={agreementFiles}
+              canRemove={canManage}
+              layout="pages"
+              lastFileWarning="This is the only agreement page. The client will show “Agreement missing” until a new one is uploaded."
+            />
+            {canManage && (
+              <AttachmentUpload
+                kind="client_agreement"
+                ownerId={agreement.id}
+                existingCount={agreementFiles.length}
+                label={agreementFiles.length > 0 ? "Add or replace pages" : "Upload the signed agreement"}
+                hint="Photos of each page or one PDF · several at once"
+                buttonLabel="Save agreement pages"
+              />
+            )}
+          </div>
         </div>
       </section>
 
@@ -417,14 +483,33 @@ export default async function ClientBillingPage({
                   <span data-label="Account">
                     {account ? accountKindLabel(account) : payment.account_name ?? "—"}
                   </span>
-                  <span className="truncate" data-label="Note">
-                    {[
-                      payment.method ? PAYMENT_METHOD_LABELS[payment.method] : null,
-                      payment.reference,
-                      payment.note,
-                    ]
-                      .filter(Boolean)
-                      .join(" · ") || "—"}
+                  <span className="min-w-0" data-label="Note">
+                    <span className="block truncate">
+                      {[
+                        payment.method ? PAYMENT_METHOD_LABELS[payment.method] : null,
+                        payment.reference,
+                        payment.note,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ") || "—"}
+                    </span>
+                    {(vatBillsByPayment.get(payment.id) ?? []).length > 0 && (
+                      <span className="flex flex-wrap gap-1 mt-1">
+                        {(vatBillsByPayment.get(payment.id) ?? []).map((bill, index, list) => (
+                          <a
+                            key={bill.id}
+                            href={attachmentUrl(bill.id)}
+                            target="_blank"
+                            rel="noopener"
+                            className="pill bill-pill"
+                            title={bill.file_name}
+                          >
+                            <Icon name="receipt" size={11} />
+                            {list.length > 1 ? `VAT bill ${index + 1}` : "VAT bill"}
+                          </a>
+                        ))}
+                      </span>
+                    )}
                   </span>
                   {canManage && (
                     <span className="flex items-center justify-end gap-1">
@@ -433,6 +518,7 @@ export default async function ClientBillingPage({
                         currency={currency}
                         moneyAccounts={moneyAccounts}
                         periods={allPeriods}
+                        vatBills={vatBillsByPayment.get(payment.id) ?? []}
                       />
                       <DeleteIncomePayment id={payment.id} />
                     </span>

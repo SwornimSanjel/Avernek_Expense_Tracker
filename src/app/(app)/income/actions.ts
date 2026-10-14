@@ -4,6 +4,13 @@ import { revalidatePath } from "next/cache";
 import { exec, one, transaction } from "@/lib/db";
 import { requireSession } from "@/lib/auth/server";
 import { assertAppOwner } from "@/lib/authz";
+import {
+  assertRoomFor,
+  insertAttachments,
+  readUploads,
+  type AttachmentOwner,
+  type FileUpload,
+} from "@/lib/attachments.server";
 import { addCalendarDays, addCalendarMonths, isValidDate, legacyServiceType, todayIso } from "@/lib/income";
 import type {
   AdsStatus,
@@ -123,6 +130,25 @@ async function paymentAccount(id: string, currency: Currency) {
     name: account.name,
     receivedIn: (account.kind === "personal_custody" ? "personal" : "company") as IncomeAccountType,
   };
+}
+
+/**
+ * Read uploaded files without letting a bad file throw past the form: the
+ * message ("x.pdf is not a PDF or an image") has to reach the person who chose
+ * it, and production Next.js hides thrown messages.
+ */
+async function filesFrom(
+  formData: FormData,
+  field: string,
+  owner?: AttachmentOwner
+): Promise<{ uploads: FileUpload[] } | { error: string }> {
+  try {
+    const uploads = await readUploads(formData, field);
+    if (owner) await assertRoomFor(owner, uploads.length);
+    return { uploads };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Could not read the files." };
+  }
 }
 
 function revalidateIncome() {
@@ -319,6 +345,17 @@ export async function addIncomeAgreement(
   if ("error" in parsed) return { error: parsed.error ?? "Check the client details.", ok: null };
   const value = parsed.value;
 
+  // The signed agreement is the one document every new client must have. Older
+  // clients added before uploads existed get theirs from Edit or the client page.
+  const agreementFiles = await filesFrom(formData, "agreement_files");
+  if ("error" in agreementFiles) return { error: agreementFiles.error, ok: null };
+  if (agreementFiles.uploads.length === 0) {
+    return {
+      error: "Upload the signed agreement (all its pages — photos or a PDF) to add this client.",
+      ok: null,
+    };
+  }
+
   // The opening payment is optional. Rs. 0 paid is a perfectly valid new client;
   // money recorded later never requires recreating anything.
   const initialAmount = optionalAmount(formData, "initial_paid_amount") ?? 0;
@@ -357,6 +394,11 @@ export async function addIncomeAgreement(
     initialTax = { vat: tax.vat, tds: tax.tds };
   }
 
+  // A VAT bill for the opening payment is optional — only when one was issued.
+  const openingVatBills =
+    initialAmount > 0 ? await filesFrom(formData, "initial_vat_bill_files") : { uploads: [] };
+  if ("error" in openingVatBills) return { error: openingVatBills.error, ok: null };
+
   let account: Awaited<ReturnType<typeof paymentAccount>> | null = null;
   if (initialAmount > 0) {
     try {
@@ -390,13 +432,15 @@ export async function addIncomeAgreement(
       names.map((name) => columns[name])
     );
     const id = inserted.rows[0].id;
+    await insertAttachments(client, { kind: "client_agreement", id }, agreementFiles.uploads, session.sub);
 
     if (initialAmount > 0 && account) {
-      await client.query(
+      const payment = await client.query<{ id: string }>(
         `insert into public.income_payments
            (agreement_id, payment_for, billing_period_start, billing_stream, amount, vat_amount,
             tds_amount, paid_on, received_in, money_account_id, account_name, method, note, recorded_by)
-         values ($1,$2,null,null,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+         values ($1,$2,null,null,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+         returning id`,
         [
           id,
           initialFor,
@@ -412,6 +456,12 @@ export async function addIncomeAgreement(
           session.sub,
         ]
       );
+      await insertAttachments(
+        client,
+        { kind: "vat_bill", id: payment.rows[0].id },
+        openingVatBills.uploads,
+        session.sub
+      );
     }
     return id;
   });
@@ -424,7 +474,7 @@ export async function updateIncomeAgreement(
   _previous: IncomeFormState,
   formData: FormData
 ): Promise<IncomeFormState> {
-  await requireIncomeAdmin();
+  const session = await requireIncomeAdmin();
   const id = stringValue(formData, "agreement_id");
   if (!id) return { error: "Client not found.", ok: null };
   const parsed = parseAgreement(formData);
@@ -517,18 +567,30 @@ export async function updateIncomeAgreement(
     };
   }
 
+  // More agreement pages can be added to any client, old or new.
+  const agreementFiles = await filesFrom(formData, "agreement_files", {
+    kind: "client_agreement",
+    id,
+  });
+  if ("error" in agreementFiles) return { error: agreementFiles.error, ok: null };
+
   const columns = agreementColumns(value);
   const names = Object.keys(columns);
   const assignments = names.map((name, index) => `${name} = $${index + 1}`);
   const params = names.map((name) => columns[name]);
   params.push(id);
 
-  const changed = await exec(
-    `update public.income_agreements
-        set ${assignments.join(", ")}, updated_at = now()
-      where id = $${params.length}`,
-    params
-  );
+  const changed = await transaction(async (client) => {
+    const result = await client.query(
+      `update public.income_agreements
+          set ${assignments.join(", ")}, updated_at = now()
+        where id = $${params.length}`,
+      params
+    );
+    if (!result.rowCount) return 0;
+    await insertAttachments(client, { kind: "client_agreement", id }, agreementFiles.uploads, session.sub);
+    return result.rowCount;
+  });
   if (!changed) return { error: "Client no longer exists.", ok: null };
 
   revalidateIncome();
@@ -926,6 +988,10 @@ export async function recordIncomePayment(
   const tax = parseTax(formData, amount);
   if ("error" in tax) return { error: tax.error ?? "Check VAT and TDS.", ok: null };
 
+  // Optional: only when a VAT bill was actually issued for this payment.
+  const vatBills = await filesFrom(formData, "vat_bill_files");
+  if ("error" in vatBills) return { error: vatBills.error, ok: null };
+
   const paid = await alreadyPaid(target);
   const remaining = Math.max(0, target.agreed - paid);
   if (amount > remaining + 0.001) {
@@ -937,12 +1003,14 @@ export async function recordIncomePayment(
     };
   }
 
-  await exec(
+  await transaction(async (client) => {
+    const inserted = await client.query<{ id: string }>(
     `insert into public.income_payments
        (agreement_id, payment_for, billing_period_start, billing_stream, amount, vat_amount,
         tds_amount, paid_on, received_in, money_account_id, account_name, method, reference,
         note, recorded_by)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+     returning id`,
     [
       agreementId,
       paymentFor,
@@ -960,7 +1028,14 @@ export async function recordIncomePayment(
       note,
       session.sub,
     ]
-  );
+    );
+    await insertAttachments(
+      client,
+      { kind: "vat_bill", id: inserted.rows[0].id },
+      vatBills.uploads,
+      session.sub
+    );
+  });
 
   revalidateIncome();
   return { error: null, ok: `Payment recorded for ${target.clientName}.` };
@@ -1029,6 +1104,10 @@ export async function updateIncomePayment(
   const tax = parseTax(formData, amount);
   if ("error" in tax) return { error: tax.error ?? "Check VAT and TDS.", ok: null };
 
+  // VAT bills can be added to any payment later — for example once it is cut.
+  const vatBills = await filesFrom(formData, "vat_bill_files", { kind: "vat_bill", id: paymentId });
+  if ("error" in vatBills) return { error: vatBills.error, ok: null };
+
   const paidByOthers = await alreadyPaid(target, paymentId);
   const available = Math.max(0, target.agreed - paidByOthers);
   if (amount > available + 0.001) {
@@ -1038,7 +1117,8 @@ export async function updateIncomePayment(
     };
   }
 
-  const changed = await exec(
+  const changed = await transaction(async (client) => {
+    const result = await client.query(
     `update public.income_payments
         set amount = $1, paid_on = $2, received_in = $3, money_account_id = $4,
             account_name = $5, method = $6, reference = $7, note = $8,
@@ -1060,7 +1140,11 @@ export async function updateIncomePayment(
       tax.vat,
       tax.tds,
     ]
-  );
+    );
+    if (!result.rowCount) return 0;
+    await insertAttachments(client, { kind: "vat_bill", id: paymentId }, vatBills.uploads, session.sub);
+    return result.rowCount;
+  });
   if (!changed) return { error: "Payment no longer exists.", ok: null };
 
   revalidateIncome();

@@ -12,6 +12,8 @@ import type {
   Vendor,
 } from "@/lib/types";
 import ShareAllocationFields from "./ShareAllocationFields";
+import AttachmentField from "./AttachmentField";
+import AttachmentList from "./AttachmentList";
 
 export default function EditExpenseModal({
   expense,
@@ -37,6 +39,7 @@ export default function EditExpenseModal({
   );
   const [moneyAccountId, setMoneyAccountId] = useState(expense.money_account_id ?? "");
   const [busy, start] = useTransition();
+  const [filesBusy, setFilesBusy] = useState(false);
   const matchingAccounts = moneyAccounts.filter(
     (account) =>
       account.is_active &&
@@ -248,8 +251,23 @@ export default function EditExpenseModal({
           <textarea name="note" defaultValue={expense.note ?? ""} className="input mt-1 min-h-20" />
         </label>
 
-        <button type="submit" disabled={busy} className="btn btn-primary w-full !h-12">
-          {busy ? "Saving…" : "Save changes"}
+        {!!expense.attachments?.length && (
+          <div>
+            <span className="field-label">Saved bills ({expense.attachments.length})</span>
+            <div className="mt-1">
+              <AttachmentList files={expense.attachments} canRemove />
+            </div>
+          </div>
+        )}
+        <AttachmentField
+          name="bills"
+          label={expense.attachments?.length ? "Add more bills" : "Bill / receipt"}
+          existingCount={expense.attachments?.length ?? 0}
+          onBusyChange={setFilesBusy}
+        />
+
+        <button type="submit" disabled={busy || filesBusy} className="btn btn-primary w-full !h-12">
+          {busy ? "Saving…" : filesBusy ? "Preparing photos…" : "Save changes"}
         </button>
       </form>
     </div>

@@ -14,6 +14,8 @@ import { bankAmount } from "@/lib/tax";
 import { OTHER_INCOME_LABELS, formatIncomeMoney, formatServiceDate } from "@/lib/income";
 import { deleteCompanyBill, deleteMoneyTransfer, deleteTaxPayment } from "../funds/actions";
 import type { IncomeAgreement } from "@/lib/types";
+import Icon from "@/components/Icons";
+import { ATTACHMENT_COLUMNS, attachmentUrl, type Attachment } from "@/lib/attachments";
 
 export const dynamic = "force-dynamic";
 
@@ -27,7 +29,30 @@ type VatRow = {
   tds: number;
   bank: number;
   account: string;
+  /** VAT bills uploaded for this receipt, if one was cut. */
+  bills: Attachment[];
 };
+
+function FileLinks({ files, label }: { files: Attachment[]; label: string }) {
+  if (!files.length) return null;
+  return (
+    <span className="flex flex-wrap gap-1 mt-1">
+      {files.map((file, index) => (
+        <a
+          key={file.id}
+          href={attachmentUrl(file.id)}
+          target="_blank"
+          rel="noopener"
+          className="pill bill-pill"
+          title={file.file_name}
+        >
+          <Icon name="receipt" size={11} />
+          {files.length > 1 ? `${label} ${index + 1}` : label}
+        </a>
+      ))}
+    </span>
+  );
+}
 
 function monthKey(date: string) {
   return date.slice(0, 7);
@@ -47,10 +72,20 @@ function monthLabel(key: string) {
 export default async function VatPage() {
   const session = await requireSession();
   const canManage = isAppOwner(session);
-  const [ledger, agreements] = await Promise.all([
+  const [ledger, agreements, files] = await Promise.all([
     loadLedger(),
     query<Pick<IncomeAgreement, "id" | "client_name">>(`select id, client_name from public.income_agreements`),
+    query<Attachment>(
+      `select ${ATTACHMENT_COLUMNS} from public.attachments
+        where kind in ('vat_bill', 'company_bill')
+        order by created_at`
+    ),
   ]);
+  const filesByOwner = new Map<string, Attachment[]>();
+  for (const file of files) {
+    const owner = file.payment_id ?? file.company_bill_id!;
+    filesByOwner.set(owner, [...(filesByOwner.get(owner) ?? []), file]);
+  }
   const { accounts, payments, otherIncome, taxPayments, balances, tax, billStatuses } = ledger;
   const clientById = new Map(agreements.map((agreement) => [agreement.id, agreement.client_name]));
   const accountById = new Map(accounts.map((account) => [account.id, account]));
@@ -76,6 +111,7 @@ export default async function VatPage() {
         tds: Number(payment.tds_amount),
         bank: bankAmount(payment),
         account: accountShortName(accountById.get(payment.money_account_id ?? "")),
+        bills: filesByOwner.get(payment.id) ?? [],
       })),
     ...otherIncome
       .filter((row) => Number(row.vat_amount) > 0)
@@ -89,6 +125,7 @@ export default async function VatPage() {
         tds: Number(row.tds_amount),
         bank: bankAmount(row),
         account: accountShortName(accountById.get(row.money_account_id)),
+        bills: [],
       })),
   ].sort((a, b) => b.date.localeCompare(a.date));
 
@@ -174,6 +211,7 @@ export default async function VatPage() {
                           <td className="register-who">
                             <strong>{row.from}</strong>
                             <small>{row.forWhat} · {row.account}</small>
+                            <FileLinks files={row.bills} label="VAT bill" />
                           </td>
                           <td>{money(row.charge)}</td>
                           <td className="register-vat">{money(row.vat)}</td>
@@ -220,6 +258,7 @@ export default async function VatPage() {
                     {item.bill.bill_number ? ` · bill ${item.bill.bill_number}` : ""}
                     {item.bill.paid_by ? ` · paid by ${item.bill.paid_by}` : ""}
                   </div>
+                  <FileLinks files={filesByOwner.get(item.bill.id) ?? []} label="Bill" />
                 </div>
                 <dl className="bill-row-figures">
                   <div><dt>Bill</dt><dd>{money(Number(item.bill.total_amount))}</dd></div>
@@ -230,7 +269,7 @@ export default async function VatPage() {
                 {canManage && (
                   <div className="flex items-center gap-1 justify-end">
                     {item.pending > 0 && <ReimburseBill bills={billStatuses} balances={balances} billId={item.bill.id} />}
-                    <AddCompanyBill bill={item.bill} />
+                    <AddCompanyBill bill={item.bill} files={filesByOwner.get(item.bill.id) ?? []} />
                     {item.reimbursements.length === 0 && (
                       <ConfirmDelete id={item.bill.id} action={deleteCompanyBill} message="Delete this bill?" />
                     )}

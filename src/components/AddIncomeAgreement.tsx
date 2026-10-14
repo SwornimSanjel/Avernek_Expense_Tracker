@@ -26,6 +26,7 @@ export default function AddIncomeAgreement({
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState(1);
   const [hint, setHint] = useState<string | null>(null);
+  const [filesBusy, setFilesBusy] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
   const router = useRouter();
   const [state, action, pending] = useActionState(addIncomeAgreement, initialState);
@@ -45,8 +46,14 @@ export default function AddIncomeAgreement({
       const services = ["has_website", "has_ads", "has_automation"].some(
         (field) => (form.elements.namedItem(field) as HTMLInputElement | null)?.checked
       );
+      const agreementPages =
+        (form.elements.namedItem("agreement_files") as HTMLInputElement | null)?.files?.length ?? 0;
       if (!name) return setHint("Enter the client name to continue.");
       if (!services) return setHint("Select at least one service to continue.");
+      if (filesBusy) return setHint("Wait a moment — the agreement photos are still being prepared.");
+      if (agreementPages === 0) {
+        return setHint("Upload the signed agreement pages to continue — it is required for every new client.");
+      }
     }
     setHint(null);
     setStep((value) => Math.min(AGREEMENT_STEPS.length, value + 1));
@@ -88,7 +95,7 @@ export default function AddIncomeAgreement({
           <div>
             <h2 className="text-lg font-bold">New client</h2>
             <p className="text-xs muted">
-              Three short steps. Only the name and one service are required — everything else can be filled in later.
+              Three short steps. The name, one service and the signed agreement are required — everything else can be filled in later.
             </p>
           </div>
           <button type="button" onClick={() => setOpen(false)} className="icon-btn">
@@ -125,6 +132,7 @@ export default function AddIncomeAgreement({
           includeInitialPayment
           moneyAccounts={moneyAccounts}
           activeStep={step}
+          onFilesBusyChange={setFilesBusy}
         />
 
         {hint && <p className="text-sm" style={{ color: "var(--amber)" }}>{hint}</p>}
@@ -155,8 +163,8 @@ export default function AddIncomeAgreement({
               Continue
             </button>
           ) : (
-            <button key="save" type="submit" disabled={pending} className="btn btn-primary flex-1 !h-12">
-              {pending ? "Saving…" : "Save client"}
+            <button key="save" type="submit" disabled={pending || filesBusy} className="btn btn-primary flex-1 !h-12">
+              {pending ? "Saving…" : filesBusy ? "Preparing photos…" : "Save client"}
             </button>
           )}
         </div>

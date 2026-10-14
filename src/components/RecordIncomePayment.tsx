@@ -15,6 +15,7 @@ import {
 import { accountShortName } from "@/lib/funds";
 import type { IncomeAgreement, IncomePaymentFor, MoneyAccount } from "@/lib/types";
 import TaxBreakdownFields from "./TaxBreakdownFields";
+import AttachmentField from "./AttachmentField";
 
 const initialState: IncomeFormState = { error: null, ok: null };
 
@@ -81,6 +82,7 @@ export default function RecordIncomePayment({
     summary.recurring.nextDuePeriod?.periodStart ?? activeStream?.periods[0]?.periodStart ?? ""
   );
   const [state, action, pending] = useActionState(recordIncomePayment, initialState);
+  const [filesBusy, setFilesBusy] = useState(false);
 
   const selectedPeriod = useMemo(
     () => activeStream?.periods.find((period) => period.periodStart === periodStart) ?? null,
@@ -230,9 +232,17 @@ export default function RecordIncomePayment({
           </label>
         </div>
 
+        <AttachmentField
+          name="vat_bill_files"
+          label="VAT bill"
+          hint="Only if you cut a VAT bill for this payment · photos or PDF · several at once"
+          emptyHelp="No VAT bill issued? Leave this empty — you can add it later from Edit."
+          onBusyChange={setFilesBusy}
+        />
+
         {state.error && <p className="text-sm" style={{ color: "var(--red)" }}>{state.error}</p>}
-        <button disabled={pending || !accountId} className="btn btn-primary w-full !h-12">
-          {pending ? "Recording…" : "Record payment"}
+        <button disabled={pending || !accountId || filesBusy} className="btn btn-primary w-full !h-12">
+          {pending ? "Recording…" : filesBusy ? "Preparing photos…" : "Record payment"}
         </button>
       </form>
     </div>

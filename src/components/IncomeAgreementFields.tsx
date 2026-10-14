@@ -22,6 +22,9 @@ import {
 } from "@/lib/income";
 import { accountShortName } from "@/lib/funds";
 import TaxBreakdownFields from "./TaxBreakdownFields";
+import AttachmentField from "./AttachmentField";
+import AttachmentList from "./AttachmentList";
+import type { Attachment } from "@/lib/attachments";
 import PriceBreakdownTable from "./PriceBreakdownTable";
 
 /**
@@ -54,6 +57,10 @@ type Props = {
   activeStep?: number;
   /** Warn before moving Day 1 when monthly payments already depend on it. */
   recurringPaymentCount?: number;
+  /** Signed agreement pages already saved (edit mode). */
+  agreementFiles?: Attachment[];
+  /** True while chosen photos are still being prepared for upload. */
+  onFilesBusyChange?: (busy: boolean) => void;
 };
 
 export default function IncomeAgreementFields({
@@ -62,6 +69,8 @@ export default function IncomeAgreementFields({
   includeInitialPayment = false,
   activeStep,
   recurringPaymentCount = 0,
+  agreementFiles = [],
+  onFilesBusyChange,
 }: Props) {
   const today = todayIso();
   const visible = (step: number) => activeStep == null || activeStep === step;
@@ -225,6 +234,42 @@ export default function IncomeAgreementFields({
               <option value="USD">USD</option>
             </select>
           </Field>
+        </div>
+
+        {/* The signed agreement: required for a new client, and always
+            addable / removable later — old clients included. */}
+        <div className="mt-4">
+          {agreement && agreementFiles.length > 0 && (
+            <div className="mb-3">
+              <span className="field-label">Signed agreement · {agreementFiles.length} page{agreementFiles.length === 1 ? "" : "s"} saved</span>
+              <div className="mt-1">
+                <AttachmentList
+                  files={agreementFiles}
+                  canRemove
+                  layout="pages"
+                  lastFileWarning="This is the only agreement page. The client will show “Agreement missing” until a new one is uploaded."
+                />
+              </div>
+            </div>
+          )}
+          {agreement && agreementFiles.length === 0 && (
+            <p className="alert alert-warn mb-2 !text-xs">
+              No signed agreement on file for this client yet. Add the pages below.
+            </p>
+          )}
+          <AttachmentField
+            name="agreement_files"
+            label={agreement && agreementFiles.length > 0 ? "Add or replace agreement pages" : "Signed agreement papers"}
+            required={!agreement}
+            existingCount={agreementFiles.length}
+            hint="Photos of each page or one PDF · several pages at once"
+            emptyHelp={
+              agreement
+                ? "To replace a page: add the new one here, then remove the old one above."
+                : "Required. Take a photo of every signed page (2–3 pages is normal) or attach the PDF."
+            }
+            onBusyChange={onFilesBusyChange}
+          />
         </div>
       </FormSection>
 
@@ -579,6 +624,15 @@ export default function IncomeAgreementFields({
                     ))}
                   </select>
                 </Field>
+              </div>
+              <div className="mt-3">
+                <AttachmentField
+                  name="initial_vat_bill_files"
+                  label="VAT bill for this payment"
+                  hint="Only if you cut a VAT bill · photos or PDF · several at once"
+                  emptyHelp="No VAT bill issued? Leave this empty."
+                  onBusyChange={onFilesBusyChange}
+                />
               </div>
             </>
           )}

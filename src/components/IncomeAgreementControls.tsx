@@ -10,6 +10,7 @@ import {
 } from "@/app/(app)/income/actions";
 import type { IncomeAgreement, MoneyAccount } from "@/lib/types";
 import IncomeAgreementFields from "./IncomeAgreementFields";
+import type { Attachment } from "@/lib/attachments";
 import Icon from "./Icons";
 
 const initialState: IncomeFormState = { error: null, ok: null };
@@ -24,6 +25,7 @@ export default function IncomeAgreementControls({
   moneyAccounts,
   paymentCount,
   recurringPaymentCount = 0,
+  agreementFiles = [],
   redirectOnDelete,
   showEditButton,
 }: {
@@ -31,12 +33,15 @@ export default function IncomeAgreementControls({
   moneyAccounts: MoneyAccount[];
   paymentCount: number;
   recurringPaymentCount?: number;
+  /** Signed agreement pages already on file. */
+  agreementFiles?: Attachment[];
   redirectOnDelete?: string;
   /** Show a visible “Edit client” button next to the ⋯ menu. */
   showEditButton?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [filesBusy, setFilesBusy] = useState(false);
   const [state, action, pending] = useActionState(updateIncomeAgreement, initialState);
   const [statusPending, startTransition] = useTransition();
   const wrapper = useRef<HTMLDivElement>(null);
@@ -173,10 +178,12 @@ export default function IncomeAgreementControls({
               agreement={agreement}
               moneyAccounts={moneyAccounts}
               recurringPaymentCount={recurringPaymentCount}
+              agreementFiles={agreementFiles}
+              onFilesBusyChange={setFilesBusy}
             />
             {state.error && <p className="text-sm" style={{ color: "var(--red)" }}>{state.error}</p>}
-            <button disabled={pending} className="btn btn-primary w-full !h-12">
-              {pending ? "Saving…" : "Save changes"}
+            <button disabled={pending || filesBusy} className="btn btn-primary w-full !h-12">
+              {pending ? "Saving…" : filesBusy ? "Preparing photos…" : "Save changes"}
             </button>
           </form>
         </div>

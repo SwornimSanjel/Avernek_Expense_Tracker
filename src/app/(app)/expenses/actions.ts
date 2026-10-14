@@ -12,6 +12,11 @@ import {
   validateShareTotal,
 } from "@/lib/shares";
 import { assertCanManageExpenses } from "@/lib/authz";
+import {
+  assertRoomFor,
+  insertAttachments,
+  readUploads,
+} from "@/lib/attachments.server";
 
 function n(v: FormDataEntryValue | null): number | null {
   if (v == null || v === "") return null;
@@ -19,7 +24,21 @@ function n(v: FormDataEntryValue | null): number | null {
   return Number.isFinite(x) ? x : null;
 }
 
-export async function addExpense(formData: FormData) {
+/**
+ * Returns the error instead of throwing it: in production Next.js replaces a
+ * thrown server-action message with a generic one, and "this file is not a
+ * bill" has to reach the person who picked it.
+ */
+export async function addExpense(formData: FormData): Promise<{ error: string | null }> {
+  try {
+    await saveNewExpense(formData);
+    return { error: null };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Could not save expense" };
+  }
+}
+
+async function saveNewExpense(formData: FormData) {
   const session = await requireSession();
 
   const amount = n(formData.get("amount")) ?? 0;
@@ -50,6 +69,7 @@ export async function addExpense(formData: FormData) {
   }
   const shares = fundingSource === "personal" ? readShareInputs(formData) : [];
   validateShareTotal(shares, amount);
+  const bills = await readUploads(formData, "bills");
 
   // Look up the NRB sell rate for the expense date only when we actually need it
   // (USD, and no exact charge / manual rate supplied).
@@ -120,6 +140,10 @@ export async function addExpense(formData: FormData) {
         client
       );
     }
+
+    // Bills land in the same transaction: an expense is never saved with half
+    // of its attachments, and a rejected bill never leaves an expense behind.
+    await insertAttachments(client, { kind: "expense_bill", id: expenseId }, bills, session.sub);
   });
 
   revalidatePath("/expenses");
@@ -165,6 +189,9 @@ export async function updateExpense(formData: FormData) {
     }
     const shares = fundingSource === "personal" ? readShareInputs(formData) : [];
     validateShareTotal(shares, amount);
+    // Any expense — however old — can gain bills here; existing ones stay.
+    const bills = await readUploads(formData, "bills");
+    await assertRoomFor({ kind: "expense_bill", id }, bills.length);
 
     let nrbRate = null;
     if (currency === "USD" && actualNprCharged == null && manualRate == null) {
@@ -224,6 +251,9 @@ export async function updateExpense(formData: FormData) {
           client
         );
       }
+
+      // New bills are added; existing ones stay until removed explicitly.
+      await insertAttachments(client, { kind: "expense_bill", id }, bills, session.sub);
     });
 
     revalidatePath("/expenses");

@@ -12,6 +12,9 @@ import { accountShortName, type BillStatus, type MoneyAccountBalance } from "@/l
 import { vatInsideTotal } from "@/lib/tax";
 import type { CompanyBill } from "@/lib/types";
 import Icon from "./Icons";
+import AttachmentField from "./AttachmentField";
+import AttachmentList from "./AttachmentList";
+import type { Attachment } from "@/lib/attachments";
 
 const initialState: FundsFormState = { error: null, ok: null };
 
@@ -41,7 +44,16 @@ function ModalHeader({
  * A bill issued in Avernek's name (lawyer, rent, printing...) that someone paid
  * first. Its VAT is input VAT: it lowers the VAT owed to IRD.
  */
-export function AddCompanyBill({ bill, compact }: { bill?: CompanyBill; compact?: boolean }) {
+export function AddCompanyBill({
+  bill,
+  compact,
+  files = [],
+}: {
+  bill?: CompanyBill;
+  compact?: boolean;
+  /** Scans / photos already saved on this bill. */
+  files?: Attachment[];
+}) {
   const [open, setOpen] = useState(false);
   const [state, action, pending] = useActionState(addCompanyBill, initialState);
   const [total, setTotal] = useState(bill ? String(Number(bill.total_amount)) : "");
@@ -49,6 +61,7 @@ export function AddCompanyBill({ bill, compact }: { bill?: CompanyBill; compact?
   const [vat, setVat] = useState(bill ? String(Number(bill.vat_amount)) : "");
   const [vatEdited, setVatEdited] = useState(Boolean(bill));
   const vatValue = !isVatBill ? 0 : vatEdited ? Number(vat || 0) : vatInsideTotal(Number(total || 0));
+  const [filesBusy, setFilesBusy] = useState(false);
 
   useEffect(() => {
     if (state.ok) setOpen(false);
@@ -141,9 +154,24 @@ export function AddCompanyBill({ bill, compact }: { bill?: CompanyBill; compact?
               <input name="note" defaultValue={bill?.note ?? ""} className="input mt-1" />
             </label>
 
+            {files.length > 0 && (
+              <div>
+                <span className="field-label">Saved scans · {files.length}</span>
+                <div className="mt-1">
+                  <AttachmentList files={files} canRemove />
+                </div>
+              </div>
+            )}
+            <AttachmentField
+              name="bill_files"
+              label={files.length ? "Add more pages" : "Bill scan / photo"}
+              existingCount={files.length}
+              onBusyChange={setFilesBusy}
+            />
+
             {state.error && <p className="text-sm" style={{ color: "var(--red)" }}>{state.error}</p>}
-            <button disabled={pending} className="btn btn-primary w-full !h-12">
-              {pending ? "Saving…" : bill ? "Save bill" : "Add bill"}
+            <button disabled={pending || filesBusy} className="btn btn-primary w-full !h-12">
+              {pending ? "Saving…" : filesBusy ? "Preparing photos…" : bill ? "Save bill" : "Add bill"}
             </button>
           </form>
         </div>

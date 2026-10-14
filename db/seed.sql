@@ -11,6 +11,8 @@ insert into public.categories (name, color) values
   ('Office Supplies',    '#64748b'),
   ('Phone / Recharge',   '#0f766e'),
   ('Client-specific',    '#0d9488'),
+  ('Salary',             '#b45309'),
+  ('Food',               '#c2410c'),
   ('Miscellaneous',      '#94a3b8')
 on conflict (name) do nothing;
 
@@ -19,8 +21,8 @@ insert into public.vendors (name, category_id, default_currency)
 select v.name, c.id, v.cur
 from (values
   ('n8n',              'Software / SaaS',  'USD'),
-  ('OpenAI',           'AI / Token Usage', 'USD'),
-  ('Anthropic',        'AI / Token Usage', 'USD'),
+  ('OpenAI (GPT)',     'AI / Token Usage', 'USD'),
+  ('Anthropic (Claude)', 'AI / Token Usage', 'USD'),
   ('Vercel',           'Software / SaaS',  'USD'),
   ('Domain Registrar', 'Software / SaaS',  'USD'),
   ('Google Drive',     'Software / SaaS',  'USD'),
