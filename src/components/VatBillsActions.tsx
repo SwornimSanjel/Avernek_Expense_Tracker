@@ -154,7 +154,7 @@ export function AddCompanyBill({
               <input name="note" defaultValue={bill?.note ?? ""} className="input mt-1" />
             </label>
 
-            <BillDocuments name="bill_files" title="Bill scan / photo" existing={files} onBusyChange={setFilesBusy} />
+            <BillDocuments name="bill_files" kind="company_bill" title="Bill scan / photo" existing={files} onBusyChange={setFilesBusy} />
 
             {state.error && <p className="text-sm" style={{ color: "var(--red)" }}>{state.error}</p>}
             <button disabled={pending || filesBusy} className="btn btn-primary w-full !h-12">

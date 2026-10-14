@@ -1,22 +1,30 @@
 import { createHash } from "node:crypto";
+import type { PoolClient } from "pg";
 import {
   ATTACHMENT_MAX_BYTES,
   ATTACHMENT_MAX_FILES,
-  ATTACHMENT_MAX_TOTAL_BYTES,
   cleanFileName,
   formatFileSize,
   sniffAttachmentType,
-  type AttachmentContentType,
+  type Attachment,
   type AttachmentKind,
 } from "@/lib/attachments";
 import { one, query } from "@/lib/db";
 
 /**
- * Server-side half of attachments: read uploaded files out of a form, prove
- * what they are, and store them against exactly one owner record.
+ * Server-side half of attachments.
+ *
+ * Files are uploaded on their own, one per request, to POST /api/files the
+ * moment they are picked (see stageUpload). That stores the bytes as a
+ * "staged" row: it has a kind but no owner. Forms then post only the staged
+ * ids, and saving the record claims them by setting the owner column — inside
+ * the record's own transaction, so a record is never saved with half its files.
+ *
+ * Keeping photo bytes out of the form posts matters: Cloudflare's firewall
+ * occasionally blocked page posts that carried them.
  */
 
-type Queryable = { query: (text: string, params?: unknown[]) => Promise<unknown> };
+type Db = Pick<PoolClient, "query">;
 
 export type AttachmentOwner =
   | { kind: "expense_bill"; id: string }
@@ -31,59 +39,79 @@ const OWNER_COLUMN: Record<AttachmentKind, string> = {
   company_bill: "company_bill_id",
 };
 
-export type FileUpload = {
-  fileName: string;
-  contentType: AttachmentContentType;
-  sizeBytes: number;
-  sha256: string;
-  data: Buffer;
-};
+export const ATTACHMENT_KINDS = Object.keys(OWNER_COLUMN) as AttachmentKind[];
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const STAGED = "expense_id is null and agreement_id is null and payment_id is null and company_bill_id is null";
+
+/** A staged upload referenced by a form. */
+export type FileUpload = { id: string };
+
+// -----------------------------------------------------------------------------
+// Upload: store one file as staged
+// -----------------------------------------------------------------------------
 
 /**
- * Read the files posted under `field`. No file is fine. Anything that is not a
- * real PDF or image, or is too large, is rejected with a message that names the
- * file — before any record is written.
+ * Prove what a file is and store it, unattached. Returns its metadata.
+ * Also clears staged files older than a day that no form ever claimed.
  */
-export async function readUploads(formData: FormData, field: string): Promise<FileUpload[]> {
-  const files = formData
-    .getAll(field)
-    .filter((value): value is File => value instanceof File && value.size > 0);
-  if (files.length === 0) return [];
-  if (files.length > ATTACHMENT_MAX_FILES) {
-    throw new Error(`Attach at most ${ATTACHMENT_MAX_FILES} files at once.`);
-  }
-  const total = files.reduce((sum, file) => sum + file.size, 0);
-  if (total > ATTACHMENT_MAX_TOTAL_BYTES) {
+export async function stageUpload(input: {
+  kind: AttachmentKind;
+  fileName: string;
+  data: Buffer;
+  uploadedBy: string;
+}): Promise<Attachment> {
+  if (input.data.length === 0) throw new Error("That file is empty.");
+  if (input.data.length > ATTACHMENT_MAX_BYTES) {
     throw new Error(
-      `These files add up to ${formatFileSize(total)}; save at most ${formatFileSize(ATTACHMENT_MAX_TOTAL_BYTES)} at a time.`
+      `${input.fileName} is ${formatFileSize(input.data.length)}; each file must be under ${formatFileSize(ATTACHMENT_MAX_BYTES)}.`
     );
   }
-
-  const uploads: FileUpload[] = [];
-  const seen = new Set<string>();
-  for (const file of files) {
-    if (file.size > ATTACHMENT_MAX_BYTES) {
-      throw new Error(
-        `${file.name} is ${formatFileSize(file.size)}; each file must be under ${formatFileSize(ATTACHMENT_MAX_BYTES)}.`
-      );
-    }
-    const data = Buffer.from(await file.arrayBuffer());
-    const contentType = sniffAttachmentType(data);
-    if (!contentType) {
-      throw new Error(`${file.name} is not a PDF or an image (JPG, PNG, WEBP, HEIC).`);
-    }
-    const sha256 = createHash("sha256").update(data).digest("hex");
-    if (seen.has(sha256)) continue;
-    seen.add(sha256);
-    uploads.push({
-      fileName: cleanFileName(file.name),
-      contentType,
-      sizeBytes: data.length,
-      sha256,
-      data,
-    });
+  const contentType = sniffAttachmentType(input.data);
+  if (!contentType) {
+    throw new Error(`${input.fileName} is not a PDF or an image (JPG, PNG, WEBP, HEIC).`);
   }
-  return uploads;
+  const sha256 = createHash("sha256").update(input.data).digest("hex");
+
+  const row = await one<Attachment>(
+    `insert into public.attachments
+       (kind, file_name, content_type, size_bytes, sha256, data, uploaded_by)
+     values ($1,$2,$3,$4,$5,$6,$7)
+     returning id, kind, expense_id, agreement_id, payment_id, company_bill_id,
+               file_name, content_type, size_bytes, created_at`,
+    [input.kind, cleanFileName(input.fileName), contentType, input.data.length, sha256, input.data, input.uploadedBy]
+  );
+
+  await query(
+    `delete from public.attachments where ${STAGED} and created_at < now() - interval '1 day'`
+  );
+  return row!;
+}
+
+// -----------------------------------------------------------------------------
+// Forms: read staged ids, check room, claim them
+// -----------------------------------------------------------------------------
+
+/**
+ * The staged files a form posted under `field` (one id per value). No file is
+ * fine. Raw file bytes are refused: only a page from before this change would
+ * send them, and it is told to reload.
+ */
+export async function readUploads(formData: FormData, field: string): Promise<FileUpload[]> {
+  const values = formData.getAll(field);
+  if (values.some((value) => value instanceof File && value.size > 0)) {
+    throw new Error("This page is out of date. Reload it and add the files again.");
+  }
+  const ids = [
+    ...new Set(
+      values.filter((value): value is string => typeof value === "string" && value.length > 0)
+    ),
+  ];
+  if (ids.length > ATTACHMENT_MAX_FILES) {
+    throw new Error(`Attach at most ${ATTACHMENT_MAX_FILES} files at once.`);
+  }
+  if (!ids.every((id) => UUID_RE.test(id))) throw new Error("One of the uploaded files was not found.");
+  return ids.map((id) => ({ id }));
 }
 
 /** How many files the owner already has. */
@@ -108,33 +136,52 @@ export async function assertRoomFor(owner: AttachmentOwner, adding: number) {
 }
 
 /**
- * Store the files. Run inside the owner's transaction so a record is never
- * saved with half its files. The same file twice on one owner is skipped.
+ * Attach staged files to their owner. Run inside the owner's transaction.
+ * A file identical to one the owner already has is dropped instead of being
+ * attached twice.
  */
 export async function insertAttachments(
-  client: Queryable,
+  client: Db,
   owner: AttachmentOwner,
   uploads: FileUpload[],
-  uploadedBy: string
+  _uploadedBy: string
 ) {
+  if (uploads.length === 0) return;
+  const ids = uploads.map((upload) => upload.id);
   const column = OWNER_COLUMN[owner.kind];
-  for (const upload of uploads) {
-    await client.query(
-      `insert into public.attachments
-         (kind, ${column}, file_name, content_type, size_bytes, sha256, data, uploaded_by)
-       values ($1,$2,$3,$4,$5,$6,$7,$8)
-       on conflict do nothing`,
-      [
-        owner.kind,
-        owner.id,
-        upload.fileName,
-        upload.contentType,
-        upload.sizeBytes,
-        upload.sha256,
-        upload.data,
-        uploadedBy,
-      ]
-    );
+
+  const staged = await client.query<{ id: string; sha256: string }>(
+    `select id, sha256 from public.attachments
+      where id = any($1::uuid[]) and kind = $2 and ${STAGED}
+      for update`,
+    [ids, owner.kind]
+  );
+  if (staged.rows.length !== ids.length) {
+    throw new Error("Some uploaded files expired or were already used. Remove them, add them again and save.");
+  }
+
+  const existing = await client.query<{ sha256: string }>(
+    `select sha256 from public.attachments where ${column} = $1`,
+    [owner.id]
+  );
+  const seen = new Set(existing.rows.map((row) => row.sha256));
+  const keep: string[] = [];
+  const duplicate: string[] = [];
+  for (const row of staged.rows) {
+    if (seen.has(row.sha256)) duplicate.push(row.id);
+    else {
+      seen.add(row.sha256);
+      keep.push(row.id);
+    }
+  }
+  if (duplicate.length) {
+    await client.query(`delete from public.attachments where id = any($1::uuid[])`, [duplicate]);
+  }
+  if (keep.length) {
+    await client.query(`update public.attachments set ${column} = $1 where id = any($2::uuid[])`, [
+      owner.id,
+      keep,
+    ]);
   }
 }
 
@@ -154,8 +201,6 @@ export async function readPrefixedUploads(
   }
   return result;
 }
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * VAT bills posted from a client's "VAT bills" tab or panel: one field per
@@ -181,7 +226,7 @@ export async function readClientVatBills(
 }
 
 export async function insertClientVatBills(
-  client: Queryable,
+  client: Db,
   byPayment: Map<string, FileUpload[]>,
   uploadedBy: string
 ) {

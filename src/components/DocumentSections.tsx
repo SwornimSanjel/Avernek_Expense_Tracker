@@ -50,6 +50,7 @@ export function AgreementDocuments({
       </header>
       <FileUploader
         name={name}
+        kind="client_agreement"
         variant="pages"
         existing={existing}
         lastFileWarning="This is the only page on file."
@@ -118,6 +119,7 @@ export function VatBillDocuments({
       {cut && (
         <FileUploader
           name={name}
+          kind="vat_bill"
           variant="bill"
           existing={existing}
           addLabel="Add VAT bill"
@@ -131,11 +133,13 @@ export function VatBillDocuments({
 /** Bill / receipt for an expense or a company bill. Optional, compact. */
 export function BillDocuments({
   name,
+  kind = "expense_bill",
   existing = [],
   title = "Bill / receipt",
   onBusyChange,
 }: {
   name: string;
+  kind?: "expense_bill" | "company_bill";
   existing?: Attachment[];
   title?: string;
   onBusyChange?: (busy: boolean) => void;
@@ -156,7 +160,7 @@ export function BillDocuments({
           </span>
         )}
       </header>
-      <FileUploader name={name} variant="bill" existing={existing} addLabel="Add bill" onBusyChange={onBusyChange} />
+      <FileUploader name={name} kind={kind} variant="bill" existing={existing} addLabel="Add bill" onBusyChange={onBusyChange} />
     </section>
   );
 }
@@ -237,6 +241,7 @@ export function ClientVatBills({
                 </div>
                 <FileUploader
                   name={`vat_bill_files:${row.id}`}
+                  kind="vat_bill"
                   variant="bill"
                   existing={existing}
                   readOnly={readOnly}
