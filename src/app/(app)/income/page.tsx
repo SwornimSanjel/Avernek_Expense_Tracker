@@ -78,7 +78,7 @@ export default async function IncomePage({
   const filters = await searchParams;
   const today = todayIso();
 
-  const [agreements, ledger, agreementFileRows, people] = await Promise.all([
+  const [agreements, ledger, agreementFileRows, people, vatBillRows] = await Promise.all([
     query<IncomeAgreement>(
       `select * from public.income_agreements
        order by case status when 'active' then 0 when 'pending' then 1 when 'paused' then 2 else 3 end,
@@ -91,6 +91,11 @@ export default async function IncomePage({
         order by created_at`
     ),
     query<{ name: string }>(`select name from public.users order by name`),
+    query<Attachment>(
+      `select ${ATTACHMENT_COLUMNS} from public.attachments
+        where kind = 'vat_bill'
+        order by created_at`
+    ),
   ]);
   const openLoans = ledger.loans.filter((loan) => !loan.repaid_on);
   const agreementFilesById = new Map<string, Attachment[]>();
@@ -382,11 +387,6 @@ export default async function IncomePage({
                         <h2 className="text-base font-bold truncate">{agreement.client_name}</h2>
                         <StatusPill kind="agreement" value={agreement.status} />
                         <StatusPill kind="billing" value={summary.overallStatus} />
-                        {!agreementFilesById.has(agreement.id) && (
-                          <span className="status-pill status-pill-warn" title="No signed agreement uploaded yet">
-                            No agreement
-                          </span>
-                        )}
                       </div>
                       <div className="mt-1.5">
                         <ServiceBadges services={summary.services} />
@@ -409,6 +409,8 @@ export default async function IncomePage({
                           paymentCount={agreementPayments.length}
                           recurringPaymentCount={recurringPaymentCount}
                           agreementFiles={agreementFilesById.get(agreement.id) ?? []}
+                          payments={agreementPayments}
+                          vatBills={vatBillRows}
                         />
                       </>
                     )}

@@ -1707,3 +1707,35 @@ details > summary:hover { background: rgb(255 255 255 / 0.018); }
   .uploader { --tile: 96px; }
   .uploader-pages { --tile: 120px; }
 }
+
+/* ----- client VAT bills: one row per payment that carried VAT ----- */
+.vat-bill-rows { display: flex; flex-direction: column; gap: 10px; }
+.vat-bill-rows > li {
+  display: grid;
+  grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
+  align-items: start;
+  gap: 16px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+}
+.vat-bill-row-info { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
+.vat-bill-row-info strong { font-size: 13px; font-weight: 680; }
+.vat-bill-row-info span { color: var(--muted); font-size: 11.5px; }
+.vat-bill-row-info em { margin-top: 4px; color: var(--muted-2); font-size: 11px; font-style: normal; font-weight: 600; }
+.vat-bill-row-info em.is-done { color: var(--green); }
+.vat-bill-rows .uploader { --tile: 96px; }
+.vat-bill-rows .uploader-foot { display: none; }
+.doc-empty {
+  padding: 18px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 12px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
+}
+@media (max-width: 720px) {
+  .vat-bill-rows > li { grid-template-columns: 1fr; }
+}

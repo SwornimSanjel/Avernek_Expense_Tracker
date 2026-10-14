@@ -843,3 +843,32 @@ export function suggestedBillingStart(
     ? agreement.recurring_billing_start_date
     : liveDate;
 }
+
+/** One payment that carried VAT, described for the "VAT bills" section. */
+export type VatBillPaymentRow = { id: string; title: string; detail: string };
+
+/**
+ * Payments that carried VAT — the only ones a VAT bill can belong to — newest
+ * first, labelled so the person uploading knows which receipt each bill is for.
+ */
+export function vatBillPaymentRows(payments: IncomePayment[], currency: string): VatBillPaymentRow[] {
+  return payments
+    .filter((payment) => Number(payment.vat_amount ?? 0) > 0)
+    .sort((a, b) => b.paid_on.localeCompare(a.paid_on) || b.created_at.localeCompare(a.created_at))
+    .map((payment) => ({
+      id: payment.id,
+      title: `${formatServiceDate(payment.paid_on)} · ${
+        payment.payment_for === "setup"
+          ? "Setup · month 1"
+          : payment.payment_for === "website"
+            ? "Website"
+            : payment.billing_period_start
+              ? `Monthly fee · from ${formatServiceDate(payment.billing_period_start)}`
+              : "Monthly fee"
+      }`,
+      detail: `${formatIncomeMoney(Number(payment.amount), currency)} + VAT ${formatIncomeMoney(
+        Number(payment.vat_amount),
+        currency
+      )}${payment.reference ? ` · bill no. ${payment.reference}` : ""}`,
+    }));
+}

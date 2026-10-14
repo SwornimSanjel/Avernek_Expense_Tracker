@@ -118,6 +118,16 @@ export default async function ClientsPage({
         [selected.id]
       )
     : [];
+  const selectedVatBills = selected
+    ? await query<Attachment>(
+        `select ${ATTACHMENT_COLUMNS.split(", ").map((column) => `a.${column}`).join(", ")}
+           from public.attachments a
+           join public.income_payments p on p.id = a.payment_id
+          where a.kind = 'vat_bill' and p.agreement_id = $1
+          order by a.created_at`,
+        [selected.id]
+      )
+    : [];
   const collected = new Map<string, number>();
   const outstanding = new Map<string, number>();
   const recurring = new Map<string, number>();
@@ -226,6 +236,8 @@ export default async function ClientsPage({
                         redirectOnDelete="/clients"
                         showEditButton
                         agreementFiles={selectedAgreementFiles}
+                        payments={selectedPayments}
+                        vatBills={selectedVatBills}
                       />
                     )}
                   </div>

@@ -8,7 +8,8 @@ import {
   updateIncomeAgreement,
   type IncomeFormState,
 } from "@/app/(app)/income/actions";
-import type { IncomeAgreement, MoneyAccount } from "@/lib/types";
+import type { IncomeAgreement, IncomePayment, MoneyAccount } from "@/lib/types";
+import { vatBillPaymentRows } from "@/lib/income";
 import IncomeAgreementFields, { AGREEMENT_TABS, type AgreementSection } from "./IncomeAgreementFields";
 import type { Attachment } from "@/lib/attachments";
 import Icon from "./Icons";
@@ -26,6 +27,8 @@ export default function IncomeAgreementControls({
   paymentCount,
   recurringPaymentCount = 0,
   agreementFiles = [],
+  payments = [],
+  vatBills = [],
   redirectOnDelete,
   showEditButton,
 }: {
@@ -35,12 +38,28 @@ export default function IncomeAgreementControls({
   recurringPaymentCount?: number;
   /** Signed agreement pages already on file. */
   agreementFiles?: Attachment[];
+  /** This client's payments, for the VAT bills tab. */
+  payments?: IncomePayment[];
+  /** VAT bills already saved on those payments. */
+  vatBills?: Attachment[];
   redirectOnDelete?: string;
   /** Show a visible “Edit client” button next to the ⋯ menu. */
   showEditButton?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [tab, setTab] = useState<AgreementSection>("client");
+  const vatPayments = vatBillPaymentRows(
+    payments.filter((payment) => payment.agreement_id === agreement.id),
+    agreement.currency
+  );
+  const vatBillsByPayment: Record<string, Attachment[]> = {};
+  for (const bill of vatBills) {
+    if (bill.payment_id) (vatBillsByPayment[bill.payment_id] ??= []).push(bill);
+  }
+  const tabCount: Partial<Record<AgreementSection, number>> = {
+    agreement: agreementFiles.length,
+    vatbills: vatPayments.reduce((sum, row) => sum + (vatBillsByPayment[row.id]?.length ?? 0), 0),
+  };
   const [menuOpen, setMenuOpen] = useState(false);
   const [filesBusy, setFilesBusy] = useState(false);
   const [state, action, pending] = useActionState(updateIncomeAgreement, initialState);
@@ -187,12 +206,9 @@ export default function IncomeAgreementControls({
                     className={`sheet-tab ${tab === item.key ? "sheet-tab-on" : ""}`}
                   >
                     {item.title}
-                    {item.key === "documents" &&
-                      (agreementFiles.length > 0 ? (
-                        <span className="sheet-tab-count">{agreementFiles.length}</span>
-                      ) : (
-                        <span className="sheet-tab-dot" title="No agreement uploaded yet" />
-                      ))}
+                    {(tabCount[item.key] ?? 0) > 0 && (
+                      <span className="sheet-tab-count">{tabCount[item.key]}</span>
+                    )}
                   </button>
                 ))}
               </nav>
@@ -206,6 +222,8 @@ export default function IncomeAgreementControls({
                 agreementFiles={agreementFiles}
                 onFilesBusyChange={setFilesBusy}
                 activeSection={tab}
+                vatPayments={vatPayments}
+                vatBillsByPayment={vatBillsByPayment}
               />
             </div>
 

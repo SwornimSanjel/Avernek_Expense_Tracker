@@ -9,7 +9,7 @@ import {
   type AttachmentContentType,
   type AttachmentKind,
 } from "@/lib/attachments";
-import { one } from "@/lib/db";
+import { one, query } from "@/lib/db";
 
 /**
  * Server-side half of attachments: read uploaded files out of a form, prove
@@ -135,5 +135,57 @@ export async function insertAttachments(
         uploadedBy,
       ]
     );
+  }
+}
+
+/**
+ * Read several upload fields at once, one per owner, named `${prefix}${ownerId}`
+ * (e.g. `vat_bill_files:<paymentId>`). Returns only owners that got files.
+ */
+export async function readPrefixedUploads(
+  formData: FormData,
+  prefix: string
+): Promise<Map<string, FileUpload[]>> {
+  const fields = [...new Set([...formData.keys()].filter((key) => key.startsWith(prefix)))];
+  const result = new Map<string, FileUpload[]>();
+  for (const field of fields) {
+    const uploads = await readUploads(formData, field);
+    if (uploads.length) result.set(field.slice(prefix.length), uploads);
+  }
+  return result;
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * VAT bills posted from a client's "VAT bills" tab or panel: one field per
+ * payment. Every payment must belong to `agreementId` and have room left.
+ */
+export async function readClientVatBills(
+  formData: FormData,
+  agreementId: string
+): Promise<Map<string, FileUpload[]>> {
+  const byPayment = await readPrefixedUploads(formData, "vat_bill_files:");
+  if (byPayment.size === 0) return byPayment;
+  const ids = [...byPayment.keys()];
+  if (!ids.every((id) => UUID_RE.test(id))) throw new Error("That payment was not found.");
+  const owned = await query<{ id: string }>(
+    `select id from public.income_payments where agreement_id = $1 and id = any($2::uuid[])`,
+    [agreementId, ids]
+  );
+  if (owned.length !== ids.length) {
+    throw new Error("A VAT bill was attached to a payment that does not belong to this client.");
+  }
+  for (const [id, uploads] of byPayment) await assertRoomFor({ kind: "vat_bill", id }, uploads.length);
+  return byPayment;
+}
+
+export async function insertClientVatBills(
+  client: Queryable,
+  byPayment: Map<string, FileUpload[]>,
+  uploadedBy: string
+) {
+  for (const [id, uploads] of byPayment) {
+    await insertAttachments(client, { kind: "vat_bill", id }, uploads, uploadedBy);
   }
 }

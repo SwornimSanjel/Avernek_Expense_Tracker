@@ -7,6 +7,8 @@ import { assertAppOwner } from "@/lib/authz";
 import {
   assertRoomFor,
   insertAttachments,
+  insertClientVatBills,
+  readClientVatBills,
   readUploads,
   type AttachmentOwner,
   type FileUpload,
@@ -567,6 +569,14 @@ export async function updateIncomeAgreement(
   });
   if ("error" in agreementFiles) return { error: agreementFiles.error, ok: null };
 
+  // VAT bills from the "VAT bills" tab — one field per payment of this client.
+  let vatBills: Awaited<ReturnType<typeof readClientVatBills>>;
+  try {
+    vatBills = await readClientVatBills(formData, id);
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Could not read the VAT bills.", ok: null };
+  }
+
   const columns = agreementColumns(value);
   const names = Object.keys(columns);
   const assignments = names.map((name, index) => `${name} = $${index + 1}`);
@@ -582,6 +592,7 @@ export async function updateIncomeAgreement(
     );
     if (!result.rowCount) return 0;
     await insertAttachments(client, { kind: "client_agreement", id }, agreementFiles.uploads, session.sub);
+    await insertClientVatBills(client, vatBills, session.sub);
     return result.rowCount;
   });
   if (!changed) return { error: "Client no longer exists.", ok: null };

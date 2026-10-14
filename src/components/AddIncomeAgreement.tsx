@@ -29,6 +29,9 @@ export default function AddIncomeAgreement({
   const [hint, setHint] = useState<string | null>(null);
   const [filesBusy, setFilesBusy] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
+  // Set by "Save now": every step after the first is optional, so the client
+  // can be saved from any of them without clicking through the rest.
+  const saveNow = useRef(false);
   const router = useRouter();
   const [state, action, pending] = useActionState(addIncomeAgreement, initialState);
 
@@ -72,10 +75,11 @@ export default function AddIncomeAgreement({
         // Only the "Save client" button on the last step may save. Enter in a
         // field moves to the next step instead of saving half a client.
         onSubmit={(event) => {
-          if (!isLast) {
+          if (!isLast && !saveNow.current) {
             event.preventDefault();
             next();
           }
+          saveNow.current = false;
         }}
         onKeyDown={(event) => {
           const target = event.target as HTMLElement;
@@ -158,6 +162,19 @@ export default function AddIncomeAgreement({
           )}
           {/* Distinct keys: React must not reuse the Continue <button> as the
               submit button, or the same click both advances and saves. */}
+          {!isLast && step > 1 && (
+            <button
+              key="save-now"
+              type="submit"
+              disabled={pending || filesBusy}
+              onClick={() => {
+                saveNow.current = true;
+              }}
+              className="btn !h-11"
+            >
+              {pending ? "Saving…" : "Save client"}
+            </button>
+          )}
           {!isLast ? (
             <button
               key="continue"

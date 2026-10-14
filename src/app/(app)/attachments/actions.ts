@@ -8,6 +8,8 @@ import type { AttachmentKind } from "@/lib/attachments";
 import {
   assertRoomFor,
   insertAttachments,
+  insertClientVatBills,
+  readClientVatBills,
   readUploads,
   type AttachmentOwner,
 } from "@/lib/attachments.server";
@@ -70,6 +72,27 @@ export async function uploadAttachments(
     };
   } catch (error) {
     return { error: error instanceof Error ? error.message : "Could not save the files.", ok: null };
+  }
+}
+
+/** VAT bills for one or more of a client's payments, from the client page. */
+export async function uploadClientVatBills(
+  _previous: AttachmentFormState,
+  formData: FormData
+): Promise<AttachmentFormState> {
+  try {
+    const session = await requireSession();
+    assertAppOwner(session);
+    const agreementId = String(formData.get("agreement_id") ?? "");
+    if (!agreementId) return { error: "Client not found.", ok: null };
+    const byPayment = await readClientVatBills(formData, agreementId);
+    const count = [...byPayment.values()].reduce((sum, uploads) => sum + uploads.length, 0);
+    if (count === 0) return { error: "Choose at least one VAT bill.", ok: null };
+    await transaction((client) => insertClientVatBills(client, byPayment, session.sub));
+    revalidateFor("vat_bill");
+    return { error: null, ok: `${count} VAT bill file${count === 1 ? "" : "s"} saved.`, savedAt: Date.now() };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Could not save the VAT bills.", ok: null };
   }
 }
 

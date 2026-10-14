@@ -13,6 +13,7 @@ import EditIncomePayment from "@/components/EditIncomePayment";
 import DeleteIncomePayment from "@/components/DeleteIncomePayment";
 import MarkServiceLive from "@/components/MarkServiceLive";
 import AgreementUploadPanel from "@/components/AgreementUploadPanel";
+import ClientVatBillsPanel from "@/components/ClientVatBillsPanel";
 import { ATTACHMENT_COLUMNS, attachmentUrl, type Attachment } from "@/lib/attachments";
 import PriceBreakdownTable from "@/components/PriceBreakdownTable";
 import { bankAmount } from "@/lib/tax";
@@ -32,6 +33,7 @@ import {
   todayIso,
   type BillingBucket,
   type RecurringStreamSummary,
+  vatBillPaymentRows,
 } from "@/lib/income";
 import type {
   Expense,
@@ -157,6 +159,8 @@ export default async function ClientBillingPage({
                 redirectOnDelete="/income"
                 showEditButton
                 agreementFiles={agreementFiles}
+                payments={payments}
+                vatBills={vatBills}
               />
             </div>
           ) : undefined
@@ -170,9 +174,6 @@ export default async function ClientBillingPage({
           <div className="mt-2 flex items-center gap-2 flex-wrap">
             <StatusPill kind="agreement" value={agreement.status} />
             <StatusPill kind="billing" value={summary.overallStatus} prefix="Billing:" />
-            {agreementFiles.length === 0 && (
-              <a href="#agreement-papers" className="status-pill status-pill-warn">No agreement uploaded</a>
-            )}
           </div>
           <div className="mt-3">
             <ServiceBadges services={summary.services} size="md" />
@@ -227,8 +228,14 @@ export default async function ClientBillingPage({
       </section>
 
       {/* ------------------------------------------------- agreement papers */}
-      <section id="agreement-papers">
+      <section id="documents" className="space-y-3">
         <AgreementUploadPanel agreementId={agreement.id} files={agreementFiles} canManage={canManage} />
+        <ClientVatBillsPanel
+          agreementId={agreement.id}
+          payments={vatBillPaymentRows(payments, currency)}
+          billsByPayment={Object.fromEntries(vatBillsByPayment)}
+          canManage={canManage}
+        />
       </section>
 
       {/* ------------------------------------------------------- key dates */}

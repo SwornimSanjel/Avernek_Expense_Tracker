@@ -19,10 +19,11 @@ import {
   goLiveDate,
   isValidDate,
   todayIso,
+  type VatBillPaymentRow,
 } from "@/lib/income";
 import { accountShortName } from "@/lib/funds";
 import TaxBreakdownFields from "./TaxBreakdownFields";
-import { AgreementDocuments, VatBillDocuments } from "./DocumentSections";
+import { AgreementDocuments, ClientVatBills, VatBillDocuments, useBusyTracker } from "./DocumentSections";
 import type { Attachment } from "@/lib/attachments";
 import PriceBreakdownTable from "./PriceBreakdownTable";
 
@@ -43,21 +44,27 @@ import PriceBreakdownTable from "./PriceBreakdownTable";
  * stays mounted (inactive ones are hidden) so one form post carries all of it.
  */
 
-export type AgreementSection = "client" | "pricing" | "documents" | "payment";
+export type AgreementSection = "client" | "pricing" | "payment" | "agreement" | "vatbills";
 
-/** Add-client wizard steps. */
+/**
+ * Add-client wizard steps. Only the first is required; the documents come
+ * last and are two separate, optional steps — some clients never sign an
+ * agreement and some never get a VAT bill.
+ */
 export const AGREEMENT_STEPS: { key: AgreementSection; title: string; hint: string }[] = [
   { key: "client", title: "Client", hint: "Who and what they bought" },
   { key: "pricing", title: "Prices & dates", hint: "What was agreed and when" },
-  { key: "documents", title: "Agreement", hint: "Optional — signed pages" },
   { key: "payment", title: "Money received", hint: "Optional — Rs. 0 is fine" },
+  { key: "agreement", title: "Agreement", hint: "Optional — signed pages" },
+  { key: "vatbills", title: "VAT bill", hint: "Optional — if you cut one" },
 ];
 
 /** Edit-sheet tabs. */
 export const AGREEMENT_TABS: { key: AgreementSection; title: string }[] = [
   { key: "client", title: "Client" },
   { key: "pricing", title: "Prices & dates" },
-  { key: "documents", title: "Agreement papers" },
+  { key: "agreement", title: "Agreement" },
+  { key: "vatbills", title: "VAT bills" },
 ];
 
 type Props = {
@@ -73,6 +80,9 @@ type Props = {
   agreementFiles?: Attachment[];
   /** True while chosen photos are still being prepared for upload. */
   onFilesBusyChange?: (busy: boolean) => void;
+  /** Edit mode: the client's payments that carried VAT, for the VAT bills tab. */
+  vatPayments?: VatBillPaymentRow[];
+  vatBillsByPayment?: Record<string, Attachment[]>;
 };
 
 export default function IncomeAgreementFields({
@@ -83,7 +93,10 @@ export default function IncomeAgreementFields({
   recurringPaymentCount = 0,
   agreementFiles = [],
   onFilesBusyChange,
+  vatPayments = [],
+  vatBillsByPayment = {},
 }: Props) {
+  const track = useBusyTracker(onFilesBusyChange);
   const today = todayIso();
   const visible = (section: AgreementSection) => activeSection === section;
   // Step numbers only make sense in the add wizard, not in edit tabs.
@@ -506,10 +519,6 @@ export default function IncomeAgreementFields({
         </details>
       </FormSection>
 
-      {/* ------------------------------------------------------- documents */}
-      <div hidden={!visible("documents")}>
-        <AgreementDocuments existing={agreementFiles} onBusyChange={onFilesBusyChange} />
-      </div>
 
       {/* ------------------------------------------------------------ payment */}
       {includeInitialPayment && (
@@ -607,9 +616,7 @@ export default function IncomeAgreementFields({
                   </select>
                 </Field>
               </div>
-              <div className="mt-3">
-                <VatBillDocuments name="initial_vat_bill_files" onBusyChange={onFilesBusyChange} />
-              </div>
+
             </>
           )}
 
@@ -655,6 +662,33 @@ export default function IncomeAgreementFields({
           </dl>
         </FormSection>
       )}
+
+      {/* --------------------------------------------- signed agreement */}
+      <div hidden={!visible("agreement")}>
+        <AgreementDocuments existing={agreementFiles} onBusyChange={track("agreement")} />
+      </div>
+
+      {/* ---------------------------------------------------- VAT bills */}
+      <div hidden={!visible("vatbills")}>
+        {includeInitialPayment ? (
+          paidYet ? (
+            <VatBillDocuments name="initial_vat_bill_files" onBusyChange={track("opening-vat")} />
+          ) : (
+            <section className="doc-section doc-section-vat">
+              <p className="doc-empty">
+                No payment recorded in “Money received”, so there is no VAT bill yet. Attach it when you record the
+                payment — or go back a step if the client has already paid.
+              </p>
+            </section>
+          )
+        ) : (
+          <ClientVatBills
+            payments={vatPayments}
+            billsByPayment={vatBillsByPayment}
+            onBusyChange={track("vat-bills")}
+          />
+        )}
+      </div>
     </div>
   );
 }

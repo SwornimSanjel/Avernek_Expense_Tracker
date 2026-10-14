@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import type { Attachment } from "@/lib/attachments";
+import type { VatBillPaymentRow } from "@/lib/income";
 import FileUploader from "./FileUploader";
 import Icon from "./Icons";
 
@@ -156,6 +157,103 @@ export function BillDocuments({
         )}
       </header>
       <FileUploader name={name} variant="bill" existing={existing} addLabel="Add bill" onBusyChange={onBusyChange} />
+    </section>
+  );
+}
+
+/**
+ * Several uploaders feeding one "busy" flag: the form stays locked while any
+ * of them is still preparing photos.
+ */
+export function useBusyTracker(onBusyChange?: (busy: boolean) => void) {
+  const busy = useRef(new Set<string>());
+  return useCallback(
+    (key: string) => (isBusy: boolean) => {
+      if (isBusy) busy.current.add(key);
+      else busy.current.delete(key);
+      onBusyChange?.(busy.current.size > 0);
+    },
+    [onBusyChange]
+  );
+}
+
+/**
+ * VAT bills for a whole client: one row per payment that carried VAT, each
+ * with its own tiles. A VAT bill always belongs to a payment, so payments
+ * without VAT are not listed.
+ */
+export function ClientVatBills({
+  payments,
+  billsByPayment,
+  onBusyChange,
+  readOnly,
+  emptyText = "No payment with VAT yet. When you record one, its VAT bill can be attached here or in the payment itself.",
+  resetKey,
+  onCountChange,
+  footer,
+}: {
+  payments: VatBillPaymentRow[];
+  billsByPayment: Record<string, Attachment[]>;
+  onBusyChange?: (busy: boolean) => void;
+  readOnly?: boolean;
+  emptyText?: string;
+  resetKey?: unknown;
+  onCountChange?: (count: number) => void;
+  footer?: React.ReactNode;
+}) {
+  const track = useBusyTracker(onBusyChange);
+  const counts = useRef(new Map<string, number>());
+  const saved = payments.reduce((sum, row) => sum + (billsByPayment[row.id]?.length ?? 0), 0);
+
+  return (
+    <section className="doc-section doc-section-vat">
+      <header className="doc-section-head">
+        <span className="doc-section-icon">
+          <Icon name="receipt" size={17} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <h3>VAT bills</h3>
+          <p>Only for payments where you cut a VAT bill. Optional — skip any you don&apos;t have.</p>
+        </div>
+        <span className={`status-pill ${saved ? "status-pill-ok" : "status-pill-muted"}`}>
+          {saved ? `${saved} file${saved === 1 ? "" : "s"} on file` : "None yet"}
+        </span>
+      </header>
+
+      {payments.length === 0 ? (
+        <p className="doc-empty">{emptyText}</p>
+      ) : (
+        <ul className="vat-bill-rows">
+          {payments.map((row) => {
+            const existing = billsByPayment[row.id] ?? [];
+            return (
+              <li key={row.id}>
+                <div className="vat-bill-row-info">
+                  <strong>{row.title}</strong>
+                  <span>{row.detail}</span>
+                  <em className={existing.length ? "is-done" : ""}>
+                    {existing.length ? `${existing.length} VAT bill file${existing.length === 1 ? "" : "s"}` : "No VAT bill attached"}
+                  </em>
+                </div>
+                <FileUploader
+                  name={`vat_bill_files:${row.id}`}
+                  variant="bill"
+                  existing={existing}
+                  readOnly={readOnly}
+                  addLabel="Add VAT bill"
+                  onBusyChange={track(row.id)}
+                  resetKey={resetKey}
+                  onCountChange={(count) => {
+                    counts.current.set(row.id, count);
+                    onCountChange?.([...counts.current.values()].reduce((sum, value) => sum + value, 0));
+                  }}
+                />
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {footer}
     </section>
   );
 }
