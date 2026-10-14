@@ -146,6 +146,9 @@ repository or a console log.
    Payload URL `https://<jenkins-host>/github-webhook/`, content type
    `application/json`, event **Just the push event**, active.
 3. Branches other than `main` are built and tested but never deployed.
+4. The build parameters `ADOPT_EXISTING_DEPLOYMENT` (first deployment only) and
+   `SYNC_ENV_FROM_CREDENTIAL` appear under **Build with Parameters** once this
+   Jenkinsfile has run once.
 
 The pipeline uses `disableConcurrentBuilds()`: pushes during a build queue up.
 
@@ -192,14 +195,15 @@ docker ps --filter publish=3001                # no container should publish it
 ```
 
 The earlier deployment of this app used **3001** (and Caddy already points
-there); keep it when adopting that deployment. The pipeline refuses to deploy
-if the port is used by anything other than this project.
+there); taking that deployment over keeps it automatically. The pipeline
+refuses to deploy if the port is used by anything other than this project.
 
 ## First deployment
 
-The first deployment to `/srv/deployments/avernek-expense-tracker/` needs an
-explicit approval file; until it exists, the pipeline stops in Prepare
-Deployment without touching anything. Choose one of the two cases.
+Nobody needs to log in to the server for the first deployment. The pipeline
+looks at what of this project is on the host and decides. Until a deployment
+has been verified, it stops in Prepare Deployment before changing anything
+whenever the case is not clear.
 
 ### Case A: taking over the existing deployment (expected)
 
@@ -208,78 +212,63 @@ The previous Jenkinsfile ran this app from
 project name, with its database in volume `avernek-expense-tracker_pgdata`. The
 new pipeline keeps that project name and volume, so the data carries over.
 
-```bash
-JH=/var/lib/jenkins                                  # JENKINS_HOME
-OLD=$JH/deployments/avernek-expense-tracker
-NEW=/srv/deployments/avernek-expense-tracker
-sudo install -d -o jenkins -g jenkins -m 750 $NEW   # the pipeline would create it, but files go in first
+Taking it over replaces running production containers, so it needs one
+approval, given in Jenkins: the push-triggered build stops with
+`would take over this project's existing stack. Nothing was changed.` and lists
+what it found. Then:
 
-# 1. Look at what runs today.
-docker ps --filter label=com.docker.compose.project=avernek-expense-tracker
-docker volume inspect avernek-expense-tracker_pgdata --format '{{.Mountpoint}} {{.Labels}}'
+**Build with Parameters → tick `ADOPT_EXISTING_DEPLOYMENT` → Build.**
 
-# 2. Back the database up first, and copy the dump off the server.
-sudo install -d -m 700 /var/backups/avernek-expense-tracker
-docker exec avernek-postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' \
-  | sudo tee /var/backups/avernek-expense-tracker/pre-adoption.dump >/dev/null
+That build:
 
-# 3. Move the configuration across, adding APP_PORT (the old Jenkinsfile set it).
-sudo install -m 600 -o jenkins -g jenkins $OLD/.env $NEW/.env
-echo 'APP_PORT=3001' | sudo tee -a $NEW/.env >/dev/null
-echo 'PUBLIC_URL=https://expenses.avernek.com' | sudo tee -a $NEW/.env >/dev/null
-
-# 4. Approve the takeover.
-echo adopt-legacy | sudo -u jenkins tee $NEW/.first-deploy-approved
-```
-
-Then push to `main` (or click *Build Now*). The pipeline:
-
-- recognises the old containers (same Compose project, other directory) and the
-  volume, and accepts them because of `adopt-legacy`;
+- installs `.env` from the Jenkins credential `avernek-expense-tracker-env` (the
+  one the old pipeline used) and adds `APP_PORT` from the port the old stack
+  publishes (3001; the old Jenkinsfile set it itself, so the credential has
+  none). Add `APP_PORT=3001` to the credential too, so a later
+  `SYNC_ENV_FROM_CREDENTIAL` keeps it;
+- dumps the database from the old database container to
+  `backups/pre-adoption-<time>.dump` before anything changes, and stops if that
+  fails (this dump is never pruned; copy it off the server);
 - records the old deployment's running image as the rollback target;
-- backs up the database, applies any new migrations, and replaces the old
-  containers with the new stack (same volume; a few seconds of downtime while
-  the database container is recreated on the new network);
+- backs up again, applies any new migrations, and replaces the old containers
+  with the new stack (same volume; a few seconds of downtime while the database
+  container is recreated on the new network);
 - verifies health; on failure it restores the old image under the new Compose
   file, with the same `.env`, port and volume.
 
-Afterwards, once you are satisfied:
+The approval is recorded in `.first-deploy-approved` until the first deployment
+succeeds, so a retry after a failure needs no parameter. Once `.activated` is
+written the parameter is ignored.
+
+Optional tidy-up on the server once you are satisfied (nothing depends on it):
 
 ```bash
-sudo rm -rf $OLD                                  # old compose copy and its .env (secrets)
+sudo rm -rf /var/lib/jenkins/deployments/avernek-expense-tracker   # old compose copy and its .env (secrets)
 docker network rm avernek-expense-tracker_default 2>/dev/null || true   # old network, if unused
 docker images avernek-expense-tracker              # old numeric tags (:12, :latest) can go
 ```
 
 The image tags of the old pipeline (`:<build-number>`, `:latest`) are never
-removed automatically; delete them by hand when no longer needed.
+removed automatically.
 
 ### Case B: a brand-new installation (empty database)
 
-```bash
-NEW=/srv/deployments/avernek-expense-tracker
-sudo install -d -o jenkins -g jenkins -m 750 $NEW   # the pipeline would create it, but files go in first
-# Option 1: let the pipeline create .env from the Jenkins credential (it must contain APP_PORT).
-# Option 2: create it yourself:
-sudo install -m 600 -o jenkins -g jenkins /dev/null $NEW/.env
-sudoedit $NEW/.env                                  # fill in from .env.example
-echo new | sudo -u jenkins tee $NEW/.first-deploy-approved
-```
-
-The pipeline refuses `new` if the Compose project is already running or the
-volume already exists (it would otherwise reuse unknown data). The empty volume
-is initialised once, from `POSTGRES_*`; `db/schema.sql` and all migrations run;
-the administrator is created.
+When the host has no containers of this Compose project and no
+`avernek-expense-tracker_pgdata` volume, there is nothing to overwrite and no
+approval is needed: push to `main`. `.env` comes from the Jenkins credential
+`avernek-expense-tracker-env`, which must contain `APP_PORT` (see Port). The
+empty volume is initialised once, from `POSTGRES_*`; `db/schema.sql` and all
+migrations run; the administrator is created.
 
 ### What the preflight checks
 
 Docker access for `jenkins`; Compose 2.20+; `flock`, `ss`, `curl`; the deployment
-directory exists and is writable; approval present and consistent with what is
-on the host; the volume is not another project's; every required `.env`
-variable is set; `APP_PORT` is not used by anything else. Each failure prints
-the command that fixes it. On success the approval file is renamed to
-`.first-deploy-approved.used` and `.activated` is written; later deployments
-need no approval.
+directory exists (created when `/srv/deployments` allows it) and is writable;
+the first-deployment case matches what is on the host; the volume is not
+another project's; every required `.env` variable is set; `APP_PORT` is not
+used by anything else. Each failure says what to change, in Jenkins where
+possible. On success the approval record is renamed to
+`.first-deploy-approved.used` and `.activated` is written.
 
 A failed first deployment of a new installation has no earlier release to go
 back to: the pipeline reports `Rollback: no prior release` and leaves the
@@ -462,8 +451,8 @@ This does not exercise the plugin itself; the next pipeline run does.
 | Symptom | Fix |
 |---|---|
 | `… /srv/deployments is not writable by jenkins` (or `does not exist`) | One-time VPS setup: "Deployment directory" above. |
-| `first deployment is not approved` | Follow "First deployment" and write `.first-deploy-approved`. |
-| `missing or empty in .env: …` | Edit `/srv/deployments/avernek-expense-tracker/.env`. |
+| `… would take over this project's existing stack. Nothing was changed.` | Build with Parameters, tick `ADOPT_EXISTING_DEPLOYMENT` ("First deployment", Case A). |
+| `missing or empty in .env: …` | Add the variables to the Jenkins credential and rebuild with `SYNC_ENV_FROM_CREDENTIAL` ticked, or edit `/srv/deployments/avernek-expense-tracker/.env`. |
 | `host port … is in use` | Choose a free `APP_PORT`, update Caddy, rebuild. |
 | `Compose project … has containers running from another directory` | The old stack is still running next to the new one: stop it (`docker compose -p avernek-expense-tracker -f $OLD/docker-compose.yml stop`). |
 | `db did not become healthy` | `./deploy-control.sh logs db`; disk space; volume permissions. |

@@ -8,6 +8,7 @@
 #                        none exists (or SYNC_ENV_FROM_CREDENTIAL=true: backs up first)
 #   prepare              validate .env and the port, keep the verified release for
 #                        rollback, install compose.yaml, scripts and .deployment.env
+#                        (taking over the old stack: its port, a dump of its database)
 #   deploy               database up, backup, migrations, app up, admin seed
 #   verify               post-deployment health checks
 #   finalize             record the release as verified (the next rollback target)
@@ -139,9 +140,8 @@ cmd_preflight() {
     return 0
   fi
 
-  # ---- First deployment under /srv/deployments: needs the operator's approval.
+  # ---- First deployment under /srv/deployments.
   local mode volume_project
-  mode="$(approval)"
   volume_project=""
   if docker volume inspect "$VOLUME_NAME" >/dev/null 2>&1; then
     volume_project="$(docker volume inspect -f '{{index .Labels "com.docker.compose.project"}}' "$VOLUME_NAME")"
@@ -149,36 +149,52 @@ cmd_preflight() {
       "It is not this project's database. Resolve the name conflict before deploying; do not delete data blindly."
   fi
 
-  local instructions=(
-    "This is the first deployment to $DEPLOY_DIR. Follow docs/DEPLOYMENT.md, 'First deployment', then approve it:"
-    "  new installation:      echo new | sudo -u jenkins tee $APPROVAL_FILE"
-    "  take over the stack deployed by the old Jenkinsfile (keeps its database):"
-    "                         echo adopt-legacy | sudo -u jenkins tee $APPROVAL_FILE"
-  )
+  # Nothing of this project on the host: a new installation, nothing to
+  # overwrite. The old Jenkinsfile's stack or volume: taking it over replaces
+  # running production containers, so it needs the ADOPT_EXISTING_DEPLOYMENT
+  # build parameter. The decision is kept in $APPROVAL_FILE until activation,
+  # so a retry after a failed attempt continues the same first deployment.
+  mode="$(approval)"
+  if [[ -z "$mode" ]]; then
+    if [[ -z "$legacy" && -z "$volume_project" ]]; then
+      mode=new
+    elif [[ "${ADOPT_EXISTING_DEPLOYMENT:-false}" == "true" ]]; then
+      mode=adopt-legacy
+    else
+      local found=() line
+      if [[ -n "$legacy" ]]; then
+        found+=("Found: containers of Compose project '$PROJECT_NAME' running from another directory:")
+        while read -r line; do found+=("  $line"); done <<< "$legacy"
+      fi
+      [[ -z "$volume_project" ]] || found+=("Found: database volume $VOLUME_NAME (it may hold data).")
+      die "the first deployment to $DEPLOY_DIR would take over this project's existing stack. Nothing was changed." \
+        "${found[@]}" \
+        "Approve it in Jenkins: Build with Parameters, tick ADOPT_EXISTING_DEPLOYMENT. The database is" \
+        "backed up first and the old release stays the rollback target (docs/DEPLOYMENT.md, 'First deployment')."
+    fi
+  fi
 
   case "$mode" in
     new)
-      [[ -z "$legacy" ]] || die "approval says 'new', but Compose project '$PROJECT_NAME' is already running:" "$legacy" \
-        "Use 'adopt-legacy' to take it over with its database, or stop it first."
+      [[ -z "$legacy" ]] || die "$APPROVAL_FILE says 'new', but Compose project '$PROJECT_NAME' is already running:" "$legacy" \
+        "To take it over with its database, remove that file and rebuild with ADOPT_EXISTING_DEPLOYMENT."
       if [[ -n "$volume_project" && ! -f "$DEPLOYMENT_ENV" ]]; then
-        die "approval says 'new', but database volume $VOLUME_NAME already exists (it may hold data)." \
-          "Use 'adopt-legacy' to keep using it."
+        die "$APPROVAL_FILE says 'new', but database volume $VOLUME_NAME already exists (it may hold data)." \
+          "To keep using it, remove that file and rebuild with ADOPT_EXISTING_DEPLOYMENT."
       fi
-      echo "    first deployment approved: new installation"
+      echo "    first deployment: new installation (nothing of this project on the host)"
       ;;
     adopt-legacy)
       [[ -n "$legacy" || -n "$volume_project" ]] || die "approval says 'adopt-legacy', but there is no existing stack or volume to adopt." \
-        "Use 'new' instead."
+        "Remove $APPROVAL_FILE: with nothing on the host, the pipeline installs a new deployment by itself."
       echo "    first deployment approved: adopting the existing stack and volume $VOLUME_NAME"
-      [[ -n "$legacy" ]] && { echo "    existing containers:"; echo "$legacy" | sed 's/^/      /'; }
-      ;;
-    "")
-      die "first deployment is not approved." "${instructions[@]}"
+      if [[ -n "$legacy" ]]; then echo "    existing containers:"; echo "$legacy" | sed 's/^/      /'; fi
       ;;
     *)
-      die "unknown approval '$mode' in $APPROVAL_FILE." "${instructions[@]}"
+      die "unknown approval '$mode' in $APPROVAL_FILE (expected 'new' or 'adopt-legacy')."
       ;;
   esac
+  [[ -f "$APPROVAL_FILE" ]] || printf '%s\n# recorded by build %s\n' "$mode" "${BUILD_NUMBER:-?}" > "$APPROVAL_FILE"
 }
 
 # ---------------------------------------------------------------------------
@@ -214,7 +230,8 @@ validate_env() {
     [[ -n "$(env_value "$ENV_FILE" "$key")" ]] || missing+=("$key")
   done
   [[ ${#missing[@]} -eq 0 ]] || die "missing or empty in $ENV_FILE: ${missing[*]}" \
-    "Edit it on the server (values are never printed by the pipeline)."
+    "Add them to the Jenkins credential 'avernek-expense-tracker-env' and rebuild with SYNC_ENV_FROM_CREDENTIAL" \
+    "ticked (the current .env is backed up first), or edit the file on the server. Values are never printed."
 
   local port admin_password secret url
   port="$(env_value "$ENV_FILE" APP_PORT)"
@@ -272,15 +289,56 @@ write_deployment_env() {
   mv "$tmp" "$target"
 }
 
+# ---- Taking over the old Jenkinsfile's stack (first deployment, adopt-legacy).
+
+# The old Jenkinsfile set APP_PORT itself, so the .env credential it shares
+# with this pipeline has none: keep the host port the old stack publishes.
+adopt_port() {
+  [[ -f "$ENV_FILE" && -z "$(env_value "$ENV_FILE" APP_PORT)" ]] || return 0
+  local id port
+  id="$(legacy_containers | awk '$3 == "web" {print $1; exit}')"
+  [[ -n "$id" ]] || return 0
+  port="$(docker inspect -f '{{with index .HostConfig.PortBindings "3000/tcp"}}{{(index . 0).HostPort}}{{end}}' "$id" 2>/dev/null || true)"
+  [[ "$port" =~ ^[0-9]+$ ]] || return 0
+  printf '\n# The port of the old deployment, kept by build %s.\nAPP_PORT=%s\n' "${BUILD_NUMBER:-?}" "$port" >> "$ENV_FILE"
+  echo "    .env: APP_PORT=$port, the port the old deployment publishes (add it to the Jenkins credential too)"
+}
+
+# A dump made by the old database container itself, before the new stack
+# replaces it. Named outside the backup retention, so it is never pruned.
+backup_legacy_db() {
+  local id target objects
+  id="$(legacy_containers | awk '$3 == "db" {print $1; exit}')"
+  [[ -n "$id" ]] || return 0
+  if [[ "$(docker inspect -f '{{.State.Running}}' "$id")" != "true" ]]; then
+    warn "the old database container is stopped: the backup taken once the database starts covers it."
+    return 0
+  fi
+  target="$DEPLOY_DIR/backups/pre-adoption-$(date -u +%Y%m%d-%H%M%SZ).dump"
+  info "Backing up the old deployment's database to $target"
+  if ! docker exec "$id" sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --format=custom --compress=6' > "$target.partial"; then
+    rm -f "$target.partial"
+    die "pg_dump in the old database container failed. The old stack was not touched."
+  fi
+  mv "$target.partial" "$target"
+  chmod 600 "$target"
+  objects="$(docker exec -i "$id" pg_restore --list < "$target" 2>/dev/null | grep -cE '^[0-9]+;' || true)"
+  (( ${objects:-0} >= 1 )) || die "$target contains no restorable objects. The old stack was not touched."
+  echo "    backup written: $(du -h "$target" | cut -f1), $objects objects"
+}
+
 cmd_prepare() {
   : "${APP_IMAGE:?APP_IMAGE is not set}"
   lock
   info "Preparing $APP_IMAGE"
   docker image inspect "$APP_IMAGE" >/dev/null 2>&1 || die "image $APP_IMAGE was not built on this host."
+  if [[ "$(approval)" == "adopt-legacy" ]]; then adopt_port; fi
   validate_env
   check_port
   install -d -m 750 "$RELEASES_DIR" "$DEPLOY_DIR/bin"
   install -d -m 700 "$DEPLOY_DIR/backups"
+  # Before anything is marked in progress: a failure here leaves the old stack as it is.
+  if [[ "$(approval)" == "adopt-legacy" ]]; then backup_legacy_db; fi
 
   # The rollback target: the verified release now in service.
   if [[ -d "$RELEASES_DIR/verified" ]]; then

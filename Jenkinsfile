@@ -34,6 +34,11 @@ pipeline {
 
   parameters {
     booleanParam(
+      name: 'ADOPT_EXISTING_DEPLOYMENT',
+      defaultValue: false,
+      description: 'First deployment only: take over the stack the old Jenkinsfile deployed (same database; it is backed up first and the old release stays the rollback target). Not needed on a host without it, ignored once the deployment is activated.'
+    )
+    booleanParam(
       name: 'SYNC_ENV_FROM_CREDENTIAL',
       defaultValue: false,
       description: 'Replace the server .env with the Jenkins credential "avernek-expense-tracker-env" (the current .env is backed up first). Off: the server .env is kept as it is.'
@@ -115,7 +120,9 @@ pipeline {
       steps {
         script {
           deployStep('Prepare Deployment') {
-            sh 'bash scripts/ci/release.sh preflight'
+            withEnv(["ADOPT_EXISTING_DEPLOYMENT=${params.ADOPT_EXISTING_DEPLOYMENT}"]) {
+              sh 'bash scripts/ci/release.sh preflight'
+            }
             boolean hasEnv = sh(script: 'test -f "$DEPLOY_DIR/.env"', returnStatus: true) == 0
             if (!hasEnv || params.SYNC_ENV_FROM_CREDENTIAL) {
               withCredentials([file(credentialsId: env.ENV_CREDENTIAL_ID, variable: 'ENV_SOURCE')]) {
