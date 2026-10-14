@@ -15,7 +15,7 @@ import {
 import { accountShortName } from "@/lib/funds";
 import type { IncomeAgreement, IncomePaymentFor, MoneyAccount } from "@/lib/types";
 import TaxBreakdownFields from "./TaxBreakdownFields";
-import AttachmentField from "./AttachmentField";
+import { VatBillDocuments } from "./DocumentSections";
 
 const initialState: IncomeFormState = { error: null, ok: null };
 
@@ -232,13 +232,7 @@ export default function RecordIncomePayment({
           </label>
         </div>
 
-        <AttachmentField
-          name="vat_bill_files"
-          label="VAT bill"
-          hint="Only if you cut a VAT bill for this payment · photos or PDF · several at once"
-          emptyHelp="No VAT bill issued? Leave this empty — you can add it later from Edit."
-          onBusyChange={setFilesBusy}
-        />
+        <VatBillDocuments onBusyChange={setFilesBusy} />
 
         {state.error && <p className="text-sm" style={{ color: "var(--red)" }}>{state.error}</p>}
         <button disabled={pending || !accountId || filesBusy} className="btn btn-primary w-full !h-12">

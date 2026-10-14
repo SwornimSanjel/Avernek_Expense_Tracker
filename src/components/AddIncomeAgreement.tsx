@@ -24,6 +24,7 @@ export default function AddIncomeAgreement({
   label?: string;
 }) {
   const [open, setOpen] = useState(false);
+  // 1-based position in AGREEMENT_STEPS.
   const [step, setStep] = useState(1);
   const [hint, setHint] = useState<string | null>(null);
   const [filesBusy, setFilesBusy] = useState(false);
@@ -46,14 +47,8 @@ export default function AddIncomeAgreement({
       const services = ["has_website", "has_ads", "has_automation"].some(
         (field) => (form.elements.namedItem(field) as HTMLInputElement | null)?.checked
       );
-      const agreementPages =
-        (form.elements.namedItem("agreement_files") as HTMLInputElement | null)?.files?.length ?? 0;
       if (!name) return setHint("Enter the client name to continue.");
       if (!services) return setHint("Select at least one service to continue.");
-      if (filesBusy) return setHint("Wait a moment — the agreement photos are still being prepared.");
-      if (agreementPages === 0) {
-        return setHint("Upload the signed agreement pages to continue — it is required for every new client.");
-      }
     }
     setHint(null);
     setStep((value) => Math.min(AGREEMENT_STEPS.length, value + 1));
@@ -89,61 +84,74 @@ export default function AddIncomeAgreement({
             next();
           }
         }}
-        className="modal-panel md:max-w-3xl p-5 md:p-6 space-y-4"
+        className="modal-panel modal-panel-sheet md:max-w-3xl"
       >
-        <div className="modal-header">
-          <div>
-            <h2 className="text-lg font-bold">New client</h2>
-            <p className="text-xs muted">
-              Three short steps. The name, one service and the signed agreement are required — everything else can be filled in later.
-            </p>
+        <div className="modal-sheet-head !pb-4">
+          <div className="modal-header">
+            <div>
+              <h2 className="text-lg font-bold">New client</h2>
+              <p className="text-xs muted">
+                Only the name and one service are required — prices, agreement papers and payments can all be added later.
+              </p>
+            </div>
+            <button type="button" onClick={() => setOpen(false)} className="icon-btn" aria-label="Close">
+              ✕
+            </button>
           </div>
-          <button type="button" onClick={() => setOpen(false)} className="icon-btn">
-            ✕
-          </button>
+
+          <ol className="wizard-steps">
+            {AGREEMENT_STEPS.map((item, index) => {
+              const number = index + 1;
+              return (
+                <li
+                  key={item.key}
+                  className={`wizard-step ${number === step ? "wizard-step-active" : ""} ${
+                    number < step ? "wizard-step-done" : ""
+                  }`}
+                >
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setHint(null);
+                      setStep(number);
+                    }}
+                  >
+                    <span className="wizard-step-index">{number}</span>
+                    <span className="wizard-step-text">
+                      <strong>{item.title}</strong>
+                      <small>{item.hint}</small>
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ol>
         </div>
 
-        <ol className="wizard-steps">
-          {AGREEMENT_STEPS.map((item) => (
-            <li
-              key={item.step}
-              className={`wizard-step ${item.step === step ? "wizard-step-active" : ""} ${
-                item.step < step ? "wizard-step-done" : ""
-              }`}
-            >
-              <button
-                type="button"
-                onClick={() => {
-                  setHint(null);
-                  setStep(item.step);
-                }}
-              >
-                <span className="wizard-step-index">{item.step}</span>
-                <span className="wizard-step-text">
-                  <strong>{item.title}</strong>
-                  <small>{item.hint}</small>
-                </span>
-              </button>
-            </li>
-          ))}
-        </ol>
+        <div className="modal-sheet-body">
+          <IncomeAgreementFields
+            includeInitialPayment
+            moneyAccounts={moneyAccounts}
+            activeSection={AGREEMENT_STEPS[step - 1].key}
+            onFilesBusyChange={setFilesBusy}
+          />
+        </div>
 
-        <IncomeAgreementFields
-          includeInitialPayment
-          moneyAccounts={moneyAccounts}
-          activeStep={step}
-          onFilesBusyChange={setFilesBusy}
-        />
-
-        {hint && <p className="text-sm" style={{ color: "var(--amber)" }}>{hint}</p>}
-        {state.error && <p className="text-sm" style={{ color: "var(--red)" }}>{state.error}</p>}
-
-        <div className="flex items-center gap-2">
+        <div className="modal-sheet-foot">
+          <div className="min-w-0 flex-1">
+            {hint && <p className="text-sm" style={{ color: "var(--amber)" }}>{hint}</p>}
+            {state.error && <p className="text-sm" style={{ color: "var(--red)" }}>{state.error}</p>}
+            {!hint && !state.error && (
+              <p className="text-xs muted">
+                Step {step} of {AGREEMENT_STEPS.length} · {AGREEMENT_STEPS[step - 1].hint}
+              </p>
+            )}
+          </div>
           {step > 1 && (
             <button
               type="button"
               onClick={() => setStep((value) => Math.max(1, value - 1))}
-              className="btn !h-12"
+              className="btn !h-11"
             >
               Back
             </button>
@@ -158,12 +166,12 @@ export default function AddIncomeAgreement({
                 event.preventDefault();
                 next();
               }}
-              className="btn btn-primary flex-1 !h-12"
+              className="btn btn-primary !h-11 !px-6"
             >
               Continue
             </button>
           ) : (
-            <button key="save" type="submit" disabled={pending || filesBusy} className="btn btn-primary flex-1 !h-12">
+            <button key="save" type="submit" disabled={pending || filesBusy} className="btn btn-primary !h-11 !px-6">
               {pending ? "Saving…" : filesBusy ? "Preparing photos…" : "Save client"}
             </button>
           )}

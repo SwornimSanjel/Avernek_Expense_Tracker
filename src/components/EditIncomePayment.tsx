@@ -9,8 +9,7 @@ import { PAYMENT_METHOD_LABELS, formatIncomeMoney, periodLabel, type RecurringPe
 import type { Currency, IncomePayment, MoneyAccount } from "@/lib/types";
 import Icon from "./Icons";
 import TaxBreakdownFields from "./TaxBreakdownFields";
-import AttachmentField from "./AttachmentField";
-import AttachmentList from "./AttachmentList";
+import { VatBillDocuments } from "./DocumentSections";
 import type { Attachment } from "@/lib/attachments";
 
 const initialState: IncomeFormState = { error: null, ok: null };
@@ -167,21 +166,7 @@ export default function EditIncomePayment({
               <input name="note" defaultValue={payment.note ?? ""} className="input mt-1" />
             </label>
 
-            {vatBills.length > 0 && (
-              <div>
-                <span className="field-label">VAT bill · {vatBills.length} saved</span>
-                <div className="mt-1">
-                  <AttachmentList files={vatBills} canRemove />
-                </div>
-              </div>
-            )}
-            <AttachmentField
-              name="vat_bill_files"
-              label={vatBills.length ? "Add more VAT bill pages" : "VAT bill"}
-              hint="Only if a VAT bill was cut for this payment · photos or PDF"
-              existingCount={vatBills.length}
-              onBusyChange={setFilesBusy}
-            />
+            <VatBillDocuments existing={vatBills} onBusyChange={setFilesBusy} />
 
             {state.error && <p className="text-sm" style={{ color: "var(--red)" }}>{state.error}</p>}
             <button disabled={pending || filesBusy} className="btn btn-primary w-full !h-12">

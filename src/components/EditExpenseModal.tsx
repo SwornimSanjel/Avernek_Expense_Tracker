@@ -12,8 +12,7 @@ import type {
   Vendor,
 } from "@/lib/types";
 import ShareAllocationFields from "./ShareAllocationFields";
-import AttachmentField from "./AttachmentField";
-import AttachmentList from "./AttachmentList";
+import { BillDocuments } from "./DocumentSections";
 
 export default function EditExpenseModal({
   expense,
@@ -251,20 +250,7 @@ export default function EditExpenseModal({
           <textarea name="note" defaultValue={expense.note ?? ""} className="input mt-1 min-h-20" />
         </label>
 
-        {!!expense.attachments?.length && (
-          <div>
-            <span className="field-label">Saved bills ({expense.attachments.length})</span>
-            <div className="mt-1">
-              <AttachmentList files={expense.attachments} canRemove />
-            </div>
-          </div>
-        )}
-        <AttachmentField
-          name="bills"
-          label={expense.attachments?.length ? "Add more bills" : "Bill / receipt"}
-          existingCount={expense.attachments?.length ?? 0}
-          onBusyChange={setFilesBusy}
-        />
+        <BillDocuments name="bills" existing={expense.attachments ?? []} onBusyChange={setFilesBusy} />
 
         <button type="submit" disabled={busy || filesBusy} className="btn btn-primary w-full !h-12">
           {busy ? "Saving…" : filesBusy ? "Preparing photos…" : "Save changes"}

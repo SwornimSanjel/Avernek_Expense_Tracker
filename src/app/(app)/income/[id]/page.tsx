@@ -12,8 +12,7 @@ import IncomeAgreementControls from "@/components/IncomeAgreementControls";
 import EditIncomePayment from "@/components/EditIncomePayment";
 import DeleteIncomePayment from "@/components/DeleteIncomePayment";
 import MarkServiceLive from "@/components/MarkServiceLive";
-import AttachmentList from "@/components/AttachmentList";
-import AttachmentUpload from "@/components/AttachmentUpload";
+import AgreementUploadPanel from "@/components/AgreementUploadPanel";
 import { ATTACHMENT_COLUMNS, attachmentUrl, type Attachment } from "@/lib/attachments";
 import PriceBreakdownTable from "@/components/PriceBreakdownTable";
 import { bankAmount } from "@/lib/tax";
@@ -172,7 +171,7 @@ export default async function ClientBillingPage({
             <StatusPill kind="agreement" value={agreement.status} />
             <StatusPill kind="billing" value={summary.overallStatus} prefix="Billing:" />
             {agreementFiles.length === 0 && (
-              <a href="#agreement-papers" className="status-pill status-pill-danger">Agreement missing</a>
+              <a href="#agreement-papers" className="status-pill status-pill-warn">No agreement uploaded</a>
             )}
           </div>
           <div className="mt-3">
@@ -229,41 +228,7 @@ export default async function ClientBillingPage({
 
       {/* ------------------------------------------------- agreement papers */}
       <section id="agreement-papers">
-        <div className="billing-panel">
-          <div className="billing-panel-head">
-            <div>
-              <h2>Signed agreement</h2>
-              <p>
-                {agreementFiles.length > 0
-                  ? `${agreementFiles.length} page${agreementFiles.length === 1 ? "" : "s"} on file · open any page to read or print it`
-                  : "Not uploaded yet — every client needs its signed agreement on file"}
-              </p>
-            </div>
-            {agreementFiles.length > 0 ? (
-              <span className="status-pill status-pill-ok">On file</span>
-            ) : (
-              <span className="status-pill status-pill-danger">Agreement missing</span>
-            )}
-          </div>
-          <div className="border-t p-5 space-y-4" style={{ borderColor: "var(--line)" }}>
-            <AttachmentList
-              files={agreementFiles}
-              canRemove={canManage}
-              layout="pages"
-              lastFileWarning="This is the only agreement page. The client will show “Agreement missing” until a new one is uploaded."
-            />
-            {canManage && (
-              <AttachmentUpload
-                kind="client_agreement"
-                ownerId={agreement.id}
-                existingCount={agreementFiles.length}
-                label={agreementFiles.length > 0 ? "Add or replace pages" : "Upload the signed agreement"}
-                hint="Photos of each page or one PDF · several at once"
-                buttonLabel="Save agreement pages"
-              />
-            )}
-          </div>
-        </div>
+        <AgreementUploadPanel agreementId={agreement.id} files={agreementFiles} canManage={canManage} />
       </section>
 
       {/* ------------------------------------------------------- key dates */}

@@ -345,16 +345,9 @@ export async function addIncomeAgreement(
   if ("error" in parsed) return { error: parsed.error ?? "Check the client details.", ok: null };
   const value = parsed.value;
 
-  // The signed agreement is the one document every new client must have. Older
-  // clients added before uploads existed get theirs from Edit or the client page.
+  // Signed agreement pages are optional here and can be added any time later.
   const agreementFiles = await filesFrom(formData, "agreement_files");
   if ("error" in agreementFiles) return { error: agreementFiles.error, ok: null };
-  if (agreementFiles.uploads.length === 0) {
-    return {
-      error: "Upload the signed agreement (all its pages — photos or a PDF) to add this client.",
-      ok: null,
-    };
-  }
 
   // The opening payment is optional. Rs. 0 paid is a perfectly valid new client;
   // money recorded later never requires recreating anything.

@@ -22,8 +22,7 @@ import {
 } from "@/lib/income";
 import { accountShortName } from "@/lib/funds";
 import TaxBreakdownFields from "./TaxBreakdownFields";
-import AttachmentField from "./AttachmentField";
-import AttachmentList from "./AttachmentList";
+import { AgreementDocuments, VatBillDocuments } from "./DocumentSections";
 import type { Attachment } from "@/lib/attachments";
 import PriceBreakdownTable from "./PriceBreakdownTable";
 
@@ -38,23 +37,36 @@ import PriceBreakdownTable from "./PriceBreakdownTable";
  *   Website           started / delivered — a one-off project, done once delivered
  *
  * Due dates, billing anchors and service statuses are worked out from those.
- * The add-client wizard passes `activeStep` (other steps stay mounted but
- * hidden so one form post carries everything); the edit modal shows all.
+ *
+ * The form is split into sections. The add-client wizard walks through them
+ * as steps and the edit sheet shows them as tabs; either way every section
+ * stays mounted (inactive ones are hidden) so one form post carries all of it.
  */
 
-export const AGREEMENT_STEPS = [
-  { step: 1, title: "Client", hint: "Who and what they bought" },
-  { step: 2, title: "Prices & dates", hint: "What was agreed and when" },
-  { step: 3, title: "Money received", hint: "Optional — Rs. 0 is fine" },
-] as const;
+export type AgreementSection = "client" | "pricing" | "documents" | "payment";
+
+/** Add-client wizard steps. */
+export const AGREEMENT_STEPS: { key: AgreementSection; title: string; hint: string }[] = [
+  { key: "client", title: "Client", hint: "Who and what they bought" },
+  { key: "pricing", title: "Prices & dates", hint: "What was agreed and when" },
+  { key: "documents", title: "Agreement", hint: "Optional — signed pages" },
+  { key: "payment", title: "Money received", hint: "Optional — Rs. 0 is fine" },
+];
+
+/** Edit-sheet tabs. */
+export const AGREEMENT_TABS: { key: AgreementSection; title: string }[] = [
+  { key: "client", title: "Client" },
+  { key: "pricing", title: "Prices & dates" },
+  { key: "documents", title: "Agreement papers" },
+];
 
 type Props = {
   agreement?: IncomeAgreement;
   moneyAccounts?: MoneyAccount[];
   /** Show the opening-payment step (new clients only). */
   includeInitialPayment?: boolean;
-  /** Wizard mode: render only this step and keep the rest mounted but hidden. */
-  activeStep?: number;
+  /** The section on screen; the others stay mounted but hidden. */
+  activeSection: AgreementSection;
   /** Warn before moving Day 1 when monthly payments already depend on it. */
   recurringPaymentCount?: number;
   /** Signed agreement pages already saved (edit mode). */
@@ -67,13 +79,18 @@ export default function IncomeAgreementFields({
   agreement,
   moneyAccounts = [],
   includeInitialPayment = false,
-  activeStep,
+  activeSection,
   recurringPaymentCount = 0,
   agreementFiles = [],
   onFilesBusyChange,
 }: Props) {
   const today = todayIso();
-  const visible = (step: number) => activeStep == null || activeStep === step;
+  const visible = (section: AgreementSection) => activeSection === section;
+  // Step numbers only make sense in the add wizard, not in edit tabs.
+  const stepNumber = (section: AgreementSection) =>
+    includeInitialPayment
+      ? String(AGREEMENT_STEPS.findIndex((step) => step.key === section) + 1)
+      : undefined;
 
   const [clientName, setClientName] = useState(agreement?.client_name ?? "");
   const [hasWebsite, setHasWebsite] = useState(agreement?.has_website ?? false);
@@ -120,10 +137,10 @@ export default function IncomeAgreementFields({
     <div className="space-y-4">
       {/* ------------------------------------------------------------ step 1 */}
       <FormSection
-        number="1"
+        number={stepNumber("client")}
         title="Client"
         description="Who they are, what they bought, and which account they pay into."
-        hidden={!visible(1)}
+        hidden={!visible("client")}
       >
         <div className="grid sm:grid-cols-2 gap-3">
           <Field label="Client name">
@@ -236,49 +253,14 @@ export default function IncomeAgreementFields({
           </Field>
         </div>
 
-        {/* The signed agreement: required for a new client, and always
-            addable / removable later — old clients included. */}
-        <div className="mt-4">
-          {agreement && agreementFiles.length > 0 && (
-            <div className="mb-3">
-              <span className="field-label">Signed agreement · {agreementFiles.length} page{agreementFiles.length === 1 ? "" : "s"} saved</span>
-              <div className="mt-1">
-                <AttachmentList
-                  files={agreementFiles}
-                  canRemove
-                  layout="pages"
-                  lastFileWarning="This is the only agreement page. The client will show “Agreement missing” until a new one is uploaded."
-                />
-              </div>
-            </div>
-          )}
-          {agreement && agreementFiles.length === 0 && (
-            <p className="alert alert-warn mb-2 !text-xs">
-              No signed agreement on file for this client yet. Add the pages below.
-            </p>
-          )}
-          <AttachmentField
-            name="agreement_files"
-            label={agreement && agreementFiles.length > 0 ? "Add or replace agreement pages" : "Signed agreement papers"}
-            required={!agreement}
-            existingCount={agreementFiles.length}
-            hint="Photos of each page or one PDF · several pages at once"
-            emptyHelp={
-              agreement
-                ? "To replace a page: add the new one here, then remove the old one above."
-                : "Required. Take a photo of every signed page (2–3 pages is normal) or attach the PDF."
-            }
-            onBusyChange={onFilesBusyChange}
-          />
-        </div>
       </FormSection>
 
       {/* ------------------------------------------------------------ step 2 */}
       <FormSection
-        number="2"
+        number={stepNumber("pricing")}
         title="Prices & dates"
         description="Only the dates that are on paper or really happened. Leave a date blank until it happens."
-        hidden={!visible(2)}
+        hidden={!visible("pricing")}
       >
         <div className="service-block">
           <div className="service-block-title">Contract</div>
@@ -339,7 +321,6 @@ export default function IncomeAgreementFields({
                 <input
                   name="go_live_date"
                   type="date"
-                  max={today}
                   value={dayOne}
                   onChange={(event) => setDayOne(event.target.value)}
                   className="input"
@@ -358,14 +339,10 @@ export default function IncomeAgreementFields({
                 )}
               </Field>
             </div>
-            {isValidDate(dayOne) && dayOne > today && (
-              <p className="field-help" style={{ color: "var(--amber)" }}>
-                Day 1 is in the future. Leave it empty and set it on the client page the day the ads go live.
-              </p>
-            )}
             <p className="field-help">
-              Amounts exclude VAT. Don&apos;t guess Day 1 — leave it empty and press “Ads launched? Set Day 1” on
-              the client page on the day the ads / AI automation go live.
+              {isValidDate(dayOne) && dayOne > today
+                ? `Launch planned for ${formatServiceDate(dayOne)} — month 1 starts that day.`
+                : "Amounts exclude VAT. Leave Day 1 empty until the ads / AI automation actually go live."}
             </p>
             <BillingTimeline
               dayOne={dayOne}
@@ -529,13 +506,18 @@ export default function IncomeAgreementFields({
         </details>
       </FormSection>
 
-      {/* ------------------------------------------------------------ step 3 */}
+      {/* ------------------------------------------------------- documents */}
+      <div hidden={!visible("documents")}>
+        <AgreementDocuments existing={agreementFiles} onBusyChange={onFilesBusyChange} />
+      </div>
+
+      {/* ------------------------------------------------------------ payment */}
       {includeInitialPayment && (
         <FormSection
-          number="3"
+          number={stepNumber("payment")}
           title="Money received so far"
           description="Optional. Payments can always be added later from the client page."
-          hidden={!visible(3)}
+          hidden={!visible("payment")}
         >
           <span className="field-label">Has the client paid anything yet?</span>
           <div className="choice-grid mt-2 mb-3">
@@ -626,13 +608,7 @@ export default function IncomeAgreementFields({
                 </Field>
               </div>
               <div className="mt-3">
-                <AttachmentField
-                  name="initial_vat_bill_files"
-                  label="VAT bill for this payment"
-                  hint="Only if you cut a VAT bill · photos or PDF · several at once"
-                  emptyHelp="No VAT bill issued? Leave this empty."
-                  onBusyChange={onFilesBusyChange}
-                />
+                <VatBillDocuments name="initial_vat_bill_files" onBusyChange={onFilesBusyChange} />
               </div>
             </>
           )}
@@ -783,7 +759,7 @@ export function FormSection({
   children,
   hidden,
 }: {
-  number: string;
+  number?: string;
   title: string;
   description: string;
   children: React.ReactNode;
@@ -792,9 +768,10 @@ export function FormSection({
   return (
     <section className="agreement-form-section" hidden={hidden}>
       <div className="agreement-form-heading">
-        <span>{number}</span>
+        {number && <span>{number}</span>}
         <div>
-          <h3>{title}</h3>
+          {/* In the edit sheet the tab already names the section. */}
+          {number && <h3>{title}</h3>}
           <p>{description}</p>
         </div>
       </div>

@@ -12,8 +12,7 @@ import { accountShortName, type BillStatus, type MoneyAccountBalance } from "@/l
 import { vatInsideTotal } from "@/lib/tax";
 import type { CompanyBill } from "@/lib/types";
 import Icon from "./Icons";
-import AttachmentField from "./AttachmentField";
-import AttachmentList from "./AttachmentList";
+import { BillDocuments } from "./DocumentSections";
 import type { Attachment } from "@/lib/attachments";
 
 const initialState: FundsFormState = { error: null, ok: null };
@@ -154,20 +153,7 @@ export function AddCompanyBill({
               <input name="note" defaultValue={bill?.note ?? ""} className="input mt-1" />
             </label>
 
-            {files.length > 0 && (
-              <div>
-                <span className="field-label">Saved scans · {files.length}</span>
-                <div className="mt-1">
-                  <AttachmentList files={files} canRemove />
-                </div>
-              </div>
-            )}
-            <AttachmentField
-              name="bill_files"
-              label={files.length ? "Add more pages" : "Bill scan / photo"}
-              existingCount={files.length}
-              onBusyChange={setFilesBusy}
-            />
+            <BillDocuments name="bill_files" title="Bill scan / photo" existing={files} onBusyChange={setFilesBusy} />
 
             {state.error && <p className="text-sm" style={{ color: "var(--red)" }}>{state.error}</p>}
             <button disabled={pending || filesBusy} className="btn btn-primary w-full !h-12">

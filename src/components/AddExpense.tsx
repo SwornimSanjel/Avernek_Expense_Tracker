@@ -11,7 +11,7 @@ import type {
   Vendor,
 } from "@/lib/types";
 import ShareAllocationFields from "./ShareAllocationFields";
-import AttachmentField from "./AttachmentField";
+import { BillDocuments } from "./DocumentSections";
 
 const today = () => {
   const date = new Date();
@@ -362,12 +362,7 @@ export default function AddExpense({
           <input name="note" className="input" />
         </Field>
 
-        <AttachmentField
-          name="bills"
-          label="Bill / receipt"
-          emptyHelp="No bill yet? Save without one and add it later from Edit."
-          onBusyChange={setFilesBusy}
-        />
+        <BillDocuments name="bills" onBusyChange={setFilesBusy} />
 
         <button type="submit" disabled={pending || filesBusy} className="btn btn-primary w-full !h-12">
           {pending ? "Saving…" : filesBusy ? "Preparing photos…" : "Save expense"}

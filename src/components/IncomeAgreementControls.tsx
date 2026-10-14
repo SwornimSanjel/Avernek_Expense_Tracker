@@ -9,7 +9,7 @@ import {
   type IncomeFormState,
 } from "@/app/(app)/income/actions";
 import type { IncomeAgreement, MoneyAccount } from "@/lib/types";
-import IncomeAgreementFields from "./IncomeAgreementFields";
+import IncomeAgreementFields, { AGREEMENT_TABS, type AgreementSection } from "./IncomeAgreementFields";
 import type { Attachment } from "@/lib/attachments";
 import Icon from "./Icons";
 
@@ -40,6 +40,7 @@ export default function IncomeAgreementControls({
   showEditButton?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
+  const [tab, setTab] = useState<AgreementSection>("client");
   const [menuOpen, setMenuOpen] = useState(false);
   const [filesBusy, setFilesBusy] = useState(false);
   const [state, action, pending] = useActionState(updateIncomeAgreement, initialState);
@@ -161,30 +162,66 @@ export default function IncomeAgreementControls({
 
       {editing && (
         <div className="modal-backdrop">
-          <form action={action} className="modal-panel md:max-w-3xl p-5 md:p-6 space-y-4">
+          <form action={action} className="modal-panel modal-panel-sheet md:max-w-3xl">
             <input type="hidden" name="agreement_id" value={agreement.id} />
-            <div className="modal-header">
-              <div>
-                <h2 className="text-lg font-bold">Edit {agreement.client_name}</h2>
-                <p className="text-xs muted">
-                  Change anything and save. Recorded payments are kept; balances recalculate from them.
-                </p>
+            <div className="modal-sheet-head">
+              <div className="modal-header">
+                <div>
+                  <h2 className="text-lg font-bold">Edit {agreement.client_name}</h2>
+                  <p className="text-xs muted">
+                    Recorded payments are kept — balances recalculate from them.
+                  </p>
+                </div>
+                <button type="button" onClick={() => setEditing(false)} className="icon-btn" aria-label="Close">
+                  ✕
+                </button>
               </div>
-              <button type="button" onClick={() => setEditing(false)} className="icon-btn">
-                ✕
+              <nav className="sheet-tabs" role="tablist">
+                {AGREEMENT_TABS.map((item) => (
+                  <button
+                    key={item.key}
+                    type="button"
+                    role="tab"
+                    aria-selected={tab === item.key}
+                    onClick={() => setTab(item.key)}
+                    className={`sheet-tab ${tab === item.key ? "sheet-tab-on" : ""}`}
+                  >
+                    {item.title}
+                    {item.key === "documents" &&
+                      (agreementFiles.length > 0 ? (
+                        <span className="sheet-tab-count">{agreementFiles.length}</span>
+                      ) : (
+                        <span className="sheet-tab-dot" title="No agreement uploaded yet" />
+                      ))}
+                  </button>
+                ))}
+              </nav>
+            </div>
+
+            <div className="modal-sheet-body">
+              <IncomeAgreementFields
+                agreement={agreement}
+                moneyAccounts={moneyAccounts}
+                recurringPaymentCount={recurringPaymentCount}
+                agreementFiles={agreementFiles}
+                onFilesBusyChange={setFilesBusy}
+                activeSection={tab}
+              />
+            </div>
+
+            <div className="modal-sheet-foot">
+              {state.error ? (
+                <p className="text-sm min-w-0 flex-1" style={{ color: "var(--red)" }}>{state.error}</p>
+              ) : (
+                <p className="text-xs muted min-w-0 flex-1">Changes on every tab are saved together.</p>
+              )}
+              <button type="button" onClick={() => setEditing(false)} className="btn !h-11">
+                Cancel
+              </button>
+              <button disabled={pending || filesBusy} className="btn btn-primary !h-11 !px-6">
+                {pending ? "Saving…" : filesBusy ? "Preparing photos…" : "Save changes"}
               </button>
             </div>
-            <IncomeAgreementFields
-              agreement={agreement}
-              moneyAccounts={moneyAccounts}
-              recurringPaymentCount={recurringPaymentCount}
-              agreementFiles={agreementFiles}
-              onFilesBusyChange={setFilesBusy}
-            />
-            {state.error && <p className="text-sm" style={{ color: "var(--red)" }}>{state.error}</p>}
-            <button disabled={pending || filesBusy} className="btn btn-primary w-full !h-12">
-              {pending ? "Saving…" : filesBusy ? "Preparing photos…" : "Save changes"}
-            </button>
           </form>
         </div>
       )}

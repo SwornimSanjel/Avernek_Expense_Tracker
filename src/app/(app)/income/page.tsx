@@ -383,8 +383,8 @@ export default async function IncomePage({
                         <StatusPill kind="agreement" value={agreement.status} />
                         <StatusPill kind="billing" value={summary.overallStatus} />
                         {!agreementFilesById.has(agreement.id) && (
-                          <span className="status-pill status-pill-danger" title="No signed agreement uploaded yet">
-                            Agreement missing
+                          <span className="status-pill status-pill-warn" title="No signed agreement uploaded yet">
+                            No agreement
                           </span>
                         )}
                       </div>
