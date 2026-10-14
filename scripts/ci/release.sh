@@ -169,6 +169,7 @@ cmd_preflight() {
       [[ -z "$volume_project" ]] || found+=("Found: database volume $VOLUME_NAME (it may hold data).")
       die "the first deployment to $DEPLOY_DIR would take over this project's existing stack. Nothing was changed." \
         "${found[@]}" \
+        "This build ran with ADOPT_EXISTING_DEPLOYMENT off (the default; Replay and Rebuild reuse the old build's value)." \
         "Approve it in Jenkins: Build with Parameters, tick ADOPT_EXISTING_DEPLOYMENT. The database is" \
         "backed up first and the old release stays the rollback target (docs/DEPLOYMENT.md, 'First deployment')."
     fi
