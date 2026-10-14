@@ -1739,3 +1739,33 @@ details > summary:hover { background: rgb(255 255 255 / 0.018); }
 @media (max-width: 720px) {
   .vat-bill-rows > li { grid-template-columns: 1fr; }
 }
+
+/* ----- error screens ----- */
+.app-error { display: grid; min-height: 70vh; place-items: center; padding: 24px; }
+.app-error-card {
+  width: 100%;
+  max-width: 460px;
+  padding: 28px;
+  border: 1px solid var(--line-strong);
+  border-radius: 20px;
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+  text-align: center;
+}
+.app-error-card h1 { font-size: 18px; font-weight: 720; }
+.app-error-card p { margin-top: 8px; color: var(--muted); font-size: 13px; line-height: 1.55; }
+.app-error-spinner { display: inline-block; width: 26px; height: 26px; margin-bottom: 14px; border-color: color-mix(in srgb, var(--accent) 30%, transparent); border-top-color: var(--accent); }
+.app-error-details { margin-top: 18px; text-align: left; }
+.app-error-details summary { color: var(--muted-2); font-size: 11.5px; cursor: pointer; }
+.app-error-details code {
+  display: block;
+  margin-top: 8px;
+  padding: 10px 12px;
+  overflow-x: auto;
+  border-radius: 10px;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

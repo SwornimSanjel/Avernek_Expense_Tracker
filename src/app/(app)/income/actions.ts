@@ -338,7 +338,7 @@ function agreementColumns(value: AgreementValues) {
 // Agreements
 // -----------------------------------------------------------------------------
 
-export async function addIncomeAgreement(
+async function addIncomeAgreementUnguarded(
   _previous: IncomeFormState,
   formData: FormData
 ): Promise<IncomeFormState> {
@@ -465,7 +465,7 @@ export async function addIncomeAgreement(
   return { error: null, ok: `${value.clientName} added.`, agreementId };
 }
 
-export async function updateIncomeAgreement(
+async function updateIncomeAgreementUnguarded(
   _previous: IncomeFormState,
   formData: FormData
 ): Promise<IncomeFormState> {
@@ -944,7 +944,7 @@ async function alreadyPaid(target: PaymentTarget, excludePaymentId?: string) {
   return Number(row?.paid ?? 0);
 }
 
-export async function recordIncomePayment(
+async function recordIncomePaymentUnguarded(
   _previous: IncomeFormState,
   formData: FormData
 ): Promise<IncomeFormState> {
@@ -1045,7 +1045,7 @@ export async function recordIncomePayment(
   return { error: null, ok: `Payment recorded for ${target.clientName}.` };
 }
 
-export async function updateIncomePayment(
+async function updateIncomePaymentUnguarded(
   _previous: IncomeFormState,
   formData: FormData
 ): Promise<IncomeFormState> {
@@ -1268,4 +1268,40 @@ export async function deleteOtherIncome(id: string) {
   await requireIncomeAdmin();
   await exec(`delete from public.other_income where id = $1`, [id]);
   revalidateIncome();
+}
+
+/**
+ * A save that fails on the server (database down, constraint, anything
+ * unexpected) must come back as a message in the form — never as a blank
+ * "Application error" screen. Everything runs in a transaction, so a failed
+ * save leaves nothing half-written. Next.js redirects still pass through.
+ */
+async function guardSave(run: () => Promise<IncomeFormState>): Promise<IncomeFormState> {
+  try {
+    return await run();
+  } catch (error) {
+    const digest = (error as { digest?: unknown } | null)?.digest;
+    if (typeof digest === "string" && digest.startsWith("NEXT_")) throw error;
+    console.error("[save failed]", error);
+    return {
+      error: `Could not save: ${error instanceof Error ? error.message : "unexpected error"}. Nothing was saved — try again.`,
+      ok: null,
+    };
+  }
+}
+
+export async function addIncomeAgreement(previous: IncomeFormState, formData: FormData): Promise<IncomeFormState> {
+  return guardSave(() => addIncomeAgreementUnguarded(previous, formData));
+}
+
+export async function updateIncomeAgreement(previous: IncomeFormState, formData: FormData): Promise<IncomeFormState> {
+  return guardSave(() => updateIncomeAgreementUnguarded(previous, formData));
+}
+
+export async function recordIncomePayment(previous: IncomeFormState, formData: FormData): Promise<IncomeFormState> {
+  return guardSave(() => recordIncomePaymentUnguarded(previous, formData));
+}
+
+export async function updateIncomePayment(previous: IncomeFormState, formData: FormData): Promise<IncomeFormState> {
+  return guardSave(() => updateIncomePaymentUnguarded(previous, formData));
 }

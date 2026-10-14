@@ -260,7 +260,7 @@ function money2(raw: FormDataEntryValue | null) {
   return Number.isFinite(amount) ? Math.round(amount * 100) / 100 : NaN;
 }
 
-export async function addCompanyBill(
+async function addCompanyBillUnguarded(
   _previous: FundsFormState,
   formData: FormData
 ): Promise<FundsFormState> {
@@ -451,7 +451,7 @@ export async function deleteTaxPayment(id: string) {
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 /** Lend money, or correct an existing loan when `loan_id` is posted. */
-export async function saveMoneyLoan(
+async function saveMoneyLoanUnguarded(
   _previous: FundsFormState,
   formData: FormData
 ): Promise<FundsFormState> {
@@ -520,7 +520,7 @@ export async function saveMoneyLoan(
 }
 
 /** The money came back: it returns to the chosen account (usually the same one). */
-export async function markLoanRepaid(
+async function markLoanRepaidUnguarded(
   _previous: FundsFormState,
   formData: FormData
 ): Promise<FundsFormState> {
@@ -576,4 +576,36 @@ export async function deleteMoneyLoan(id: string) {
   await owner();
   await exec(`delete from public.money_loans where id = $1`, [id]);
   revalidateFunds();
+}
+
+/**
+ * A save that fails on the server (database down, constraint, anything
+ * unexpected) must come back as a message in the form — never as a blank
+ * "Application error" screen. Everything runs in a transaction, so a failed
+ * save leaves nothing half-written. Next.js redirects still pass through.
+ */
+async function guardSave(run: () => Promise<FundsFormState>): Promise<FundsFormState> {
+  try {
+    return await run();
+  } catch (error) {
+    const digest = (error as { digest?: unknown } | null)?.digest;
+    if (typeof digest === "string" && digest.startsWith("NEXT_")) throw error;
+    console.error("[save failed]", error);
+    return {
+      error: `Could not save: ${error instanceof Error ? error.message : "unexpected error"}. Nothing was saved — try again.`,
+      ok: null,
+    };
+  }
+}
+
+export async function addCompanyBill(previous: FundsFormState, formData: FormData): Promise<FundsFormState> {
+  return guardSave(() => addCompanyBillUnguarded(previous, formData));
+}
+
+export async function saveMoneyLoan(previous: FundsFormState, formData: FormData): Promise<FundsFormState> {
+  return guardSave(() => saveMoneyLoanUnguarded(previous, formData));
+}
+
+export async function markLoanRepaid(previous: FundsFormState, formData: FormData): Promise<FundsFormState> {
+  return guardSave(() => markLoanRepaidUnguarded(previous, formData));
 }
