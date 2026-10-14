@@ -41,7 +41,7 @@ export default function AddOtherIncome({
 
   useEffect(() => {
     if (state.ok) setOpen(false);
-  }, [state.ok]);
+  }, [state]);
 
   return (
     <>

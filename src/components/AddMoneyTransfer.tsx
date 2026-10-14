@@ -29,7 +29,7 @@ export default function AddMoneyTransfer({ balances }: { balances: MoneyAccountB
 
   useEffect(() => {
     if (state.ok) setOpen(false);
-  }, [state.ok]);
+  }, [state]);
 
   return (
     <>

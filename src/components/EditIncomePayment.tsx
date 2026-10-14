@@ -46,7 +46,7 @@ export default function EditIncomePayment({
 
   useEffect(() => {
     if (state.ok) setOpen(false);
-  }, [state.ok]);
+  }, [state]);
 
   return (
     <>

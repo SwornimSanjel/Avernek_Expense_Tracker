@@ -44,7 +44,7 @@ export function LendMoney({
 
   useEffect(() => {
     if (state.ok) setOpen(false);
-  }, [state.ok]);
+  }, [state]);
 
   const selected = usable.find((item) => item.account.id === accountId);
   const ownAmount =
@@ -179,7 +179,7 @@ export function MarkLoanRepaid({
 
   useEffect(() => {
     if (state.ok) setOpen(false);
-  }, [state.ok]);
+  }, [state]);
 
   return (
     <>

@@ -13,7 +13,7 @@ export default function AddMemberForm() {
   // away without stale values (especially the password) sitting in the inputs.
   useEffect(() => {
     if (state.ok) form.current?.reset();
-  }, [state.ok]);
+  }, [state]);
 
   return (
     <form ref={form} action={formAction} className="space-y-3">

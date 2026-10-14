@@ -43,7 +43,7 @@ export default function MarkServiceLive({
 
   useEffect(() => {
     if (state.ok) setOpen(false);
-  }, [state.ok]);
+  }, [state]);
 
   useEffect(() => {
     if (open) {

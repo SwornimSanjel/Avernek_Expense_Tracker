@@ -64,7 +64,7 @@ export function AddCompanyBill({
 
   useEffect(() => {
     if (state.ok) setOpen(false);
-  }, [state.ok]);
+  }, [state]);
 
   return (
     <>
@@ -200,7 +200,7 @@ export function ReimburseBill({
 
   useEffect(() => {
     if (state.ok) setOpen(false);
-  }, [state.ok]);
+  }, [state]);
 
   if (!open) {
     return (
@@ -322,7 +322,7 @@ export function PayVat({ balances, vatOwed }: { balances: MoneyAccountBalance[];
 
   useEffect(() => {
     if (state.ok) setOpen(false);
-  }, [state.ok]);
+  }, [state]);
 
   if (!open) {
     return (

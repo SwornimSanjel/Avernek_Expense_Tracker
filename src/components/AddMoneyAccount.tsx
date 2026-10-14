@@ -16,7 +16,7 @@ export default function AddMoneyAccount() {
 
   useEffect(() => {
     if (state.ok) setOpen(false);
-  }, [state.ok]);
+  }, [state]);
 
   return (
     <>

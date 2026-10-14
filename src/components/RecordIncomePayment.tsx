@@ -92,7 +92,7 @@ export default function RecordIncomePayment({
 
   useEffect(() => {
     if (state.ok) setOpen(false);
-  }, [state.ok]);
+  }, [state]);
 
   if (!open) {
     return (

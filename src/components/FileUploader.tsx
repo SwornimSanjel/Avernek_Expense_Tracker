@@ -8,6 +8,7 @@ import {
   ATTACHMENT_MAX_FILES,
   ATTACHMENT_MAX_TOTAL_BYTES,
   attachmentUrl,
+  cleanFileName,
   formatFileSize,
   isImageAttachment,
   looksLikeAttachment,
@@ -86,11 +87,31 @@ export default function FileUploader({
     }
   }
 
+  // A picked file that now appears among the saved ones has been saved: drop it
+  // from the "new" list so it is never shown — or posted — twice. The server
+  // stores the cleaned name and the exact byte size, so both must match.
+  const existingRef = useRef(existing);
+  existingRef.current = existing;
+  const unsaved = (list: File[]) =>
+    list.filter(
+      (file) =>
+        !existingRef.current.some(
+          (saved) => saved.file_name === cleanFileName(file.name) && saved.size_bytes === file.size
+        )
+    );
+
+  useEffect(() => {
+    const remaining = unsaved(filesRef.current);
+    if (remaining.length !== filesRef.current.length) apply(remaining);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [existing]);
+
   // Put picked files back after React resets the form following a failed save.
+  // Files that were in fact saved are left out.
   useEffect(() => {
     const form = inputRef.current?.form;
     if (!form) return;
-    const restore = () => window.setTimeout(() => apply(filesRef.current), 0);
+    const restore = () => window.setTimeout(() => apply(unsaved(filesRef.current)), 0);
     form.addEventListener("reset", restore);
     return () => form.removeEventListener("reset", restore);
     // eslint-disable-next-line react-hooks/exhaustive-deps

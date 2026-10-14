@@ -21,7 +21,7 @@ export default function SetPasswordForm({
 
   useEffect(() => {
     if (state.ok) form.current?.reset();
-  }, [state.ok]);
+  }, [state]);
 
   return (
     <form ref={form} action={formAction} className="space-y-3">

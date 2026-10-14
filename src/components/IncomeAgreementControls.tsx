@@ -69,7 +69,7 @@ export default function IncomeAgreementControls({
 
   useEffect(() => {
     if (state.ok) setEditing(false);
-  }, [state.ok]);
+  }, [state]);
 
   useEffect(() => {
     const close = (event: MouseEvent) => {
