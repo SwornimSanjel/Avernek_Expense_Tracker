@@ -111,14 +111,19 @@ cmd_preflight() {
   echo "    Docker Compose $version"
 
   if [[ ! -d "$DEPLOY_DIR" ]]; then
-    if [[ -w "$DEPLOY_ROOT" ]]; then
+    if [[ -d "$DEPLOY_ROOT" && -w "$DEPLOY_ROOT" ]]; then
       install -d -m 750 "$DEPLOY_DIR"
       echo "    created $DEPLOY_DIR"
     else
-      die "$DEPLOY_DIR does not exist and $DEPLOY_ROOT is not writable by $(id -un)." \
-        "Run once on the server:" \
-        "  sudo install -d -o root -g root -m 755 $DEPLOY_ROOT" \
-        "  sudo install -d -o jenkins -g jenkins -m 750 $DEPLOY_DIR"
+      local why="does not exist"
+      [[ -d "$DEPLOY_ROOT" ]] && why="is not writable by $(id -un)"
+      # Only root can create or open up $DEPLOY_ROOT: a one-time step per VPS,
+      # after which every project's pipeline creates its own directory.
+      die "$DEPLOY_DIR does not exist, and $DEPLOY_ROOT $why, so the pipeline cannot create it." \
+        "One-time server setup, shared by every project on this VPS (docs/DEPLOYMENT.md, 'Deployment directory'):" \
+        "  sudo install -d -o root -g $(id -gn) -m 1775 $DEPLOY_ROOT" \
+        "Then rebuild. The first run in the new directory stops for the first-deployment approval" \
+        "(docs/DEPLOYMENT.md, 'First deployment'); you can write it before rebuilding."
     fi
   fi
   [[ -w "$DEPLOY_DIR" ]] || die "$DEPLOY_DIR is not writable by $(id -un)." \

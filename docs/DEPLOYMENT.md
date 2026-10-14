@@ -106,10 +106,21 @@ Jenkins controller and its credentials restricted to administrators.
 
 ### Deployment directory
 
+`/srv` belongs to root, so Jenkins cannot create anything under it on its own.
+Once per VPS (every project shares `/srv/deployments`), let the `jenkins`
+group create project directories there:
+
 ```bash
-sudo install -d -o root -g root -m 755 /srv/deployments
-sudo install -d -o jenkins -g jenkins -m 750 /srv/deployments/avernek-expense-tracker
+# 1775: jenkins can create its project directories; the sticky bit stops it
+# renaming or removing directories it does not own. Safe on an existing
+# /srv/deployments: it changes only that directory, not the projects inside.
+sudo install -d -o root -g jenkins -m 1775 /srv/deployments
 ```
+
+The pipeline then creates `/srv/deployments/avernek-expense-tracker/` itself
+(owner `jenkins`, mode 750) on its first run. If `/srv/deployments` must stay
+root-only, create each project directory by hand instead:
+`sudo install -d -o jenkins -g jenkins -m 750 /srv/deployments/avernek-expense-tracker`.
 
 The pipeline never writes outside this directory (apart from images, containers
 and the volume through Docker, and the shared lock file
@@ -201,6 +212,7 @@ new pipeline keeps that project name and volume, so the data carries over.
 JH=/var/lib/jenkins                                  # JENKINS_HOME
 OLD=$JH/deployments/avernek-expense-tracker
 NEW=/srv/deployments/avernek-expense-tracker
+sudo install -d -o jenkins -g jenkins -m 750 $NEW   # the pipeline would create it, but files go in first
 
 # 1. Look at what runs today.
 docker ps --filter label=com.docker.compose.project=avernek-expense-tracker
@@ -246,6 +258,7 @@ removed automatically; delete them by hand when no longer needed.
 
 ```bash
 NEW=/srv/deployments/avernek-expense-tracker
+sudo install -d -o jenkins -g jenkins -m 750 $NEW   # the pipeline would create it, but files go in first
 # Option 1: let the pipeline create .env from the Jenkins credential (it must contain APP_PORT).
 # Option 2: create it yourself:
 sudo install -m 600 -o jenkins -g jenkins /dev/null $NEW/.env
@@ -448,6 +461,7 @@ This does not exercise the plugin itself; the next pipeline run does.
 
 | Symptom | Fix |
 |---|---|
+| `… /srv/deployments is not writable by jenkins` (or `does not exist`) | One-time VPS setup: "Deployment directory" above. |
 | `first deployment is not approved` | Follow "First deployment" and write `.first-deploy-approved`. |
 | `missing or empty in .env: …` | Edit `/srv/deployments/avernek-expense-tracker/.env`. |
 | `host port … is in use` | Choose a free `APP_PORT`, update Caddy, rebuild. |
