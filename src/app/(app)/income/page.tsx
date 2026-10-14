@@ -30,6 +30,7 @@ import { loadLedger } from "@/lib/ledger";
 import { bankAmount } from "@/lib/tax";
 import type { IncomeAgreement, MoneyAccount, ServiceKey } from "@/lib/types";
 import { ATTACHMENT_COLUMNS, type Attachment } from "@/lib/attachments";
+import { LendMoney, MarkLoanRepaid } from "@/components/LoanActions";
 
 export const dynamic = "force-dynamic";
 
@@ -77,7 +78,7 @@ export default async function IncomePage({
   const filters = await searchParams;
   const today = todayIso();
 
-  const [agreements, ledger, agreementFileRows] = await Promise.all([
+  const [agreements, ledger, agreementFileRows, people] = await Promise.all([
     query<IncomeAgreement>(
       `select * from public.income_agreements
        order by case status when 'active' then 0 when 'pending' then 1 when 'paused' then 2 else 3 end,
@@ -89,7 +90,9 @@ export default async function IncomePage({
         where kind = 'client_agreement'
         order by created_at`
     ),
+    query<{ name: string }>(`select name from public.users order by name`),
   ]);
+  const openLoans = ledger.loans.filter((loan) => !loan.repaid_on);
   const agreementFilesById = new Map<string, Attachment[]>();
   for (const file of agreementFileRows) {
     const list = agreementFilesById.get(file.agreement_id!) ?? [];
@@ -159,9 +162,14 @@ export default async function IncomePage({
           title="Where the money is"
           subtitle="VAT sitting in an account belongs to IRD — only “free to use” is really yours."
           action={
-            <Link href="/funds" className="btn !h-9 text-sm">
-              <Icon name="wallet" size={14} /> Company money
-            </Link>
+            <div className="flex flex-wrap gap-2">
+              {canManage && (
+                <LendMoney balances={balances} people={people.map((person) => person.name)} compact />
+              )}
+              <Link href="/funds" className="btn !h-9 text-sm">
+                <Icon name="wallet" size={14} /> Company money
+              </Link>
+            </div>
           }
         />
         <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 mt-3">
@@ -191,6 +199,40 @@ export default async function IncomePage({
             />
           ))}
         </div>
+        {openLoans.length > 0 && (
+          <div className="capital-strip mt-3 !items-start">
+            <div className="capital-strip-icon">
+              <Icon name="user" size={15} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <strong>
+                Loans out · {formatIncomeMoney(openLoans.reduce((sum, loan) => sum + Number(loan.amount), 0), "NPR")} not paid back yet
+              </strong>
+              <p>Already taken out of the balances above. Mark a loan paid back when the money returns.</p>
+              <div className="mt-2 space-y-1.5">
+                {openLoans.map((loan) => {
+                  const account = moneyAccounts.find((item) => item.id === loan.money_account_id);
+                  return (
+                    <div key={loan.id} className="flex flex-wrap items-center gap-2 text-xs">
+                      <span className="min-w-0 flex-1">
+                        <strong className="text-[12.5px]">{loan.borrower_name}</strong>{" "}
+                        {formatIncomeMoney(Number(loan.amount), account?.currency ?? "NPR")} from{" "}
+                        {accountLabel(account ?? moneyAccounts[0])} · taken {formatServiceDate(loan.lent_on)}
+                        {loan.note ? ` · ${loan.note}` : ""}
+                      </span>
+                      {canManage && (
+                        <span className="flex items-center gap-1">
+                          <MarkLoanRepaid loan={loan} accounts={moneyAccounts} />
+                          <LendMoney balances={balances} people={people.map((person) => person.name)} loan={loan} />
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
         {(tax.vatOwed > 0 || tax.tdsCredit > 0) && (
           <div className="capital-strip mt-3">
             <div className="capital-strip-icon">

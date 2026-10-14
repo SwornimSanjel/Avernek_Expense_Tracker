@@ -332,6 +332,25 @@ export interface MoneyAccount {
 
 export type MoneyTransferKind = "transfer" | "reimbursement";
 
+/**
+ * Company money lent to a person. It leaves `money_account_id` on `lent_on` and
+ * returns to `repaid_to_account_id` on `repaid_on`. Never revenue or expense.
+ */
+export interface MoneyLoan {
+  id: string;
+  money_account_id: string;
+  borrower_name: string;
+  amount: number;
+  lent_on: string;
+  note: string | null;
+  repaid_on: string | null;
+  repaid_to_account_id: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_by: string | null;
+  updated_at: string;
+}
+
 export interface MoneyTransfer {
   id: string;
   /** reimbursement = the VAT account paying back a bill in the company's name. */

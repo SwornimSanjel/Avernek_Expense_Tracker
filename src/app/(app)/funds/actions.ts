@@ -439,3 +439,141 @@ export async function deleteTaxPayment(id: string) {
   await exec(`delete from public.tax_payments where id = $1`, [id]);
   revalidateFunds();
 }
+
+// -----------------------------------------------------------------------------
+// Loans: company money lent to a person
+//
+// Lending moves money out of an account; paying it back moves it in again.
+// Neither is an expense or income, so nothing here touches revenue, spending,
+// VAT or profit — only the balance of the accounts involved.
+// -----------------------------------------------------------------------------
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Lend money, or correct an existing loan when `loan_id` is posted. */
+export async function saveMoneyLoan(
+  _previous: FundsFormState,
+  formData: FormData
+): Promise<FundsFormState> {
+  const session = await owner();
+  const id = value(formData, "loan_id");
+  const accountId = value(formData, "money_account_id");
+  const borrower = value(formData, "borrower_name");
+  const amount = money2(formData.get("amount"));
+  const lentOn = value(formData, "lent_on");
+  const note = value(formData, "note") || null;
+
+  if (!borrower) return { error: "Who took the money?", ok: null };
+  if (!accountId) return { error: "Choose the account the money came out of.", ok: null };
+  if (!Number.isFinite(amount) || amount <= 0) return { error: "Enter how much was lent.", ok: null };
+  if (!DATE_RE.test(lentOn)) return { error: "Enter the date the money was taken.", ok: null };
+
+  const existing = id
+    ? await one<{ money_account_id: string; amount: string; repaid_on: string | null }>(
+        `select money_account_id, amount, repaid_on from public.money_loans where id = $1`,
+        [id]
+      )
+    : null;
+  if (id && !existing) return { error: "That loan no longer exists.", ok: null };
+  if (existing?.repaid_on && lentOn > existing.repaid_on) {
+    return { error: "The loan cannot start after the day it was paid back.", ok: null };
+  }
+
+  // Only money that is really free can be lent: VAT kept aside for IRD stays put.
+  const balance = (await loadLedger()).balances.find((item) => item.account.id === accountId);
+  if (!balance) return { error: "That account is unavailable.", ok: null };
+  const alreadyOut =
+    existing && !existing.repaid_on && existing.money_account_id === accountId
+      ? Number(existing.amount)
+      : 0;
+  const available = balance.free + alreadyOut;
+  if (amount > available + 0.001) {
+    return {
+      error: `Only ${Math.max(0, available).toLocaleString("en-NP")} can be lent from ${balance.account.name}${
+        balance.vatReserved > 0 ? " — the rest is VAT kept aside for IRD" : ""
+      }.`,
+      ok: null,
+    };
+  }
+
+  if (id) {
+    await exec(
+      `update public.money_loans
+          set money_account_id = $1, borrower_name = $2, amount = $3, lent_on = $4, note = $5,
+              updated_by = $6, updated_at = now()
+        where id = $7`,
+      [accountId, borrower, amount, lentOn, note, session.sub, id]
+    );
+  } else {
+    await exec(
+      `insert into public.money_loans (money_account_id, borrower_name, amount, lent_on, note, created_by)
+       values ($1,$2,$3,$4,$5,$6)`,
+      [accountId, borrower, amount, lentOn, note, session.sub]
+    );
+  }
+
+  revalidateFunds();
+  return {
+    error: null,
+    ok: id ? "Loan updated." : `Lent ${amount.toLocaleString("en-NP")} to ${borrower}. Mark it paid back when the money returns.`,
+  };
+}
+
+/** The money came back: it returns to the chosen account (usually the same one). */
+export async function markLoanRepaid(
+  _previous: FundsFormState,
+  formData: FormData
+): Promise<FundsFormState> {
+  const session = await owner();
+  const id = value(formData, "loan_id");
+  const repaidOn = value(formData, "repaid_on");
+  const toAccountId = value(formData, "repaid_to_account_id");
+  if (!id) return { error: "That loan no longer exists.", ok: null };
+  if (!DATE_RE.test(repaidOn)) return { error: "Enter the date it was paid back.", ok: null };
+
+  const loan = await one<{ lent_on: string; borrower_name: string; currency: string }>(
+    `select l.lent_on, l.borrower_name, a.currency
+       from public.money_loans l
+       join public.money_accounts a on a.id = l.money_account_id
+      where l.id = $1`,
+    [id]
+  );
+  if (!loan) return { error: "That loan no longer exists.", ok: null };
+  if (repaidOn < loan.lent_on) return { error: "It cannot be paid back before it was lent.", ok: null };
+
+  const target = await one<{ currency: string; is_active: boolean }>(
+    `select currency, is_active from public.money_accounts where id = $1`,
+    [toAccountId]
+  );
+  if (!target?.is_active) return { error: "Choose the account the money came back into.", ok: null };
+  if (target.currency !== loan.currency) {
+    return { error: `Choose a ${loan.currency} account — the loan was in ${loan.currency}.`, ok: null };
+  }
+
+  await exec(
+    `update public.money_loans
+        set repaid_on = $1, repaid_to_account_id = $2, updated_by = $3, updated_at = now()
+      where id = $4`,
+    [repaidOn, toAccountId, session.sub, id]
+  );
+  revalidateFunds();
+  return { error: null, ok: `${loan.borrower_name}'s loan marked as paid back.` };
+}
+
+/** Undo a "paid back" recorded by mistake. The loan is outstanding again. */
+export async function undoLoanRepaid(id: string) {
+  const session = await owner();
+  await exec(
+    `update public.money_loans
+        set repaid_on = null, repaid_to_account_id = null, updated_by = $1, updated_at = now()
+      where id = $2`,
+    [session.sub, id]
+  );
+  revalidateFunds();
+}
+
+export async function deleteMoneyLoan(id: string) {
+  await owner();
+  await exec(`delete from public.money_loans where id = $1`, [id]);
+  revalidateFunds();
+}

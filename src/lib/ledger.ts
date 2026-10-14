@@ -11,6 +11,7 @@ import type {
   Expense,
   IncomePayment,
   MoneyAccount,
+  MoneyLoan,
   MoneyTransfer,
   OtherIncome,
   TaxPayment,
@@ -22,7 +23,7 @@ import type {
  * a transfer can never be computed two different ways.
  */
 export async function loadLedger() {
-  const [accounts, payments, expenses, transfers, capitalInflows, otherIncome, taxPayments, bills] =
+  const [accounts, payments, expenses, transfers, capitalInflows, otherIncome, taxPayments, bills, loans] =
     await Promise.all([
       query<MoneyAccount>(`select * from public.money_accounts where is_active = true order by currency, name`),
       query<IncomePayment>(`select * from public.income_payments order by paid_on desc, created_at desc`),
@@ -35,6 +36,10 @@ export async function loadLedger() {
       query<OtherIncome>(`select * from public.other_income order by received_on desc, created_at desc`),
       query<TaxPayment>(`select * from public.tax_payments order by paid_on desc, created_at desc`),
       query<CompanyBill>(`select * from public.company_bills order by bill_date desc, created_at desc`),
+      query<MoneyLoan>(
+        `select * from public.money_loans
+          order by (repaid_on is null) desc, lent_on desc, created_at desc`
+      ),
     ]);
 
   const input: LedgerInput = {
@@ -46,6 +51,7 @@ export async function loadLedger() {
     otherIncome,
     taxPayments,
     bills,
+    loans,
   };
 
   return {
@@ -54,6 +60,7 @@ export async function loadLedger() {
     otherIncome,
     taxPayments,
     bills,
+    loans,
     balances: computeMoneyAccountBalances(input),
     tax: computeTaxPosition(input),
     billStatuses: summarizeBills(bills, transfers),

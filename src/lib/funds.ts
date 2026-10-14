@@ -4,6 +4,7 @@ import type {
   Expense,
   IncomePayment,
   MoneyAccount,
+  MoneyLoan,
   MoneyTransfer,
   OtherIncome,
   TaxPayment,
@@ -31,6 +32,12 @@ export type MoneyAccountBalance = {
   transferredOut: number;
   reimbursedOut: number;
   vatPaid: number;
+  /** Lent from this account and not paid back yet. */
+  loanedOut: number;
+  /** All money ever lent from this account (repaid or not). */
+  lentOut: number;
+  /** Loan repayments that came back into this account. */
+  loanRepaidIn: number;
   balance: number;
   /** VAT still owed to IRD that sits in this account. Untouchable. */
   vatReserved: number;
@@ -74,6 +81,7 @@ export type LedgerInput = {
   otherIncome?: OtherIncome[];
   taxPayments?: TaxPayment[];
   bills?: CompanyBill[];
+  loans?: MoneyLoan[];
 };
 
 function sumWhere<T>(rows: T[], keep: (row: T) => boolean, value: (row: T) => number) {
@@ -115,6 +123,7 @@ export function computeMoneyAccountBalances(input: LedgerInput): MoneyAccountBal
     otherIncome = [],
     taxPayments = [],
     bills = [],
+    loans = [],
   } = input;
 
   const rows = accounts.map((account) => {
@@ -142,6 +151,19 @@ export function computeMoneyAccountBalances(input: LedgerInput): MoneyAccountBal
       (t) => Number(t.from_amount)
     );
     const vatPaid = sumWhere(taxPayments, (t) => mine(t.money_account_id), (t) => Number(t.amount));
+    // A loan leaves the account when it is lent and comes back when repaid —
+    // possibly into a different account. Neither side is revenue or expense.
+    const lentOut = sumWhere(loans, (l) => mine(l.money_account_id), (l) => Number(l.amount));
+    const loanRepaidIn = sumWhere(
+      loans,
+      (l) => Boolean(l.repaid_on) && mine(l.repaid_to_account_id),
+      (l) => Number(l.amount)
+    );
+    const loanedOut = sumWhere(
+      loans,
+      (l) => !l.repaid_on && mine(l.money_account_id),
+      (l) => Number(l.amount)
+    );
 
     return {
       account,
@@ -155,8 +177,12 @@ export function computeMoneyAccountBalances(input: LedgerInput): MoneyAccountBal
       transferredOut,
       reimbursedOut,
       vatPaid,
+      loanedOut: round2(loanedOut),
+      lentOut: round2(lentOut),
+      loanRepaidIn: round2(loanRepaidIn),
       balance: round2(
         revenue + vatIn - tdsWithheld + capitalIn + transferredIn - spent - transferredOut - vatPaid
+          - lentOut + loanRepaidIn
       ),
       vatReserved: Math.max(0, vatIn - vatPaid),
       free: 0,
