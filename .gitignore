@@ -13,3 +13,6 @@ next-env.d.ts
 .deployment.env
 /bin/
 /diagnostics/
+
+# Local run of the production stack (scripts/local-stack.sh); holds a copy of .env.
+.local-deploy/
