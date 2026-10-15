@@ -79,6 +79,8 @@ export interface AppUser {
   email: string;
   is_core_member: boolean;
   is_admin: boolean;
+  /** One of the partners whose money is tracked. Login-only accounts are not. */
+  is_partner: boolean;
 }
 
 /**

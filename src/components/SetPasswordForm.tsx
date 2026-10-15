@@ -59,7 +59,7 @@ export default function SetPasswordForm({
       {state.error && <p className="alert alert-error">{state.error}</p>}
       {state.ok && <p className="alert" style={{ color: "var(--green)", borderColor: "rgb(70 216 144 / .2)" }}>{state.ok}</p>}
 
-      <p className="text-xs muted">
+      <p className="text-[13px] muted">
         Also how an existing participant gets a login for the first time. This
         does not sign them out of sessions they already have.
       </p>

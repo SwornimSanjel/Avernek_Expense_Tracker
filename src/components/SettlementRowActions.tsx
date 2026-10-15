@@ -1,5 +1,6 @@
 "use client";
 
+import Icon from "@/components/Icons";
 import { useState, useTransition } from "react";
 import { deleteSettlement, updateSettlement } from "@/app/(app)/settlements/actions";
 import type { AppUser, Settlement } from "@/lib/types";
@@ -16,7 +17,7 @@ export default function SettlementRowActions({
 
   return (
     <>
-      <button onClick={() => setOpen(true)} className="btn !h-8 !px-3 text-xs">
+      <button onClick={() => setOpen(true)} className="btn !h-8 !px-3 text-[13px]">
         Edit
       </button>
       {open && (
@@ -34,22 +35,22 @@ export default function SettlementRowActions({
             <input type="hidden" name="settlement_id" value={settlement.id} />
             <div className="modal-header">
               <h2 className="text-lg font-bold">Edit reimbursement</h2>
-              <button type="button" onClick={() => setOpen(false)} className="icon-btn">✕</button>
+              <button type="button" onClick={() => setOpen(false)} className="icon-btn"><Icon name="close" size={16} /></button>
             </div>
             <div className="grid grid-cols-2 gap-2">
-              <label className="block text-xs muted">
+              <label className="block text-[13px] muted">
                 From
                 <select name="from_user_id" defaultValue={settlement.from_user_id} className="input mt-1">
                   {users.map((user) => <option key={user.id} value={user.id}>{user.name}</option>)}
                 </select>
               </label>
-              <label className="block text-xs muted">
+              <label className="block text-[13px] muted">
                 To
                 <select name="to_user_id" defaultValue={settlement.to_user_id} className="input mt-1">
                   {users.map((user) => <option key={user.id} value={user.id}>{user.name}</option>)}
                 </select>
               </label>
-              <label className="block text-xs muted">
+              <label className="block text-[13px] muted">
                 Amount (NPR)
                 <input
                   name="amount_npr"
@@ -59,7 +60,7 @@ export default function SettlementRowActions({
                   className="input tnum mt-1"
                 />
               </label>
-              <label className="block text-xs muted">
+              <label className="block text-[13px] muted">
                 Date
                 <input
                   name="settled_on"
@@ -70,7 +71,7 @@ export default function SettlementRowActions({
                 />
               </label>
             </div>
-            <label className="block text-xs muted">
+            <label className="block text-[13px] muted">
               Note
               <input name="note" defaultValue={settlement.note ?? ""} className="input mt-1" />
             </label>

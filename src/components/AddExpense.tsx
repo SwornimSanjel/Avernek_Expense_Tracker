@@ -12,11 +12,11 @@ import type {
 } from "@/lib/types";
 import ShareAllocationFields from "./ShareAllocationFields";
 import { BillDocuments } from "./DocumentSections";
+import Icon from "./Icons";
+import { nepalToday } from "@/lib/dates";
+import { pickerPeople } from "@/lib/people";
 
-const today = () => {
-  const date = new Date();
-  return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
-};
+const today = () => nepalToday();
 
 export default function AddExpense({
   categories,
@@ -47,6 +47,13 @@ export default function AddExpense({
   const [rateLoading, setRateLoading] = useState(false);
   const [pending, startTransition] = useTransition();
   const [filesBusy, setFilesBusy] = useState(false);
+  const people = pickerPeople(users);
+  const defaultPayer =
+    people.find((person) => person.id === meId)?.id ??
+    people.find((person) => person.is_core_member)?.id ??
+    people[0]?.id ??
+    meId;
+  const [payerId, setPayerId] = useState(defaultPayer);
 
   useEffect(() => {
     if (currency !== "USD") {
@@ -93,6 +100,7 @@ export default function AddExpense({
         setMoneyAccountId("");
         setBillingMonth(today().slice(0, 7));
         setBillingMonthTouched(false);
+        setDate(today());
         setOpen(false);
       } catch (error) {
         window.alert(error instanceof Error ? error.message : "Could not save expense");
@@ -102,8 +110,8 @@ export default function AddExpense({
 
   if (!open) {
     return (
-      <button onClick={() => setOpen(true)} className="btn btn-primary">
-        <span className="text-base leading-none">＋</span> Add expense
+      <button onClick={() => { setDate(today()); setOpen(true); }} className="btn btn-primary">
+        <Icon name="plus" size={16} strokeWidth={2.2} /> Add expense
       </button>
     );
   }
@@ -115,16 +123,16 @@ export default function AddExpense({
         className="modal-panel md:max-w-lg p-5 md:p-6 space-y-4"
       >
         <div className="modal-header">
-          <div><h2 className="text-lg font-bold">Add expense</h2><p className="text-xs muted mt-1">Choose founder investment or the exact company-money account that paid.</p></div>
-          <button type="button" onClick={() => setOpen(false)} className="icon-btn">
-            ✕
+          <div><h2>Add expense</h2><p className="muted mt-1">Today&apos;s date is filled in — change it only if you paid on another day.</p></div>
+          <button type="button" onClick={() => setOpen(false)} className="icon-btn" aria-label="Close">
+            <Icon name="close" size={16} />
           </button>
         </div>
 
         {/* Amount + currency */}
         <div className="flex gap-2">
           <div className="flex-1">
-            <label className="text-xs muted">Amount</label>
+            <label className="field-label">Amount</label>
             <input
               name="amount"
               type="number"
@@ -139,7 +147,7 @@ export default function AddExpense({
             />
           </div>
           <div className="w-28">
-            <label className="text-xs muted">Currency</label>
+            <label className="field-label">Currency</label>
             <select
               name="currency"
               value={currency}
@@ -167,7 +175,7 @@ export default function AddExpense({
               <>
                 <div className="flex justify-between">
                   <span className="muted">{rateLabel(rate.rate)}</span>
-                  <span className="text-xs muted">NRB · {rate.rateDate}</span>
+                  <span className="text-[13px] muted">NRB · {rate.rateDate}</span>
                 </div>
                 <div className="tnum font-semibold mt-1">≈ {npr(estNpr)}</div>
               </>
@@ -188,7 +196,7 @@ export default function AddExpense({
 
             {showActual && (
               <div className="mt-2">
-                <label className="text-xs muted">
+                <label className="text-[13px] muted">
                   Actual NPR charged (from your statement){isNprAccountPayingUsd ? " · required" : ""}
                 </label>
                 <input
@@ -203,7 +211,7 @@ export default function AddExpense({
                   className="input tnum mt-1"
                 />
                 {effectiveRate && (
-                  <div className="text-xs mt-1" style={{ color: "var(--green)" }}>
+                  <div className="text-[13px] mt-1" style={{ color: "var(--green)" }}>
                     Effective rate: {rateLabel(effectiveRate)} — overrides the estimate
                   </div>
                 )}
@@ -298,11 +306,10 @@ export default function AddExpense({
           </Field>
           {fundingSource === "personal" && (
             <Field label="Invested / paid personally by">
-              <select name="paid_by_user_id" defaultValue={meId} className="input">
-                {users.map((u) => (
+              <select name="paid_by_user_id" value={payerId} onChange={(event) => setPayerId(event.target.value)} className="input">
+                {people.map((u) => (
                   <option key={u.id} value={u.id}>
                     {u.name}
-                    {!u.is_core_member ? " (manual split)" : ""}
                   </option>
                 ))}
               </select>
@@ -343,7 +350,12 @@ export default function AddExpense({
         </div>
 
         {fundingSource === "personal" && (
-          <ShareAllocationFields users={users} total={amount} currency={currency} />
+          <ShareAllocationFields
+            users={people}
+            total={amount}
+            currency={currency}
+            fallbackPayer={people.find((person) => person.id === payerId) ?? null}
+          />
         )}
 
         <Field label="Client / project (optional)">

@@ -97,7 +97,7 @@ export default function IncomeAgreementControls({
           <Icon name="more" size={17} />
         </button>
         {menuOpen && (
-          <div className="absolute right-0 top-10 z-20 w-52 card !rounded-xl p-1 text-xs shadow-xl">
+          <div className="absolute right-0 top-10 z-20 w-52 card !rounded-xl p-1 text-[13px] shadow-xl">
             <button
               className="w-full rounded-lg px-3 py-2 text-left hover:bg-white/[.04]"
               onClick={() => {
@@ -188,13 +188,11 @@ export default function IncomeAgreementControls({
               <div className="modal-header">
                 <div>
                   <h2 className="text-lg font-bold">Edit {agreement.client_name}</h2>
-                  <p className="text-xs muted">
+                  <p className="text-[13px] muted">
                     Recorded payments are kept — balances recalculate from them.
                   </p>
                 </div>
-                <button type="button" onClick={() => setEditing(false)} className="icon-btn" aria-label="Close">
-                  ✕
-                </button>
+                <button type="button" onClick={() => setEditing(false)} className="icon-btn" aria-label="Close"><Icon name="close" size={16} /></button>
               </div>
               <nav className="sheet-tabs" role="tablist">
                 {AGREEMENT_TABS.map((item) => (
@@ -232,7 +230,7 @@ export default function IncomeAgreementControls({
               {state.error ? (
                 <p className="text-sm min-w-0 flex-1" style={{ color: "var(--red)" }}>{state.error}</p>
               ) : (
-                <p className="text-xs muted min-w-0 flex-1">Changes on every tab are saved together.</p>
+                <p className="text-[13px] muted min-w-0 flex-1">Changes on every tab are saved together.</p>
               )}
               <button type="button" onClick={() => setEditing(false)} className="btn !h-11">
                 Cancel

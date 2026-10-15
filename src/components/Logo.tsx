@@ -1,37 +1,45 @@
-export function LogoMark({ size = 28 }: { size?: number }) {
+import { useId } from "react";
+
+/**
+ * The official Avernek mark, traced 1:1 from the brand file (1024×1024 art,
+ * mark spans x 308–716, y 320–700): two tapered legs, each with a small
+ * rounded tab at mid-height, on the brand's violet gradient. Drawn as SVG so
+ * it stays sharp at every size and needs no white or dark backing square.
+ */
+export const LOGO_LEFT =
+  "M468 320H504L480.42 480H492a10 10 0 0 1 10 10v30a10 10 0 0 1-10 10H473.05L448 700H308Z";
+export const LOGO_RIGHT =
+  "M556 320H520L543.58 480H532a10 10 0 0 0-10 10v30a10 10 0 0 0 10 10h18.95L576 700H716Z";
+
+export function LogoMark({ size = 28, className = "" }: { size?: number; className?: string }) {
+  const id = useId().replace(/:/g, "");
   return (
-    <span
-      aria-label="Avernek"
+    <svg
+      viewBox="298 300 428 420"
+      width={size}
+      height={size}
       role="img"
-      className="logo-mark relative inline-block shrink-0"
-      style={{
-        width: size,
-        height: size,
-      }}
+      aria-label="Avernek"
+      className={`logo-mark shrink-0 ${className}`}
     >
-      <svg viewBox="0 0 64 64" width={size} height={size} aria-hidden="true" className="block overflow-visible">
-        <defs>
-          <linearGradient id="avernek-mark-gradient" x1="32" y1="4" x2="32" y2="60" gradientUnits="userSpaceOnUse">
-            <stop stopColor="#b481ff" />
-            <stop offset="1" stopColor="#6d22e6" />
-          </linearGradient>
-        </defs>
-        <path d="M3 60 25 4h9l-7 34h6.5c2 0 3.5 1.5 3.5 3.5v5c0 2-1.5 3.5-3.5 3.5h-9L21.5 60H3Z" fill="url(#avernek-mark-gradient)" />
-        <path d="M61 60 39 4h-9l7 34h-6.5c-2 0-3.5 1.5-3.5 3.5v5c0 2 1.5 3.5 3.5 3.5h9l3 10H61Z" fill="url(#avernek-mark-gradient)" />
-      </svg>
-    </span>
+      <defs>
+        <linearGradient id={`avk-${id}`} x1="0" y1="320" x2="0" y2="700" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stopColor="#A274FF" />
+          <stop offset="0.48" stopColor="#8A3FFC" />
+          <stop offset="1" stopColor="#5B1EB3" />
+        </linearGradient>
+      </defs>
+      <path d={LOGO_LEFT} fill={`url(#avk-${id})`} />
+      <path d={LOGO_RIGHT} fill={`url(#avk-${id})`} />
+    </svg>
   );
 }
 
-export function LogoWord({ compact = false }: { compact?: boolean }) {
+export function LogoWord({ compact = false, size = 26 }: { compact?: boolean; size?: number }) {
   return (
     <span className="logo-word inline-flex items-center gap-2.5">
-      <LogoMark size={30} />
-      {!compact && (
-        <span className="font-bold tracking-[-0.025em] text-[19px] leading-none">
-          <span style={{ color: "#9a6bff" }}>A</span>vernek
-        </span>
-      )}
+      <LogoMark size={size} />
+      {!compact && <span className="logo-text">Avernek</span>}
     </span>
   );
 }

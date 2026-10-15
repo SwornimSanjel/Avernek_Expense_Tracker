@@ -1,5 +1,6 @@
 "use client";
 
+import Icon from "@/components/Icons";
 import { guardRequest } from "@/lib/stale-deploy";
 import { useActionState, useEffect, useState } from "react";
 import { addCapitalInflow, type FundsFormState } from "@/app/(app)/funds/actions";
@@ -39,7 +40,7 @@ export default function AddAccountFunds({
         onClick={() => setOpen(true)}
         className={`btn ${compact ? "!h-9 !px-3 text-sm" : ""}`}
       >
-        <span className="text-base leading-none">＋</span> {label}
+        <Icon name="plus" size={15} /> {label}
       </button>
     );
   }
@@ -50,13 +51,11 @@ export default function AddAccountFunds({
         <div className="modal-header">
           <div>
             <h2 className="text-lg font-bold">Add funds to an account</h2>
-            <p className="text-xs muted">
+            <p className="text-[13px] muted">
               Money that was not earned from a client. It changes the balance only.
             </p>
           </div>
-          <button type="button" onClick={() => setOpen(false)} className="icon-btn">
-            ✕
-          </button>
+          <button type="button" onClick={() => setOpen(false)} className="icon-btn"><Icon name="close" size={16} /></button>
         </div>
 
         <label className="block">
@@ -137,7 +136,7 @@ export default function AddAccountFunds({
           <input name="note" placeholder="Why the money was put in" className="input mt-1" />
         </label>
 
-        <p className="text-xs muted">
+        <p className="text-[13px] muted">
           Recorded under Capital / financing. It never appears as client income, sales, VAT
           taxable sales or profit.
         </p>

@@ -1,5 +1,7 @@
 "use client";
 
+import Icon from "@/components/Icons";
+import { pickerPeople } from "@/lib/people";
 import { useState, useTransition } from "react";
 import { updateRecurring } from "@/app/(app)/subscriptions/actions";
 import type { AppUser, Category, Currency, Cycle, Recurring, Vendor } from "@/lib/types";
@@ -9,7 +11,7 @@ export default function EditRecurringModal({
   recurring,
   categories,
   vendors,
-  users,
+  users: allUsers,
   onClose,
 }: {
   recurring: Recurring;
@@ -18,6 +20,7 @@ export default function EditRecurringModal({
   users: AppUser[];
   onClose: () => void;
 }) {
+  const users = pickerPeople(allUsers, [recurring.paid_by_user_id, ...(recurring.recurring_shares ?? []).map((share) => share.user_id)]);
   const [amount, setAmount] = useState(String(recurring.amount));
   const [currency, setCurrency] = useState<Currency>(recurring.currency);
   const [busy, start] = useTransition();
@@ -36,11 +39,11 @@ export default function EditRecurringModal({
       >
         <input type="hidden" name="recurring_id" value={recurring.id} />
         <div className="modal-header">
-          <div><h2 className="text-lg font-bold">Edit subscription</h2><p className="text-xs muted mt-1">Change the renewal, amount, payer, or split.</p></div>
-          <button type="button" onClick={onClose} className="icon-btn">✕</button>
+          <div><h2 className="text-lg font-bold">Edit subscription</h2><p className="text-[13px] muted mt-1">Change the renewal, amount, payer, or split.</p></div>
+          <button type="button" onClick={onClose} className="icon-btn"><Icon name="close" size={16} /></button>
         </div>
 
-        <label className="block text-xs muted">
+        <label className="block text-[13px] muted">
           Name
           <input name="name" required defaultValue={recurring.name} className="input mt-1" />
         </label>
@@ -70,7 +73,7 @@ export default function EditRecurringModal({
           </select>
         </div>
 
-        <label className="block text-xs muted">
+        <label className="block text-[13px] muted">
           Next renewal date
           <input
             name="next_renewal_date"
@@ -81,14 +84,14 @@ export default function EditRecurringModal({
           />
         </label>
         <div className="grid grid-cols-2 gap-2">
-          <label className="block text-xs muted">
+          <label className="block text-[13px] muted">
             Category
             <select name="category_id" defaultValue={recurring.category_id ?? ""} className="input mt-1">
               <option value="">—</option>
               {categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
             </select>
           </label>
-          <label className="block text-xs muted">
+          <label className="block text-[13px] muted">
             Vendor
             <select name="vendor_id" defaultValue={recurring.vendor_id ?? ""} className="input mt-1">
               <option value="">—</option>
@@ -96,7 +99,7 @@ export default function EditRecurringModal({
             </select>
           </label>
         </div>
-        <label className="block text-xs muted">
+        <label className="block text-[13px] muted">
           Default payer
           <select name="paid_by_user_id" defaultValue={recurring.paid_by_user_id ?? ""} className="input mt-1">
             {users.map((user) => <option key={user.id} value={user.id}>{user.name}</option>)}

@@ -1,5 +1,7 @@
 "use client";
 
+import { pickerPeople } from "@/lib/people";
+import { nepalToday } from "@/lib/dates";
 import { useState, useTransition } from "react";
 import {
   logRenewalPaid,
@@ -19,7 +21,7 @@ export default function RecurringRow({
   cycle,
   nextRenewalDate,
   paidByUserId,
-  users,
+  users: allUsers,
   shares,
   recurring,
   categories,
@@ -38,6 +40,7 @@ export default function RecurringRow({
   categories: Category[];
   vendors: Vendor[];
 }) {
+  const users = pickerPeople(allUsers, [paidByUserId, ...shares.map((share) => share.userId)]);
   const [open, setOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -50,7 +53,7 @@ export default function RecurringRow({
       <button
         disabled={busy}
         onClick={() => setOpen(true)}
-        className="btn btn-primary !h-8 !px-3 text-xs"
+        className="btn btn-primary !h-8 !px-3 text-[13px]"
       >
         Mark paid
       </button>
@@ -59,7 +62,7 @@ export default function RecurringRow({
           <Icon name="more" size={17} />
         </button>
         {menuOpen && (
-          <div className="absolute right-0 top-9 z-20 w-44 card !rounded-xl p-1 text-xs shadow-xl">
+          <div className="absolute right-0 top-9 z-20 w-44 card !rounded-xl p-1 text-[13px] shadow-xl">
             <button className="w-full rounded-lg px-3 py-2 text-left hover:bg-white/[.04]" onClick={() => { setMenuOpen(false); setEditing(true); }}>Edit details</button>
             <button className="w-full rounded-lg px-3 py-2 text-left hover:bg-white/[.04]" onClick={() => start(async () => { await toggleActive(id, !isActive); setMenuOpen(false); })}>{isActive ? "Pause subscription" : "Resume subscription"}</button>
             <button className="w-full rounded-lg px-3 py-2 text-left hover:bg-white/[.04]" style={{ color: "var(--red)" }} onClick={() => {
@@ -87,17 +90,15 @@ export default function RecurringRow({
                 <h2 className="text-lg font-bold">
                   Log {isAnnual ? "annual" : "monthly"} payment
                 </h2>
-                <p className="text-xs muted">
+                <p className="text-[13px] muted">
                   Change this {isAnnual ? "renewal" : "month"} without changing future defaults.
                 </p>
               </div>
-              <button type="button" onClick={() => setOpen(false)} className="icon-btn">
-                ✕
-              </button>
+              <button type="button" onClick={() => setOpen(false)} className="icon-btn"><Icon name="close" size={16} /></button>
             </div>
 
             <div className="flex gap-2">
-              <label className="block flex-1 text-xs muted">
+              <label className="block flex-1 text-[13px] muted">
                 Total charged
                 <input
                   name="amount"
@@ -114,17 +115,17 @@ export default function RecurringRow({
             </div>
 
             <div className="grid grid-cols-2 gap-2">
-              <label className="block text-xs muted">
+              <label className="block text-[13px] muted">
                 Payment date
                 <input
                   name="expense_date"
                   type="date"
                   required
-                  defaultValue={nextRenewalDate}
+                  defaultValue={nepalToday()}
                   className="input mt-1"
                 />
               </label>
-              <label className="block text-xs muted">
+              <label className="block text-[13px] muted">
                 Billing month
                 <input
                   name="billing_month"
@@ -136,7 +137,7 @@ export default function RecurringRow({
               </label>
             </div>
 
-            <label className="block text-xs muted">
+            <label className="block text-[13px] muted">
               Paid to vendor by
               <select
                 name="paid_by_user_id"
@@ -162,7 +163,7 @@ export default function RecurringRow({
               <input name="update_defaults" type="checkbox" value="yes" className="mt-1" />
               <span>
                 Use this amount, payer, and split for future {isAnnual ? "renewals" : "months"}
-                <span className="block text-xs muted">
+                <span className="block text-[13px] muted">
                   Leave off when this is a one-time historical arrangement.
                 </span>
               </span>
@@ -179,7 +180,7 @@ export default function RecurringRow({
           recurring={recurring}
           categories={categories}
           vendors={vendors}
-          users={users}
+          users={allUsers}
           onClose={() => setEditing(false)}
         />
       )}

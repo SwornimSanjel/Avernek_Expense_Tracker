@@ -708,7 +708,7 @@ function BillingTimeline({
   if (!isValidDate(dayOne)) {
     return (
       <div className="timeline-preview mt-3">
-        <span className="muted text-xs">
+        <span className="muted text-[13px]">
           Not launched yet. Setup is collected for month 1 and the monthly fee starts one month after Day 1.
         </span>
       </div>

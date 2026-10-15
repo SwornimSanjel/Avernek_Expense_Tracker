@@ -1,101 +1,55 @@
 import { query } from "@/lib/db";
 import { requireSession } from "@/lib/auth/server";
-import { EmptyState, PageHeader, FxBadge, SectionHeader } from "@/components/ui";
+import { Avatar, EmptyState, FxBadge, Kpi, Money, PageHeader } from "@/components/ui";
 import AddExpense from "@/components/AddExpense";
-import { npr, usd } from "@/lib/format";
+import ExpenseFilters from "@/components/ExpenseFilters";
+import ExpenseRowActions from "@/components/ExpenseRowActions";
+import Icon from "@/components/Icons";
+import { formatNumber, usd } from "@/lib/format";
 import type { AppUser, Category, Expense, MoneyAccount, Vendor } from "@/lib/types";
 import { ATTACHMENT_COLUMNS, attachmentUrl, type Attachment } from "@/lib/attachments";
-import ExpenseRowActions from "@/components/ExpenseRowActions";
-import {
-  assignedShareNpr,
-  assignedShareOriginal,
-  computeIndividualSpending,
-} from "@/lib/individual";
+import { assignedShareNpr, assignedShareOriginal, computeIndividualSpending } from "@/lib/individual";
 import { canManageExpenses } from "@/lib/authz";
-import Icon from "@/components/Icons";
+import { USER_COLUMNS, partnersOf, personTone } from "@/lib/people";
+import { expenseWhere, withFilters, type ExpenseSearch } from "@/lib/expense-filters";
+import { accountLabel } from "@/lib/statement";
+import { dayLabel, monthLabel, nepalToday } from "@/lib/dates";
 
 export const dynamic = "force-dynamic";
 
 export default async function ExpensesPage({
   searchParams,
 }: {
-  searchParams: Promise<{
-    cat?: string;
-    ledger?: string;
-    payer?: string;
-    person?: string;
-    basis?: "share" | "paid";
-    month?: string;
-    vendor?: string;
-    client?: string;
-  }>;
+  searchParams: Promise<ExpenseSearch>;
 }) {
   const sp = await searchParams;
   const session = await requireSession();
   const canManage = canManageExpenses(session);
+  const today = nepalToday();
 
-  const [cats, vends, team, accounts, agreementClients] = await Promise.all([
+  const [categories, vendors, users, moneyAccounts, agreementClients, monthRows, futureRow] = await Promise.all([
     query<Category>(`select * from public.categories order by name`),
     query<Vendor>(`select * from public.vendors order by name`),
-    query<AppUser>(`select id, name, email, is_core_member, is_admin from public.users order by name`),
+    query<AppUser>(`select ${USER_COLUMNS} from public.users order by name`),
     query<MoneyAccount>(`select * from public.money_accounts where is_active = true order by currency, name`),
-    query<{ client_name: string }>(
-      `select distinct client_name from public.income_agreements order by client_name`
-    ),
+    query<{ client_name: string }>(`select distinct client_name from public.income_agreements order by client_name`),
+    query<{ month: string }>(`select distinct to_char(expense_date, 'YYYY-MM') as month from public.expenses`),
+    query<{ count: string }>(`select count(*) from public.expenses where expense_date > $1`, [today]),
   ]);
 
-  // Filters are optional, so the WHERE clause is assembled from whichever
-  // search params are present. Values always go through $n placeholders —
-  // never interpolated — because they come straight from the query string.
-  const conditions: string[] = [];
-  const params: unknown[] = [];
-
-  if (sp.cat) {
-    params.push(sp.cat);
-    conditions.push(`category_id = $${params.length}`);
-  }
-  if (sp.vendor) {
-    params.push(sp.vendor);
-    conditions.push(`vendor_id = $${params.length}`);
-  }
-  if (sp.client) {
-    params.push(sp.client);
-    conditions.push(`lower(btrim(client)) = lower(btrim($${params.length}))`);
-  }
-  if (sp.ledger === "founder") {
-    conditions.push(`funding_source <> 'company_funds'`);
-  } else if (sp.ledger === "company") {
-    conditions.push(`funding_source = 'company_funds'`);
-  } else if (sp.ledger?.startsWith("account:")) {
-    const accountId = sp.ledger.slice("account:".length);
-    const selectedAccount = accounts.find((account) => account.id === accountId);
-    if (selectedAccount) {
-      params.push(selectedAccount.id);
-      conditions.push(`funding_source = 'company_funds'`);
-      conditions.push(`money_account_id = $${params.length}`);
-    }
-  }
-  if (/^\d{4}-\d{2}$/.test(sp.month ?? "")) {
-    params.push(`${sp.month}-01`);
-    conditions.push(`billing_month = $${params.length}`);
-  }
-
-  const where = conditions.length ? `where ${conditions.join(" and ")}` : "";
-
-  // A query failure now throws to the error boundary rather than rendering
-  // expenses with silently missing splits.
-  const shareError = null;
+  const { where, params, range } = expenseWhere(sp, moneyAccounts.map((account) => account.id), today);
 
   const [expenses, shareRows, billRows] = await Promise.all([
     query<Expense>(
-      `select * from public.expenses
+      `select e.* from public.expenses e
+         left join public.vendors v on v.id = e.vendor_id
+         left join public.categories c on c.id = e.category_id
        ${where}
-       order by expense_date desc
-       limit 1000`,
+       order by e.expense_date desc, e.created_at desc
+       limit 2000`,
       params
     ),
     query<{ expense_id: string }>(`select * from public.expense_shares`),
-    // Metadata only: the bytes are fetched one bill at a time by /api/bills/[id].
     query<Attachment>(
       `select ${ATTACHMENT_COLUMNS} from public.attachments
         where kind = 'expense_bill'
@@ -103,32 +57,17 @@ export default async function ExpensesPage({
     ),
   ]);
 
-  const categories = cats as Category[];
-  const vendors = vends as Vendor[];
-  const users = team as AppUser[];
-  const moneyAccounts = accounts as MoneyAccount[];
+  const partners = partnersOf(users);
   const clientNames = agreementClients.map((row) => row.client_name);
   const sourceRows = expenses.map((expense) => ({
     ...expense,
-    expense_shares: shareRows.filter(
-      (share) => share.expense_id === expense.id
-    ),
+    expense_shares: shareRows.filter((share) => share.expense_id === expense.id),
     attachments: billRows.filter((bill) => bill.expense_id === expense.id),
   })) as Expense[];
-  const selectedPersonId = sp.person ?? sp.payer ?? "";
-  const basis = sp.basis ?? (sp.payer ? "paid" : "share");
-  const selectedPerson = users.find((member) => member.id === selectedPersonId) ?? null;
-  const selectedLedgerAccount = sp.ledger?.startsWith("account:")
-    ? moneyAccounts.find((account) => account.id === sp.ledger?.slice("account:".length)) ?? null
-    : null;
-  const ledgerLabel = sp.ledger === "founder"
-    ? "Founder/team investment"
-    : sp.ledger === "company"
-      ? "All company operating money"
-      : selectedLedgerAccount?.name ?? "All expense ledgers";
-  const showFounderTotals = sp.ledger !== "company" && !selectedLedgerAccount;
 
-  const totals = computeIndividualSpending(users, sourceRows);
+  const selectedPersonId = sp.person ?? sp.payer ?? "";
+  const basis = sp.basis === "paid" || (sp.payer && !sp.basis) ? "paid" : "share";
+  const selectedPerson = users.find((member) => member.id === selectedPersonId) ?? null;
   const rows = !selectedPerson
     ? sourceRows
     : sourceRows.filter((expense) =>
@@ -137,251 +76,206 @@ export default async function ExpensesPage({
           : assignedShareNpr(expense, selectedPerson, users) > 0
       );
 
-  const catName = (id: string | null) =>
-    categories.find((c) => c.id === id)?.name ?? "—";
-  const vendorName = (id: string | null) =>
-    vendors.find((v) => v.id === id)?.name ?? "";
-  const payerName = (id: string | null) =>
-    users.find((u) => u.id === id)?.name.split(" ")[0] ?? "—";
-  const accountName = (id: string | null) =>
-    moneyAccounts.find((account) => account.id === id)?.name ?? "Company account";
-  const accountLedgerLabel = (id: string | null) => {
-    const account = moneyAccounts.find((item) => item.id === id);
-    if (!account) return "company money · account unassigned";
-    if (account.kind === "personal_custody") return "Swornim Global IME · non-VAT company money";
-    if (account.kind === "company_bank") return "Avernek Global IME · VAT company money";
-    return account.name;
+  const totals = computeIndividualSpending(users, sourceRows);
+  const partnerTotals = partners.map((partner, index) => ({
+    partner,
+    index,
+    ...(totals.find((row) => row.member.id === partner.id) ?? { assigned: 0, paid: 0 }),
+  }));
+  const partnerSum = partnerTotals.reduce((sum, row) => sum + row.assigned, 0);
+
+  const amountOf = (expense: Expense) =>
+    selectedPerson && basis === "share" ? assignedShareNpr(expense, selectedPerson, users) : Number(expense.amount_npr ?? 0);
+  const total = rows.reduce((sum, expense) => sum + amountOf(expense), 0);
+  const companyTotal = rows.filter((e) => e.funding_source === "company_funds").reduce((sum, e) => sum + amountOf(e), 0);
+  const founderTotal = total - companyTotal;
+  const pendingCount = rows.filter((e) => e.conversion_status === "pending").length;
+  const usdTotal = rows.filter((e) => e.currency === "USD").reduce((sum, e) => sum + Number(e.amount), 0);
+
+  const categoryById = new Map(categories.map((category) => [category.id, category]));
+  const vendorById = new Map(vendors.map((vendor) => [vendor.id, vendor]));
+  const userById = new Map(users.map((user) => [user.id, user]));
+  const accountById = new Map(moneyAccounts.map((account) => [account.id, account]));
+  const shortName = (id: string | null) => userById.get(id ?? "")?.name.replace(/^Administrator$/, "Admin").split(" ")[0] ?? "—";
+
+  // Group by month (bank-statement style), newest first.
+  const months: { key: string; rows: Expense[]; total: number }[] = [];
+  for (const expense of rows) {
+    const key = expense.expense_date.slice(0, 7);
+    const last = months[months.length - 1];
+    if (last && last.key === key) {
+      last.rows.push(expense);
+      last.total += amountOf(expense);
+    } else months.push({ key, rows: [expense], total: amountOf(expense) });
+  }
+
+  const formProps = {
+    categories,
+    vendors,
+    users,
+    moneyAccounts,
+    clients: clientNames,
   };
-  const billingLabel = (value: string | null) =>
-    value
-      ? new Intl.DateTimeFormat("en", { month: "short", year: "numeric", timeZone: "UTC" }).format(
-          new Date(`${value.slice(0, 7)}-01T00:00:00Z`)
-        )
-      : null;
 
   return (
     <>
       <PageHeader
-        eyebrow="Spending ledger"
         title="Expenses"
-        subtitle={`${rows.length} transaction${rows.length === 1 ? "" : "s"} shown in ${ledgerLabel}${selectedPerson ? ` for ${selectedPerson.name}` : ""}. Each cost belongs to exactly one money ledger.`}
-        action={canManage ? (
-          <AddExpense
-            categories={categories}
-            vendors={vendors}
-            users={users}
-            moneyAccounts={moneyAccounts}
-            clients={clientNames}
-            meId={session.sub}
-          />
-        ) : undefined}
+        subtitle="Every cost Avernek has — company money and founder money — filtered instantly."
+        action={canManage ? <AddExpense {...formProps} meId={session.sub} /> : undefined}
       />
 
-      {shareError && (
-        <div
-          className="rounded-xl px-4 py-3 mb-4 text-sm"
-          style={{ border: "1px solid var(--amber)", color: "var(--amber)" }}
-        >
-          Expenses are visible, but person splits need the Supabase migration
-          <span className="font-medium"> 20260712_add_monthly_shares.sql</span>.
+      <ExpenseFilters
+        sp={sp}
+        periodLabel={range.label}
+        monthKey={range.monthKey}
+        today={today}
+        categories={categories.map((c) => ({ value: c.id, label: c.name }))}
+        vendors={vendors.map((v) => ({ value: v.id, label: v.name }))}
+        clients={clientNames}
+        people={partners.map((p) => ({ value: p.id, label: p.name }))}
+        accounts={moneyAccounts.map((account) => ({ id: account.id, label: accountLabel(account) }))}
+        monthsWithData={monthRows.map((row) => row.month)}
+        futureCount={Number(futureRow[0]?.count ?? 0)}
+      />
+
+      <div className="kpi-grid mb-5">
+        <Kpi
+          label={selectedPerson ? `${selectedPerson.name}'s ${basis === "paid" ? "payments" : "share"}` : "Total"}
+          icon="wallet"
+          value={<Money value={total} />}
+          foot={`${range.label}${usdTotal > 0 ? ` · incl. ${usd(usdTotal)}` : ""}`}
+        />
+        <Kpi label="Company money" icon="bank" tone="blue" value={<Money value={companyTotal} />} foot="VAT and non-VAT accounts" />
+        <Kpi label="Founder money" icon="contribution" tone="pink" value={<Money value={founderTotal} />} foot="Paid from partners' own pockets" />
+        <Kpi
+          label="Transactions"
+          icon="receipt"
+          tone="muted"
+          value={<span className="tnum">{rows.length}</span>}
+          foot={rows.length ? `Average NPR ${formatNumber(Math.round(total / rows.length))}` : "Nothing in this view"}
+        />
+      </div>
+
+      {sp.ledger !== "company" && !sp.ledger?.startsWith("account:") && (
+        <div className="grid sm:grid-cols-3 gap-3 mb-5">
+          {partnerTotals.map(({ partner, index, assigned, paid }) => {
+            const on = selectedPersonId === partner.id;
+            return (
+              <a
+                key={partner.id}
+                href={`/expenses${withFilters(sp, { person: on ? null : partner.id, payer: null, basis: on ? null : "share" })}`}
+                className="card card-interactive p-4 flex items-center gap-3"
+                style={on ? { borderColor: "var(--accent-line)", background: "var(--accent-soft)" } : undefined}
+              >
+                <Avatar name={partner.name} color={personTone(index)} size={40} round />
+                <div className="min-w-0 flex-1">
+                  <div className="text-[14.5px] font-semibold truncate">{partner.name}</div>
+                  <div className="text-[12.5px] muted">Paid personally {formatNumber(Math.round(paid))}</div>
+                  <div className="bar-track !h-1.5 mt-2">
+                    <div className="bar-fill" style={{ width: `${partnerSum ? (assigned / partnerSum) * 100 : 0}%`, "--bar": personTone(index) } as React.CSSProperties} />
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-[17px] font-semibold tnum">{formatNumber(Math.round(assigned))}</div>
+                  <div className="text-[12.5px] muted">invested</div>
+                </div>
+              </a>
+            );
+          })}
         </div>
       )}
 
-      {showFounderTotals && <div className="mb-4">
-        <div className="mb-3">
-          <SectionHeader title="Founder/team investment totals" subtitle={
-            `${sp.cat || sp.vendor || sp.month ? "Selected filters" : "All time"} · only pre-registration and own-pocket spending; company-money expenses are excluded`
-          } />
+      {pendingCount > 0 && (
+        <div className="alert alert-warn mb-4">
+          <Icon name="alert" size={16} /> {pendingCount} expense{pendingCount > 1 ? "s are" : " is"} missing an exchange rate — open the row menu and choose “Retry exchange rate”.
         </div>
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
-          {totals.map(({ member, assigned, paid }, index) => (
-            <a
-              key={member.id}
-              href={`/expenses?person=${member.id}&basis=share${sp.ledger ? `&ledger=${encodeURIComponent(sp.ledger)}` : ""}${sp.cat ? `&cat=${sp.cat}` : ""}${sp.vendor ? `&vendor=${sp.vendor}` : ""}${sp.month ? `&month=${sp.month}` : ""}`}
-              className="card card-interactive p-4"
-              style={{
-                borderColor:
-                  selectedPersonId === member.id && basis === "share"
-                    ? "var(--accent)"
-                    : "var(--line)",
-              }}
-            >
-              <div className="flex items-center gap-2 text-sm font-medium">
-                <span className="pill !px-2 !py-0.5 tnum">#{index + 1}</span>
-                <span className="truncate">{member.name}</span>
-              </div>
-              <div className="tnum font-semibold mt-1">{npr(assigned)}</div>
-              <div className="text-xs muted tnum">paid {npr(paid)}</div>
-            </a>
-          ))}
-        </div>
-      </div>}
+      )}
 
-      {/* Filters */}
-      <form className="card p-3 flex flex-wrap gap-2 mb-4 text-sm">
-        <select name="ledger" aria-label="Money ledger filter" defaultValue={sp.ledger ?? ""} className="input !w-full sm:!w-auto !h-10">
-          <option value="">All expense ledgers</option>
-          <option value="founder">Founder/team investment</option>
-          <option value="company">All company operating money</option>
-          {moneyAccounts.map((account) => (
-            <option key={account.id} value={`account:${account.id}`}>
-              {account.kind === "personal_custody"
-                ? "Swornim Global IME · non-VAT"
-                : account.kind === "company_bank"
-                  ? "Avernek Global IME · VAT"
-                  : account.name}
-            </option>
-          ))}
-        </select>
-        <select name="cat" aria-label="Category filter" defaultValue={sp.cat ?? ""} className="input !w-full sm:!w-auto !h-10">
-          <option value="">All categories</option>
-          {categories.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
-        <select name="vendor" aria-label="Vendor filter" defaultValue={sp.vendor ?? ""} className="input !w-[calc(50%-4px)] sm:!w-auto !h-10">
-          <option value="">All vendors/types</option>
-          {vendors.map((vendor) => (
-            <option key={vendor.id} value={vendor.id}>{vendor.name}</option>
-          ))}
-        </select>
-        <select name="client" aria-label="Client filter" defaultValue={sp.client ?? ""} className="input !w-full sm:!w-auto !h-10">
-          <option value="">All clients / projects</option>
-          {clientNames.map((client) => (
-            <option key={client} value={client}>{client}</option>
-          ))}
-        </select>
-        <select
-          name="person"
-          defaultValue={selectedPersonId}
-          aria-label="Person filter"
-          className="input !w-[calc(50%-4px)] sm:!w-auto !h-10"
-        >
-          <option value="">All people</option>
-          {users.map((u) => (
-            <option key={u.id} value={u.id}>
-              {u.name}
-            </option>
-          ))}
-        </select>
-        <select name="basis" aria-label="Allocation basis" defaultValue={basis} className="input !w-[calc(50%-4px)] sm:!w-auto !h-10">
-          <option value="share">Investment share</option>
-          <option value="paid">Personally paid by</option>
-        </select>
-        <input
-          name="month"
-          type="month"
-          defaultValue={sp.month ?? ""}
-          aria-label="Billing month"
-          className="input !w-[calc(50%-4px)] sm:!w-auto !h-10"
-        />
-        <button className="btn !h-10">Filter</button>
-        {(selectedPersonId || sp.ledger || sp.cat || sp.vendor || sp.client || sp.month) && (
-          <a href="/expenses" className="btn !h-10">Clear</a>
-        )}
-        <a href="/api/export" className="btn !h-10">
-          Export CSV
-        </a>
-      </form>
-
-      <div className="card overflow-hidden divide-y" style={{ borderColor: "var(--line)" }}>
+      <div className="card overflow-hidden">
         {rows.length === 0 && (
-          <EmptyState title="No expenses found" description="Try clearing the filters or add the first expense for this period." icon="expense" />
+          <EmptyState title={`No expenses in ${range.label}`} description="Try another month, or clear the filters." icon="expense" />
         )}
-        {rows.map((e) => {
-          const selectedShareNpr =
-            selectedPerson && basis === "share"
-              ? assignedShareNpr(e, selectedPerson, users)
-              : null;
-          const selectedShareOriginal =
-            selectedPerson && basis === "share"
-              ? assignedShareOriginal(e, selectedPerson, users)
-              : null;
-          return (
-          <div
-            key={e.id}
-            className="list-row p-4 md:px-5 flex items-center gap-3"
-            style={{ borderColor: "var(--line)" }}
-          >
-            <div className="stat-icon !w-10 !h-10 shrink-0" style={{ color: categories.find((category) => category.id === e.category_id)?.color || "#b8a0fb" }}>
-              <Icon name="expense" size={17} />
+        {months.map((month) => (
+          <div key={month.key}>
+            <div className="group-head">
+              <span>{monthLabel(month.key)} <span className="muted font-normal">· {month.rows.length} item{month.rows.length === 1 ? "" : "s"}</span></span>
+              <span className="tnum">NPR {formatNumber(month.total)}</span>
             </div>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="font-medium truncate">
-                  {vendorName(e.vendor_id) || catName(e.category_id)}
-                </span>
-                {e.currency === "USD" && (
-                  <FxBadge source={e.fx_source} status={e.conversion_status} />
-                )}
-                {e.is_reimbursed && <span className="pill ok">reimbursed</span>}
-                {e.attachments?.map((bill, index) => (
-                  <a
-                    key={bill.id}
-                    href={attachmentUrl(bill.id)}
-                    target="_blank"
-                    rel="noopener"
-                    className="pill bill-pill"
-                    title={bill.file_name}
-                  >
-                    <Icon name="receipt" size={11} />
-                    {e.attachments!.length > 1 ? `Bill ${index + 1}` : "Bill"}
-                  </a>
-                ))}
-                {e.funding_source === "company_funds"
-                  ? <span className="pill accent">{accountLedgerLabel(e.money_account_id)}</span>
-                  : <span className="pill">founder/team investment</span>}
-              </div>
-              <div className="text-xs muted mt-0.5 truncate">
-                {e.expense_date} · {catName(e.category_id)} · {e.funding_source === "company_funds" ? accountName(e.money_account_id) : payerName(e.paid_by_user_id)}
-                {e.billing_month ? ` · for ${billingLabel(e.billing_month)}` : ""}
-                {e.client ? ` · ${e.client}` : ""}
-              </div>
-              {!!e.expense_shares?.length && (
-                <div className="text-xs muted mt-1 truncate">
-                  Split: {e.expense_shares
-                    .map(
-                      (share) =>
-                        `${payerName(share.user_id)} ${e.currency === "USD" ? usd(share.amount) : npr(share.amount)}`
-                    )
-                    .join(" · ")}
-                </div>
-              )}
+            <div className="row-list">
+              {month.rows.map((e) => {
+                const category = categoryById.get(e.category_id ?? "");
+                const vendor = vendorById.get(e.vendor_id ?? "");
+                const account = accountById.get(e.money_account_id ?? "");
+                const company = e.funding_source === "company_funds";
+                const title = e.note && vendor ? e.note : vendor?.name || e.note || category?.name || "Expense";
+                const shareNpr = selectedPerson && basis === "share" ? assignedShareNpr(e, selectedPerson, users) : null;
+                const shareOriginal = selectedPerson && basis === "share" ? assignedShareOriginal(e, selectedPerson, users) : null;
+                const future = e.expense_date > today;
+                return (
+                  <div key={e.id} className="row-item !items-start">
+                    <div className="row-icon mt-0.5" style={{ "--tone": category?.color && category.color !== "#1e3a5f" ? category.color : "var(--accent-ink)", "--tone-soft": "var(--surface-2)" } as React.CSSProperties}>
+                      <Icon name={company ? "expense" : "user"} size={17} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="row-title !whitespace-normal">{title}</span>
+                        {company ? (
+                          <span className="pill info">{account ? accountLabel(account).replace(" account", "") : "Company"}</span>
+                        ) : (
+                          <span className="pill" style={{ color: "var(--pink)" }}>Founder</span>
+                        )}
+                        {future && <span className="pill warn">Future date</span>}
+                        {e.currency === "USD" && <FxBadge source={e.fx_source} status={e.conversion_status} />}
+                        {e.is_reimbursed && <span className="pill ok">Reimbursed</span>}
+                        {e.attachments?.map((bill, index) => (
+                          <a key={bill.id} href={attachmentUrl(bill.id)} target="_blank" rel="noopener" className="pill accent" title={bill.file_name}>
+                            <Icon name="receipt" size={12} />
+                            {e.attachments!.length > 1 ? `Bill ${index + 1}` : "Bill"}
+                          </a>
+                        ))}
+                      </div>
+                      <div className="row-meta !whitespace-normal">
+                        {dayLabel(e.expense_date)} · {category?.name ?? "Uncategorised"}
+                        {vendor && e.note ? ` · ${vendor.name}` : ""}
+                        {company ? "" : ` · paid by ${shortName(e.paid_by_user_id)}`}
+                        {e.client ? ` · ${e.client}` : ""}
+                        {e.billing_month && e.billing_month.slice(0, 7) !== e.expense_date.slice(0, 7) ? ` · for ${monthLabel(e.billing_month.slice(0, 7), "short")}` : ""}
+                      </div>
+                      {!!e.expense_shares?.length && !company && (
+                        <div className="flex flex-wrap gap-1.5 mt-1.5">
+                          {e.expense_shares.map((share) => (
+                            <span key={share.user_id} className="pill !text-[12px]">
+                              {shortName(share.user_id)} {e.currency === "USD" ? usd(Number(share.amount)) : formatNumber(Number(share.amount))}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <div className="text-right shrink-0">
+                      <div className="row-amount">{shareNpr != null ? formatNumber(shareNpr) : e.amount_npr != null ? formatNumber(Number(e.amount_npr)) : "—"}</div>
+                      {shareNpr != null ? (
+                        <div className="row-sub">
+                          {e.currency === "USD" ? usd(shareOriginal ?? 0) : "share"} of {formatNumber(Number(e.amount_npr ?? 0))}
+                        </div>
+                      ) : e.currency === "USD" ? (
+                        <div className="row-sub">{usd(Number(e.amount))}</div>
+                      ) : null}
+                    </div>
+                    {canManage && (
+                      <ExpenseRowActions
+                        expense={e}
+                        isReimbursed={e.is_reimbursed}
+                        pending={e.conversion_status === "pending"}
+                        {...formProps}
+                      />
+                    )}
+                  </div>
+                );
+              })}
             </div>
-            <div className="text-right">
-              <div className="tnum font-semibold">
-                {selectedShareNpr != null
-                  ? npr(selectedShareNpr)
-                  : e.amount_npr != null
-                    ? npr(e.amount_npr)
-                    : "—"}
-              </div>
-              {selectedShareNpr != null ? (
-                <div className="tnum text-xs muted">
-                  {e.currency === "USD" ? usd(selectedShareOriginal ?? 0) : "individual share"}
-                  {" · total "}{e.amount_npr != null ? npr(e.amount_npr) : "—"}
-                </div>
-              ) : e.currency === "USD" ? (
-                <div className="tnum text-xs muted">{usd(e.amount)}</div>
-              ) : null}
-            </div>
-            {canManage && (
-              <ExpenseRowActions
-                expense={e}
-                isReimbursed={e.is_reimbursed}
-                pending={e.conversion_status === "pending"}
-                categories={categories}
-                vendors={vendors}
-                users={users}
-                moneyAccounts={moneyAccounts}
-                clients={clientNames}
-              />
-            )}
           </div>
-          );
-        })}
+        ))}
       </div>
     </>
   );

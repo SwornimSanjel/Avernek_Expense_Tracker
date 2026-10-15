@@ -1,5 +1,6 @@
 "use client";
 
+import Icon from "@/components/Icons";
 import { guardRequest } from "@/lib/stale-deploy";
 import { useActionState, useEffect, useMemo, useState } from "react";
 import {
@@ -34,20 +35,20 @@ export default function AddMoneyTransfer({ balances }: { balances: MoneyAccountB
 
   return (
     <>
-      <button onClick={() => setOpen(true)} disabled={balances.length < 2} className="btn btn-primary">⇄ Move / exchange</button>
+      <button onClick={() => setOpen(true)} disabled={balances.length < 2} className="btn btn-primary"><Icon name="swap" size={15} /> Move money</button>
       {open && (
         <div className="modal-backdrop">
           <form action={action} className="modal-panel md:max-w-lg p-5 md:p-6 space-y-4">
             <div className="modal-header">
               <div>
                 <h2 className="text-lg font-bold">Move or exchange company money</h2>
-                <p className="text-xs muted mt-1">A transfer changes account balances; it is not income or an expense.</p>
-                <p className="text-xs mt-2" style={{ color: "var(--amber)" }}>
+                <p className="text-[13px] muted mt-1">A transfer changes account balances; it is not income or an expense.</p>
+                <p className="text-[13px] mt-2" style={{ color: "var(--amber)" }}>
                   Paying back a bill in Avernek&apos;s name (lawyer, rent…)? Close this and use “Add VAT bill” →
                   “Reimburse” under Company bills to reimburse, so the bill&apos;s VAT is counted and VAT money stays untouched.
                 </p>
               </div>
-              <button type="button" onClick={() => setOpen(false)} className="icon-btn">✕</button>
+              <button type="button" onClick={() => setOpen(false)} className="icon-btn"><Icon name="close" size={16} /></button>
             </div>
             <label className="block">
               <span className="field-label">From account</span>

@@ -106,7 +106,7 @@ export default async function SubscriptionsPage() {
                     <span className="muted font-normal"> · {vName(r.vendor_id)}</span>
                   )}
                 </div>
-                <div className="text-xs muted mt-0.5">
+                <div className="text-[13px] muted mt-0.5">
                   {r.cycle} · renews {r.next_renewal_date} · {uName(r.paid_by_user_id)}
                   {soon && (
                     <span className="ml-2 font-medium" style={{ color: "var(--amber)" }}>
@@ -115,7 +115,7 @@ export default async function SubscriptionsPage() {
                   )}
                 </div>
                 {!!r.recurring_shares?.length && (
-                  <div className="text-xs muted mt-1">
+                  <div className="text-[13px] muted mt-1">
                     Split: {r.recurring_shares
                       .map(
                         (share) =>
@@ -129,7 +129,7 @@ export default async function SubscriptionsPage() {
                 <div className="font-semibold">
                   {r.currency === "USD" ? usd(r.amount) : npr(r.amount)}
                 </div>
-                <div className="text-xs muted">/{r.cycle}</div>
+                <div className="text-[13px] muted">/{r.cycle}</div>
               </div>
               {canManage && (
                 <RecurringRow
@@ -154,7 +154,7 @@ export default async function SubscriptionsPage() {
           );
         })}
       </div>
-      <p className="text-xs muted mt-3">
+      <p className="text-[13px] muted mt-3">
         "Mark paid" logs a real expense on the renewal date (freezing the NPR rate) and
         rolls the renewal forward one cycle.
       </p>

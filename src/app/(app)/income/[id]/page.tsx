@@ -179,7 +179,7 @@ export default async function ClientBillingPage({
             <ServiceBadges services={summary.services} size="md" />
           </div>
           {agreement.contact_name && (
-            <p className="text-xs muted mt-3">Contact · {agreement.contact_name}</p>
+            <p className="text-[13px] muted mt-3">Contact · {agreement.contact_name}</p>
           )}
         </div>
 
@@ -366,7 +366,7 @@ export default async function ClientBillingPage({
                 <div className="text-lg font-bold tnum">
                   {formatIncomeMoney(summary.recurring.monthlyTotal, currency)}
                 </div>
-                <div className="text-[11px] muted">per month</div>
+                <div className="text-[12.5px] muted">per month</div>
               </div>
             </div>
 
@@ -445,7 +445,7 @@ export default async function ClientBillingPage({
                   <span className="tnum" data-label="Amount">
                     <strong>{formatIncomeMoney(Number(payment.amount), currency)}</strong>
                     {(Number(payment.vat_amount) > 0 || Number(payment.tds_amount) > 0) && (
-                      <small className="block muted text-[10.5px] mt-0.5">
+                      <small className="block muted text-[12px] mt-0.5">
                         {Number(payment.vat_amount) > 0 ? `+VAT ${formatIncomeMoney(Number(payment.vat_amount), currency)} ` : ""}
                         {Number(payment.tds_amount) > 0 ? `−TDS ${formatIncomeMoney(Number(payment.tds_amount), currency)} ` : ""}
                         = bank {formatIncomeMoney(bankAmount(payment), currency)}
@@ -529,7 +529,7 @@ export default async function ClientBillingPage({
                     <span className="min-w-0 flex-1 truncate">
                       {expense.note || expense.vendor_name || expense.category_name || "Client expense"}
                     </span>
-                    <span className="text-xs muted">{formatServiceDate(expense.expense_date)}</span>
+                    <span className="text-[13px] muted">{formatServiceDate(expense.expense_date)}</span>
                     <strong className="tnum" style={{ color: "var(--red)" }}>
                       −{formatIncomeMoney(Number(expense.amount_npr ?? expense.amount), "NPR")}
                     </strong>
@@ -599,13 +599,13 @@ function BucketBody({
           <span className="income-money-paid" style={{ width: `${percent}%` }} />
           <span className="income-money-left" style={{ width: `${100 - percent}%` }} />
         </div>
-        <div className="flex justify-between gap-3 text-xs muted mt-2">
+        <div className="flex justify-between gap-3 text-[13px] muted mt-2">
           <span>{percent}% received</span>
           <span>
             {bucket.payments.length} payment{bucket.payments.length === 1 ? "" : "s"} recorded
           </span>
         </div>
-        {note && <p className="text-xs muted mt-3">{note}</p>}
+        {note && <p className="text-[13px] muted mt-3">{note}</p>}
       </div>
     </>
   );
@@ -665,7 +665,7 @@ function StreamBlock({
           {[...recent, ...upcoming].map((period) => (
             <div key={`${period.stream}-${period.periodStart}`} className="cycle-row">
               <span className="min-w-0 flex-1 truncate">{periodLabel(period)}</span>
-              <span className="tnum text-xs muted">
+              <span className="tnum text-[13px] muted">
                 {formatIncomeMoney(period.paid, currency)} / {formatIncomeMoney(period.agreed, currency)}
               </span>
               {period.isDue ? (

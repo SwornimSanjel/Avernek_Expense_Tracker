@@ -67,16 +67,14 @@ export default function EditIncomePayment({
             <div className="modal-header">
               <div>
                 <h2 className="text-lg font-bold">Edit payment</h2>
-                <p className="text-xs muted">
+                <p className="text-[13px] muted">
                   Recorded {new Date(payment.created_at).toLocaleDateString()}
                   {payment.updated_at && payment.updated_at !== payment.created_at
                     ? ` · last corrected ${new Date(payment.updated_at).toLocaleDateString()}`
                     : ""}
                 </p>
               </div>
-              <button type="button" onClick={() => setOpen(false)} className="icon-btn">
-                ✕
-              </button>
+              <button type="button" onClick={() => setOpen(false)} className="icon-btn"><Icon name="close" size={16} /></button>
             </div>
 
             <TaxBreakdownFields

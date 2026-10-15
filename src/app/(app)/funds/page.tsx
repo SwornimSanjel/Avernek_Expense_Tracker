@@ -1,279 +1,224 @@
 import Link from "next/link";
-import { query } from "@/lib/db";
 import { requireSession } from "@/lib/auth/server";
 import { isAppOwner } from "@/lib/authz";
-import { EmptyState, PageHeader, SectionHeader, StatTile } from "@/components/ui";
+import { Callout, EmptyState, Money, PageHeader, SectionHeader } from "@/components/ui";
 import Icon from "@/components/Icons";
 import AddMoneyAccount from "@/components/AddMoneyAccount";
 import AddMoneyTransfer from "@/components/AddMoneyTransfer";
 import AddAccountFunds from "@/components/AddAccountFunds";
-import AddOtherIncome from "@/components/AddOtherIncome";
-import { AddCompanyBill, ConfirmDelete } from "@/components/VatBillsActions";
-import {
-  accountShortName,
-  expenseAmountFromAccount,
-  moneyAccountKindLabel,
-} from "@/lib/funds";
-import { loadLedger } from "@/lib/ledger";
-import { bankAmount } from "@/lib/tax";
-import { CAPITAL_INFLOW_LABELS, OTHER_INCOME_LABELS, formatIncomeMoney, formatServiceDate } from "@/lib/income";
-import { deleteMoneyTransfer } from "./actions";
-import type { Currency, Expense, IncomeAgreement } from "@/lib/types";
+import StatementView from "@/components/StatementView";
+import { loadStatement } from "@/lib/statement-data";
+import { accountLabel } from "@/lib/statement";
+import { formatNumber } from "@/lib/format";
+import { nepalToday } from "@/lib/dates";
+import type { MoneyAccountBalance } from "@/lib/funds";
 
 export const dynamic = "force-dynamic";
-
-function totalsLabel(values: Map<string, number>) {
-  const entries = [...values.entries()].filter(([, amount]) => Math.abs(amount) > 0.001);
-  if (!entries.length) return "NPR 0";
-  return entries.map(([currency, amount]) => formatIncomeMoney(amount, currency)).join(" · ");
-}
-
-function addTotal(map: Map<string, number>, currency: Currency, amount: number) {
-  map.set(currency, (map.get(currency) ?? 0) + amount);
-}
 
 export default async function FundsPage() {
   const session = await requireSession();
   const canManage = isAppOwner(session);
-  const [ledger, founderRows, agreements] = await Promise.all([
-    loadLedger(),
-    query<Pick<Expense, "amount_npr">>(
-      `select amount_npr from public.expenses where funding_source <> 'company_funds'`
-    ),
-    query<Pick<IncomeAgreement, "id" | "client_name">>(`select id, client_name from public.income_agreements`),
-  ]);
-  const {
-    accounts,
-    payments,
-    expenses: companyExpenses,
-    transfers,
-    capitalInflows,
-    otherIncome,
-    taxPayments,
-    balances,
-    tax,
-    billStatuses,
-  } = ledger;
-  const founderSpent = founderRows.reduce((total, row) => total + Number(row.amount_npr ?? 0), 0);
-  const accountById = new Map(accounts.map((account) => [account.id, account]));
-  const clientById = new Map(agreements.map((agreement) => [agreement.id, agreement.client_name]));
-  const primaryBalances = [
-    balances.find((item) => item.account.kind === "company_bank"),
-    balances.find((item) => item.account.kind === "personal_custody"),
-  ].filter((item): item is NonNullable<typeof item> => Boolean(item));
-  const otherBalances = balances.filter((item) => !primaryBalances.includes(item));
+  const today = nepalToday();
+  const { ledger, events, accounts } = await loadStatement();
+  const { balances, tax, billStatuses } = ledger;
 
-  const revenue = new Map<string, number>();
-  const held = new Map<string, number>();
-  const free = new Map<string, number>();
-  const capitalIn = new Map<string, number>();
-  balances.forEach((item) => {
-    addTotal(revenue, item.account.currency, item.revenue);
-    addTotal(held, item.account.currency, item.balance);
-    addTotal(free, item.account.currency, item.free);
-    addTotal(capitalIn, item.account.currency, item.capitalIn);
-  });
-  const pendingBills = billStatuses.filter((item) => item.pending > 0);
-  const pendingTotal = pendingBills.reduce((sum, item) => sum + item.pending, 0);
-
-  const activity = [
-    ...payments
-      .filter((payment) => payment.money_account_id)
-      .map((payment) => ({
-        key: `payment-${payment.id}`,
-        date: payment.paid_on,
-        createdAt: payment.created_at,
-        kind: "income" as const,
-        title: `${clientById.get(payment.agreement_id) ?? "Client"} payment`,
-        detail: `${accountShortName(accountById.get(payment.money_account_id!))}${Number(payment.vat_amount) > 0 ? ` · incl. VAT ${formatIncomeMoney(Number(payment.vat_amount), "NPR")}` : ""}${Number(payment.tds_amount) > 0 ? ` · TDS ${formatIncomeMoney(Number(payment.tds_amount), "NPR")} withheld` : ""}`,
-        amount: bankAmount(payment),
-        currency: accountById.get(payment.money_account_id!)?.currency ?? "NPR",
-      })),
-    ...otherIncome.map((row) => ({
-      key: `other-${row.id}`,
-      date: row.received_on,
-      createdAt: row.created_at,
-      kind: "income" as const,
-      title: row.description,
-      detail: `${OTHER_INCOME_LABELS[row.category]} · ${accountShortName(accountById.get(row.money_account_id))}${row.source_name ? ` · from ${row.source_name}` : ""}`,
-      amount: bankAmount(row),
-      currency: accountById.get(row.money_account_id)?.currency ?? "NPR",
-    })),
-    ...companyExpenses.map((expense) => {
-      const account = accountById.get(expense.money_account_id ?? "");
-      return {
-        key: `expense-${expense.id}`,
-        date: expense.expense_date,
-        createdAt: expense.created_at,
-        kind: "expense" as const,
-        title: expense.note || expense.client || "Company-funded expense",
-        detail: accountShortName(account),
-        amount: account ? expenseAmountFromAccount(expense, account) : Number(expense.amount),
-        currency: account?.currency ?? expense.currency,
-      };
-    }),
-    ...taxPayments.map((row) => ({
-      key: `tax-${row.id}`,
-      date: row.paid_on,
-      createdAt: row.created_at,
-      kind: "expense" as const,
-      title: `VAT paid to IRD${row.period_label ? ` · ${row.period_label}` : ""}`,
-      detail: accountShortName(accountById.get(row.money_account_id)),
-      amount: Number(row.amount),
-      currency: accountById.get(row.money_account_id)?.currency ?? "NPR",
-    })),
-    ...capitalInflows.map((inflow) => ({
-      key: `capital-${inflow.id}`,
-      date: inflow.received_on,
-      createdAt: inflow.created_at,
-      kind: "capital" as const,
-      title: CAPITAL_INFLOW_LABELS[inflow.inflow_type],
-      detail: `${accountShortName(accountById.get(inflow.money_account_id))}${inflow.source_name ? ` · from ${inflow.source_name}` : ""} · not income`,
-      amount: Number(inflow.amount),
-      currency: accountById.get(inflow.money_account_id)?.currency ?? "NPR",
-    })),
-    ...transfers.map((transfer) => ({
-      key: `transfer-${transfer.id}`,
-      transferId: transfer.id,
-      date: transfer.transfer_date,
-      createdAt: transfer.created_at,
-      kind: "transfer" as const,
-      title: transfer.kind === "reimbursement" ? `Reimbursement · ${transfer.note ?? "bill"}` : transfer.note || "Account transfer",
-      detail: `${accountShortName(accountById.get(transfer.from_account_id))} → ${accountShortName(accountById.get(transfer.to_account_id))}`,
-      amount: Number(transfer.from_amount),
-      currency: accountById.get(transfer.from_account_id)?.currency ?? "NPR",
-      toAmount: Number(transfer.to_amount),
-      toCurrency: accountById.get(transfer.to_account_id)?.currency ?? "NPR",
-    })),
-  ].sort((a, b) => `${b.date}${b.createdAt}`.localeCompare(`${a.date}${a.createdAt}`));
+  const order = (kind: string) => (kind === "company_bank" ? 0 : kind === "personal_custody" ? 1 : 2);
+  const sorted = [...balances].sort((a, b) => order(a.account.kind) - order(b.account.kind));
+  const held = balances.reduce((sum, item) => sum + item.balance, 0);
+  const free = balances.reduce((sum, item) => sum + item.free, 0);
+  const reserved = balances.reduce((sum, item) => sum + item.vatReserved, 0);
+  const lent = balances.reduce((sum, item) => sum + item.loanedOut, 0);
+  const pendingBills = billStatuses.reduce((sum, item) => sum + item.pending, 0);
+  const total = Math.max(free + reserved + lent, 1);
 
   return (
     <>
       <PageHeader
-        eyebrow="Company treasury"
         title="Company money"
-        subtitle="What is in each account, how much of it is VAT you must not touch, and which company bills still need reimbursing."
-        action={canManage ? (
-          <div className="flex flex-wrap gap-2">
-            <AddCompanyBill />
-            <AddOtherIncome accounts={accounts} />
-            <AddAccountFunds accounts={accounts} />
-            <AddMoneyTransfer balances={balances} />
-            <AddMoneyAccount />
-          </div>
-        ) : undefined}
+        subtitle="What is in each account, how much of it is VAT, and every movement — month by month."
+        action={
+          canManage ? (
+            <>
+              <AddMoneyAccount />
+              <AddAccountFunds accounts={ledger.accounts} />
+              <AddMoneyTransfer balances={balances} />
+            </>
+          ) : undefined
+        }
       />
 
-      {/* ------------------------------------------------------------ accounts */}
-      <div className="grid md:grid-cols-2 gap-3 mb-6">
-        {balances.length === 0 && (
-          <div className="card md:col-span-2">
+      {/* position */}
+      <div className="card p-6 dot-pattern rise">
+        <div className="flex flex-wrap items-end justify-between gap-6">
+          <div>
+            <div className="text-[13.5px] muted">Company money held</div>
+            <div className="text-[36px] font-semibold tracking-tight leading-tight mt-1"><Money value={held} /></div>
+            <div className="text-[13.5px] muted mt-1">Across {balances.length} account{balances.length === 1 ? "" : "s"} · VAT included</div>
+          </div>
+          <div className="grid grid-cols-3 gap-6 text-right">
+            <Figure label="Free to use" value={free} tone="var(--green)" />
+            <Figure label="VAT for IRD" value={reserved} tone="var(--amber)" />
+            <Figure label="Lent out" value={lent} tone="var(--blue)" />
+          </div>
+        </div>
+        <div className="stack-bar !h-3 mt-5">
+          <span style={{ width: `${(Math.max(free, 0) / total) * 100}%`, background: "var(--green)" }} />
+          <span style={{ width: `${(reserved / total) * 100}%`, background: "var(--amber)" }} />
+          <span style={{ width: `${(lent / total) * 100}%`, background: "var(--blue)" }} />
+        </div>
+      </div>
+
+      {/* accounts */}
+      <section className="section">
+        <SectionHeader title="Accounts" subtitle="Every figure is since the account was opened." />
+        {sorted.length === 0 ? (
+          <div className="card">
             <EmptyState title="No company-money accounts" description="Add the VAT and non-VAT accounts to begin." icon="bank" />
           </div>
-        )}
-        {[...primaryBalances, ...otherBalances].map((item) => (
-          <div key={item.account.id} className="card p-5 account-card">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <div className="flex items-center gap-2">
-                  <Icon name={item.account.kind === "personal_custody" ? "user" : "bank"} size={16} />
-                  <strong>{accountShortName(item.account)}</strong>
-                  <span className="pill">{item.account.currency}</span>
-                </div>
-                <div className="text-xs muted mt-1">{item.account.name}</div>
-                <div className="text-[11px] muted mt-0.5">{moneyAccountKindLabel(item.account)}</div>
-              </div>
-            </div>
-            <dl className="account-split mt-4">
-              <div>
-                <dt>In the account</dt>
-                <dd style={{ color: item.balance < 0 ? "var(--red)" : undefined }}>
-                  {formatIncomeMoney(item.balance, item.account.currency)}
-                </dd>
-              </div>
-              <div>
-                <dt>VAT · don&apos;t touch</dt>
-                <dd style={{ color: item.vatReserved > 0 ? "var(--amber)" : undefined }}>
-                  {formatIncomeMoney(item.vatReserved, item.account.currency)}
-                </dd>
-              </div>
-              <div className="account-split-free">
-                <dt>Free to use</dt>
-                <dd>{formatIncomeMoney(item.free, item.account.currency)}</dd>
-              </div>
-            </dl>
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-x-6 gap-y-1.5 mt-4 text-xs">
-              <Flow label="Income (excl. VAT)" value={formatIncomeMoney(item.revenue, item.account.currency)} />
-              <Flow label="VAT collected" value={formatIncomeMoney(item.vatIn, item.account.currency)} />
-              {item.tdsWithheld > 0 && <Flow label="TDS withheld by clients" value={`−${formatIncomeMoney(item.tdsWithheld, item.account.currency)}`} />}
-              {item.capitalIn > 0 && <Flow label="Capital added · not income" value={formatIncomeMoney(item.capitalIn, item.account.currency)} />}
-              <Flow label="Spent" value={`−${formatIncomeMoney(item.spent, item.account.currency)}`} />
-              {item.vatPaid > 0 && <Flow label="VAT paid to IRD" value={`−${formatIncomeMoney(item.vatPaid, item.account.currency)}`} />}
-              <Flow label="Moved in" value={formatIncomeMoney(item.transferredIn, item.account.currency)} />
-              <Flow label="Moved out / reimbursed" value={`−${formatIncomeMoney(item.transferredOut, item.account.currency)}`} />
-            </div>
+        ) : (
+          <div className="grid lg:grid-cols-2 gap-4">
+            {sorted.map((item) => (
+              <AccountPanel key={item.account.id} item={item} />
+            ))}
           </div>
-        ))}
-      </div>
+        )}
+      </section>
 
-      {/* ------------------------------------------------------ VAT pointer */}
-      <div className="capital-strip mb-6">
-        <div className="capital-strip-icon">
-          <Icon name="receipt" size={15} />
-        </div>
-        <div className="min-w-0">
-          <strong>
-            VAT still owed {formatIncomeMoney(tax.vatOwed, "NPR")} · bills waiting to be reimbursed{" "}
-            {formatIncomeMoney(pendingTotal, "NPR")}
-          </strong>
-          <p>The VAT list (who paid VAT, on how much), bills in Avernek&apos;s name and reimbursements are on the VAT &amp; bills page.</p>
-        </div>
-        <Link href="/vat" className="btn btn-primary !h-9 shrink-0 text-xs">
-          Open VAT &amp; bills
-        </Link>
-      </div>
+      {(tax.vatOwed > 0 || pendingBills > 0) && (
+        <Callout
+          className="mt-4"
+          tone="amber"
+          icon="receipt"
+          title={<>VAT still to pay: NPR {formatNumber(tax.vatOwed)}{pendingBills > 0 ? ` · bills waiting to be reimbursed: NPR ${formatNumber(pendingBills)}` : ""}</>}
+          action={<Link href="/vat" className="btn btn-sm">VAT & bills</Link>}
+        >
+          This VAT already sits inside the VAT account balance — keep it there until it is paid to IRD.
+        </Callout>
+      )}
 
-      {/* ---------------------------------------------------------- totals */}
-      <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-3 mb-6">
-        <StatTile label="Income in (excl. VAT)" value={totalsLabel(revenue)} hint="Clients + income without a client" icon="income" tone="green" />
-        <StatTile label="Company money held" value={totalsLabel(held)} hint="Everything in the accounts, VAT included" emphasis icon="wallet" tone="accent" />
-        <StatTile label="Free to use" value={totalsLabel(free)} hint="Held minus VAT kept aside" icon="wallet" tone="green" />
-        <StatTile label="Founder money spent" value={formatIncomeMoney(founderSpent, "NPR")} hint={`Own-pocket expenses · capital added ${totalsLabel(capitalIn)}`} icon="contribution" tone="blue" />
-      </div>
-
-      {/* --------------------------------------------------------- activity */}
-      <div>
-        <div className="mb-3"><SectionHeader title="Company-money activity" subtitle="Receipts (as they reached the bank), transfers, reimbursements, VAT payments and company-paid costs" /></div>
-        <div className="card overflow-hidden divide-y" style={{ borderColor: "var(--line)" }}>
-          {activity.length === 0 && <EmptyState title="No fund activity yet" description="Record a client payment or account transfer to begin." icon="wallet" />}
-          {activity.slice(0, 100).map((item) => (
-            <div key={item.key} className="list-row p-4 flex items-center gap-3" style={{ borderColor: "var(--line)" }}>
-              <div className="stat-icon" style={{ color: item.kind === "income" ? "var(--green)" : item.kind === "expense" ? "var(--red)" : item.kind === "capital" ? "#b8a0fb" : "var(--blue)" }}><Icon name={item.kind === "income" ? "income" : item.kind === "expense" ? "expense" : item.kind === "capital" ? "contribution" : "arrow"} size={16} /></div>
-              <div className="min-w-0 flex-1"><div className="font-medium truncate">{item.title}</div><div className="text-xs muted mt-0.5 truncate">{formatServiceDate(item.date)} · {item.detail}</div></div>
-              <div className="tnum text-right font-semibold" style={{ color: item.kind === "income" ? "var(--green)" : item.kind === "expense" ? "var(--red)" : item.kind === "capital" ? "#b8a0fb" : "var(--ink)" }}>
-                {item.kind === "income" || item.kind === "capital" ? "+" : item.kind === "expense" ? "−" : ""}{formatIncomeMoney(item.amount, item.currency)}
-                {item.kind === "transfer" && item.toCurrency !== item.currency && <div className="text-xs muted mt-0.5">→ {formatIncomeMoney(item.toAmount, item.toCurrency)}</div>}
-              </div>
-              {canManage && item.kind === "transfer" && "transferId" in item && (
-                <ConfirmDelete
-                  id={item.transferId}
-                  action={deleteMoneyTransfer}
-                  message="Delete this transfer? Both account balances go back to how they were."
-                />
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
+      {/* activity */}
+      <section className="section">
+        <SectionHeader
+          title="Activity"
+          subtitle="Pick a month or any dates. Each line shows the balance after it, like a bank statement."
+        />
+        <StatementView events={events} accounts={accounts} today={today} scope="company" />
+      </section>
     </>
   );
 }
 
-function Flow({ label, value }: { label: string; value: string }) {
+function Figure({ label, value, tone }: { label: string; value: number; tone: string }) {
   return (
-    <div className="flex items-center justify-between gap-2">
-      <span className="muted">{label}</span>
-      <span className="tnum">{value}</span>
+    <div>
+      <div className="text-[13px] muted flex items-center justify-end gap-1.5"><span className="dot" style={{ color: tone }} />{label}</div>
+      <div className="text-[20px] font-semibold tnum mt-0.5">{formatNumber(value)}</div>
+    </div>
+  );
+}
+
+function AccountPanel({ item }: { item: MoneyAccountBalance }) {
+  const { account } = item;
+  const vat = account.kind === "company_bank";
+  const tone = vat ? "var(--green)" : account.kind === "personal_custody" ? "var(--blue)" : "var(--accent-ink)";
+  const moneyIn = [
+    { label: "Client & other income", value: item.revenue - item.tdsWithheld },
+    { label: "VAT collected", value: item.vatIn, hint: "for IRD" },
+    { label: "Capital added", value: item.capitalIn, hint: "not revenue" },
+    { label: "Moved in", value: item.transferredIn },
+    { label: "Loans paid back", value: item.loanRepaidIn },
+  ].filter((row) => row.value > 0.004);
+  const moneyOut = [
+    { label: "Spent", value: item.spent },
+    { label: item.reimbursedOut > 0 ? "Moved out & reimbursed" : "Moved out", value: item.transferredOut },
+    { label: "VAT paid to IRD", value: item.vatPaid },
+    { label: "Lent out", value: item.lentOut },
+  ].filter((row) => row.value > 0.004);
+  const inTotal = moneyIn.reduce((sum, row) => sum + row.value, 0);
+  const outTotal = moneyOut.reduce((sum, row) => sum + row.value, 0);
+  const splitTotal = Math.max(item.free + item.vatReserved, 1);
+
+  return (
+    <div className="card overflow-hidden rise rise-1">
+      <div className="p-5 border-b">
+        <div className="flex items-center gap-3">
+          <div className="row-icon" style={{ "--tone": tone, "--tone-soft": `color-mix(in srgb, ${tone} 14%, transparent)` } as React.CSSProperties}>
+            <Icon name={vat ? "bank" : "wallet"} size={18} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="text-[16px] font-semibold">{accountLabel(account)}</div>
+            <div className="text-[13px] muted truncate">{account.name}</div>
+          </div>
+          <span className="pill">{account.currency}</span>
+        </div>
+        <div className="mt-5 flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <div className="text-[13px] muted">Balance</div>
+            <div className={`text-[30px] font-semibold tracking-tight leading-tight ${item.balance < 0 ? "text-red" : ""}`}>
+              <Money value={item.balance} currency={account.currency} />
+            </div>
+          </div>
+          <div className="text-right">
+            <div className="text-[13px] muted">Free to use</div>
+            <div className="text-[20px] font-semibold tnum" style={{ color: tone }}>{formatNumber(item.free)}</div>
+          </div>
+        </div>
+        {item.vatReserved > 0 && (
+          <>
+            <div className="stack-bar mt-3">
+              <span style={{ width: `${(Math.max(item.free, 0) / splitTotal) * 100}%`, background: tone }} />
+              <span style={{ width: `${(item.vatReserved / splitTotal) * 100}%`, background: "var(--amber)" }} />
+            </div>
+            <div className="mt-2 text-[13px] muted">
+              <span className="text-amber font-medium">NPR {formatNumber(item.vatReserved)}</span> of this is VAT — don&apos;t spend it.
+            </div>
+          </>
+        )}
+      </div>
+      <div className="grid sm:grid-cols-2">
+        <FlowList title="Money in" icon="arrowDownLeft" tone="var(--green)" rows={moneyIn} total={inTotal} />
+        <FlowList title="Money out" icon="arrowUpRight" tone="var(--red)" rows={moneyOut} total={outTotal} border />
+      </div>
+    </div>
+  );
+}
+
+function FlowList({
+  title,
+  icon,
+  tone,
+  rows,
+  total,
+  border,
+}: {
+  title: string;
+  icon: "arrowDownLeft" | "arrowUpRight";
+  tone: string;
+  rows: { label: string; value: number; hint?: string }[];
+  total: number;
+  border?: boolean;
+}) {
+  return (
+    <div className={`p-5 ${border ? "sm:border-l border-t sm:border-t-0" : ""}`}>
+      <div className="flex items-center justify-between">
+        <span className="flex items-center gap-2 text-[14px] font-semibold">
+          <Icon name={icon} size={15} className={tone === "var(--green)" ? "text-green" : "text-red"} />
+          {title}
+        </span>
+        <span className="text-[15px] font-semibold tnum">{formatNumber(total)}</span>
+      </div>
+      <div className="mt-3 space-y-2">
+        {rows.length === 0 && <div className="text-[13.5px] muted">Nothing yet</div>}
+        {rows.map((row) => (
+          <div key={row.label} className="flex items-center justify-between gap-3 text-[13.5px]">
+            <span className="muted">
+              {row.label}
+              {row.hint && <span className="muted-2"> · {row.hint}</span>}
+            </span>
+            <span className="tnum">{formatNumber(row.value)}</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

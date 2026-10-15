@@ -54,12 +54,12 @@ export default function ClientVatBillsPanel({
                 <button disabled={pending || busy} className="btn btn-primary !h-10 !px-5">
                   {pending ? "Saving…" : busy ? "Preparing photos…" : `Save ${count} VAT bill file${count === 1 ? "" : "s"}`}
                 </button>
-                <span className="text-xs muted">Not saved until you press Save.</span>
+                <span className="text-[13px] muted">Not saved until you press Save.</span>
               </div>
             )}
             {state.error && <p className="text-sm mt-2" style={{ color: "var(--red)" }}>{state.error}</p>}
             {saved && !state.error && count === 0 && (
-              <p className="text-xs mt-2" style={{ color: "var(--green)" }}>{saved}</p>
+              <p className="text-[13px] mt-2" style={{ color: "var(--green)" }}>{saved}</p>
             )}
           </>
         }

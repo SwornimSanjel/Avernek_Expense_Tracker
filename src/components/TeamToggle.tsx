@@ -16,7 +16,7 @@ export default function TeamToggle({
     <button
       disabled={busy}
       onClick={() => start(() => setCoreMember(id, !isCore))}
-      className="btn !h-8 !px-3 text-[11px]"
+      className="btn !h-8 !px-3 text-[12.5px]"
       style={isCore ? { color: "#b8a0fb", borderColor: "rgb(139 92 246 / .22)", background: "var(--accent-soft)" } : undefined}
       title={
         isCore

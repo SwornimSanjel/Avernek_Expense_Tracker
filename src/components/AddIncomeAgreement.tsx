@@ -1,5 +1,6 @@
 "use client";
 
+import Icon from "@/components/Icons";
 import { guardRequest } from "@/lib/stale-deploy";
 import { useActionState, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -61,7 +62,7 @@ export default function AddIncomeAgreement({
   if (!open) {
     return (
       <button onClick={() => setOpen(true)} className="btn btn-primary">
-        <span className="text-base leading-none">＋</span> {label}
+        <Icon name="plus" size={15} /> {label}
       </button>
     );
   }
@@ -95,13 +96,11 @@ export default function AddIncomeAgreement({
           <div className="modal-header">
             <div>
               <h2 className="text-lg font-bold">New client</h2>
-              <p className="text-xs muted">
+              <p className="text-[13px] muted">
                 Only the name and one service are required — prices, agreement papers and payments can all be added later.
               </p>
             </div>
-            <button type="button" onClick={() => setOpen(false)} className="icon-btn" aria-label="Close">
-              ✕
-            </button>
+            <button type="button" onClick={() => setOpen(false)} className="icon-btn" aria-label="Close"><Icon name="close" size={16} /></button>
           </div>
 
           <ol className="wizard-steps">
@@ -147,7 +146,7 @@ export default function AddIncomeAgreement({
             {hint && <p className="text-sm" style={{ color: "var(--amber)" }}>{hint}</p>}
             {state.error && <p className="text-sm" style={{ color: "var(--red)" }}>{state.error}</p>}
             {!hint && !state.error && (
-              <p className="text-xs muted">
+              <p className="text-[13px] muted">
                 Step {step} of {AGREEMENT_STEPS.length} · {AGREEMENT_STEPS[step - 1].hint}
               </p>
             )}

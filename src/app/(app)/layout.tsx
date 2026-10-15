@@ -20,7 +20,7 @@ export default async function AppLayout({
   return (
     <div className="app-shell flex min-h-screen">
       <Nav name={profile?.name ?? session.name ?? session.email} isAdmin={profile?.is_admin ?? session.isAdmin} />
-      <main className="app-main flex-1 min-w-0 pt-16 md:pt-0">
+      <main className="app-main flex-1 min-w-0 pt-14 md:pt-0">
         <MotionPage>{children}</MotionPage>
       </main>
     </div>

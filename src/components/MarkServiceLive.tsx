@@ -1,5 +1,6 @@
 "use client";
 
+import Icon from "@/components/Icons";
 import { guardRequest } from "@/lib/stale-deploy";
 import { useActionState, useEffect, useState, useTransition } from "react";
 import {
@@ -68,14 +69,12 @@ export default function MarkServiceLive({
         <div className="modal-header">
           <div>
             <h2 className="text-lg font-bold">Day 1 · launch date</h2>
-            <p className="text-xs muted">{agreement.client_name}</p>
+            <p className="text-[13px] muted">{agreement.client_name}</p>
           </div>
-          <button type="button" onClick={() => setOpen(false)} className="icon-btn">
-            ✕
-          </button>
+          <button type="button" onClick={() => setOpen(false)} className="icon-btn"><Icon name="close" size={16} /></button>
         </div>
 
-        <p className="text-xs muted">
+        <p className="text-[13px] muted">
           Only set this once the ads / AI automation are actually live. Until then, leave it — the client
           simply shows “Not launched yet”.
         </p>
@@ -113,7 +112,7 @@ export default function MarkServiceLive({
         </label>
 
         {inFuture && (
-          <p className="text-xs" style={{ color: "var(--amber)" }}>
+          <p className="text-[13px]" style={{ color: "var(--amber)" }}>
             That date is in the future. Come back and set Day 1 on the day the ads actually go live.
           </p>
         )}

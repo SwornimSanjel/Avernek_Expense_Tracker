@@ -1,19 +1,29 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
+import { GeistSans } from "geist/font/sans";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Avernek Finance Tracker",
+  title: "Avernek Finance",
   description: "Internal expense, income, and client payment tracker for Avernek Technologies.",
   icons: {
-    icon: "/avernek-logo.jpg",
+    icon: [{ url: "/avernek-mark.svg", type: "image/svg+xml" }],
+    apple: "/avernek-logo.jpg",
   },
 };
 
-// Applies the saved theme before paint to avoid a flash.
-const themeScript = `
+export const viewport: Viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: dark)", color: "#09090c" },
+    { media: "(prefers-color-scheme: light)", color: "#f5f5f7" },
+  ],
+};
+
+// Applies the saved theme and sidebar state before paint, so neither flashes.
+const bootScript = `
 try {
-  var t = localStorage.getItem('avernek-theme') || 'dark';
-  document.documentElement.dataset.theme = t;
+  var d = document.documentElement;
+  d.dataset.theme = localStorage.getItem('avernek-theme') || 'dark';
+  if (localStorage.getItem('avernek-sidebar') === 'collapsed') d.dataset.sidebar = 'collapsed';
 } catch (e) {}
 `;
 
@@ -23,9 +33,9 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" data-theme="dark" suppressHydrationWarning>
+    <html lang="en" data-theme="dark" className={GeistSans.variable} suppressHydrationWarning>
       <head>
-        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+        <script dangerouslySetInnerHTML={{ __html: bootScript }} />
       </head>
       <body>{children}</body>
     </html>

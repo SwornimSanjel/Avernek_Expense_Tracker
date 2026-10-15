@@ -1,5 +1,6 @@
 "use client";
 
+import Icon from "@/components/Icons";
 import { guardRequest } from "@/lib/stale-deploy";
 import { useActionState, useEffect, useState } from "react";
 import {
@@ -21,16 +22,16 @@ export default function AddMoneyAccount() {
 
   return (
     <>
-      <button onClick={() => setOpen(true)} className="btn">＋ Account</button>
+      <button onClick={() => setOpen(true)} className="btn"><Icon name="plus" size={15} /> Account</button>
       {open && (
         <div className="modal-backdrop">
           <form action={action} className="modal-panel md:max-w-lg p-5 md:p-6 space-y-4">
             <div className="modal-header">
               <div>
                 <h2 className="text-lg font-bold">Add company-money account</h2>
-                <p className="text-xs muted mt-1">Bank, custody account, wallet, or company cash.</p>
+                <p className="text-[13px] muted mt-1">Bank, custody account, wallet, or company cash.</p>
               </div>
-              <button type="button" onClick={() => setOpen(false)} className="icon-btn">✕</button>
+              <button type="button" onClick={() => setOpen(false)} className="icon-btn"><Icon name="close" size={16} /></button>
             </div>
             <label className="block">
               <span className="field-label">Account name</span>

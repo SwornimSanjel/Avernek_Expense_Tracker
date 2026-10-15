@@ -4,7 +4,8 @@ import Icon from "@/components/Icons";
 import RecordIncomePayment from "@/components/RecordIncomePayment";
 import ClientStatusControl from "@/components/ClientStatusControl";
 import IncomeAgreementControls from "@/components/IncomeAgreementControls";
-import { EmptyState, PageHeader, StatTile } from "@/components/ui";
+import ClientRail, { type RailClient } from "@/components/ClientRail";
+import { Avatar, EmptyState, Kpi, Money, PageHeader, SectionHeader } from "@/components/ui";
 import { requireSession } from "@/lib/auth/server";
 import { isAppOwner } from "@/lib/authz";
 import { query } from "@/lib/db";
@@ -14,22 +15,18 @@ import {
   AGREEMENT_STATUS_LABELS,
   agreementServices,
   daysUntilDate,
-  formatIncomeMoney,
   formatServiceDate,
   goLiveDate,
   hasRecurringService,
   recurringFromDate,
   servicesLabel,
   summarizeIncomeAgreement,
+  todayIso,
 } from "@/lib/income";
 import { ATTACHMENT_COLUMNS, type Attachment } from "@/lib/attachments";
-import type {
-  Currency,
-  Expense,
-  IncomeAgreement,
-  IncomePayment,
-  MoneyAccount,
-} from "@/lib/types";
+import { formatNumber } from "@/lib/format";
+import { bankAmount } from "@/lib/tax";
+import type { Expense, IncomeAgreement, IncomePayment, MoneyAccount } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -39,39 +36,27 @@ type ClientExpense = Expense & {
   money_account_name: string | null;
 };
 
-function initials(name: string) {
-  return name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase();
-}
-
 function normalize(value: string | null) {
   return (value ?? "").trim().toLocaleLowerCase();
-}
-
-function addTotal(map: Map<string, number>, currency: Currency, amount: number) {
-  map.set(currency, (map.get(currency) ?? 0) + amount);
-}
-
-function totalsLabel(values: Map<string, number>) {
-  const entries = [...values.entries()].filter(([, amount]) => amount !== 0);
-  return entries.length
-    ? entries.map(([currency, amount]) => formatIncomeMoney(amount, currency)).join(" · ")
-    : "NPR 0";
 }
 
 function expenseNpr(expense: Expense) {
   return Number(expense.amount_npr ?? expense.actual_npr_charged ?? (expense.currency === "NPR" ? expense.amount : 0));
 }
 
-function statusLabel(status: IncomeAgreement["status"]) {
-  return AGREEMENT_STATUS_LABELS[status];
+function dueLabel(date: string | null, today: string) {
+  if (!date) return { text: "Nothing due", tone: "muted" };
+  const days = daysUntilDate(date, today);
+  if (days < 0) return { text: `${Math.abs(days)} day${days === -1 ? "" : "s"} overdue`, tone: "text-red" };
+  if (days === 0) return { text: "Due today", tone: "text-amber" };
+  return { text: `Due in ${days} day${days === 1 ? "" : "s"}`, tone: days <= 7 ? "text-amber" : "muted" };
 }
 
-function dueLabel(date: string | null) {
-  if (!date) return "Nothing currently due";
-  const days = daysUntilDate(date);
-  if (days < 0) return `${Math.abs(days)} day${days === -1 ? "" : "s"} overdue`;
-  if (days === 0) return "Due today";
-  return `Due in ${days} day${days === 1 ? "" : "s"}`;
+function groupOf(status: IncomeAgreement["status"]): RailClient["group"] {
+  if (status === "active") return "Active";
+  if (status === "pending") return "Pending";
+  if (status === "paused") return "Paused";
+  return "Inactive";
 }
 
 export default async function ClientsPage({
@@ -81,16 +66,15 @@ export default async function ClientsPage({
 }) {
   const session = await requireSession();
   const canManage = isAppOwner(session);
+  const today = todayIso();
   const { client: selectedId } = await searchParams;
   const [agreements, payments, expenses, moneyAccounts] = await Promise.all([
     query<IncomeAgreement>(
       `select * from public.income_agreements
-       order by case status when 'active' then 0 when 'paused' then 1 else 2 end,
+       order by case status when 'active' then 0 when 'pending' then 1 when 'paused' then 2 else 3 end,
                 client_name, agreement_date desc`
     ),
-    query<IncomePayment>(
-      `select * from public.income_payments order by paid_on desc, created_at desc`
-    ),
+    query<IncomePayment>(`select * from public.income_payments order by paid_on desc, created_at desc`),
     query<ClientExpense>(
       `select e.*, c.name as category_name, v.name as vendor_name,
               ma.name as money_account_name
@@ -101,295 +85,351 @@ export default async function ClientsPage({
         where e.client is not null and btrim(e.client) <> ''
         order by e.expense_date desc, e.created_at desc`
     ),
-    query<MoneyAccount>(
-      `select * from public.money_accounts where is_active = true order by currency, name`
-    ),
+    query<MoneyAccount>(`select * from public.money_accounts where is_active = true order by currency, name`),
   ]);
 
-  const summaries = new Map(
-    agreements.map((agreement) => [agreement.id, summarizeIncomeAgreement(agreement, payments)])
-  );
+  const summaries = new Map(agreements.map((agreement) => [agreement.id, summarizeIncomeAgreement(agreement, payments, today)]));
+  const costsFor = (agreement: IncomeAgreement) => expenses.filter((expense) => normalize(expense.client) === normalize(agreement.client_name));
   const selected = agreements.find((agreement) => agreement.id === selectedId) ?? null;
-  const selectedAgreementFiles = selected
-    ? await query<Attachment>(
-        `select ${ATTACHMENT_COLUMNS} from public.attachments
-          where kind = 'client_agreement' and agreement_id = $1
-          order by created_at`,
-        [selected.id]
-      )
-    : [];
-  const selectedVatBills = selected
-    ? await query<Attachment>(
-        `select ${ATTACHMENT_COLUMNS.split(", ").map((column) => `a.${column}`).join(", ")}
-           from public.attachments a
-           join public.income_payments p on p.id = a.payment_id
-          where a.kind = 'vat_bill' and p.agreement_id = $1
-          order by a.created_at`,
-        [selected.id]
-      )
-    : [];
-  const collected = new Map<string, number>();
-  const outstanding = new Map<string, number>();
-  const recurring = new Map<string, number>();
-  let clientSpendNpr = 0;
-  let companyClientSpendNpr = 0;
 
-  for (const agreement of agreements) {
-    const summary = summaries.get(agreement.id)!;
-    addTotal(collected, agreement.currency, summary.totalCollected);
-    addTotal(outstanding, agreement.currency, summary.totalDueNow);
-    if (agreement.status === "active") {
-      addTotal(recurring, agreement.currency, summary.recurring.monthlyTotal);
-    }
-  }
-  for (const expense of expenses) {
-    clientSpendNpr += expenseNpr(expense);
-    if (expense.funding_source === "company_funds") companyClientSpendNpr += expenseNpr(expense);
-  }
+  const [selectedAgreementFiles, selectedVatBills] = selected
+    ? await Promise.all([
+        query<Attachment>(
+          `select ${ATTACHMENT_COLUMNS} from public.attachments
+            where kind = 'client_agreement' and agreement_id = $1
+            order by created_at`,
+          [selected.id]
+        ),
+        query<Attachment>(
+          `select ${ATTACHMENT_COLUMNS.split(", ").map((column) => `a.${column}`).join(", ")}
+             from public.attachments a
+             join public.income_payments p on p.id = a.payment_id
+            where a.kind = 'vat_bill' and p.agreement_id = $1
+            order by a.created_at`,
+          [selected.id]
+        ),
+      ])
+    : [[], []];
 
+  const all = [...summaries.values()];
+  const collected = all.reduce((sum, s) => sum + s.totalCollected, 0);
+  const dueNow = all.reduce((sum, s) => sum + s.totalDueNow, 0);
+  const overdueTotal = all.reduce((sum, s) => sum + s.totalOverdue, 0);
   const active = agreements.filter((agreement) => agreement.status === "active");
-  const pending = agreements.filter((agreement) => agreement.status === "pending");
-  const paused = agreements.filter((agreement) => agreement.status === "paused");
-  const former = agreements.filter(
-    (agreement) => agreement.status === "completed" || agreement.status === "cancelled"
-  );
-  const selectedSummary = selected ? summaries.get(selected.id)! : null;
-  const selectedPayments = selected
-    ? payments.filter((payment) => payment.agreement_id === selected.id)
-    : [];
-  const selectedExpenses = selected
-    ? expenses.filter((expense) => normalize(expense.client) === normalize(selected.client_name))
-    : [];
-  const selectedAllSpend = selectedExpenses.reduce((sum, expense) => sum + expenseNpr(expense), 0);
-  const selectedCompanySpend = selectedExpenses
-    .filter((expense) => expense.funding_source === "company_funds")
-    .reduce((sum, expense) => sum + expenseNpr(expense), 0);
-  const selectedNet = selected && selected.currency === "NPR" && selectedSummary
-    ? selectedSummary.totalCollected - selectedAllSpend
-    : null;
+  const recurringTotal = active.reduce((sum, agreement) => sum + summaries.get(agreement.id)!.recurring.monthlyTotal, 0);
+  const clientCosts = expenses.reduce((sum, expense) => sum + expenseNpr(expense), 0);
+  const companyClientCosts = expenses.filter((e) => e.funding_source === "company_funds").reduce((sum, e) => sum + expenseNpr(e), 0);
+
+  const rail: RailClient[] = agreements.map((agreement) => {
+    const summary = summaries.get(agreement.id)!;
+    return {
+      id: agreement.id,
+      name: agreement.client_name,
+      group: groupOf(agreement.status),
+      dueNow: summary.totalDueNow,
+      overdue: summary.totalOverdue > 0,
+      recurring: hasRecurringService(agreement),
+    };
+  });
 
   return (
     <>
       <PageHeader
-        eyebrow="Client operations"
         title="Clients"
-        subtitle="See who you are working with, what is recurring, what is due, and every client-linked cost in one place."
+        subtitle="Every client at a glance — what they pay, what they owe, and what they cost to serve."
         action={canManage ? <AddIncomeAgreement moneyAccounts={moneyAccounts} /> : undefined}
       />
 
-      <div className="grid sm:grid-cols-2 xl:grid-cols-5 gap-3 mb-6">
-        <StatTile label="Active clients" value={String(active.length)} hint={`${agreements.length} total · ${former.length} inactive`} icon="users" tone="accent" />
-        <StatTile label="Money in" value={totalsLabel(collected)} hint="Client receipts, excluding VAT" icon="income" tone="green" />
-        <StatTile label="Due now" value={totalsLabel(outstanding)} hint="Setup + recurring outstanding" icon="clock" tone="amber" />
-        <StatTile label="Active recurring" value={totalsLabel(recurring)} hint="Expected every month" icon="subscription" tone="blue" />
-        <StatTile label="Client money out" value={formatIncomeMoney(companyClientSpendNpr, "NPR")} hint={`${formatIncomeMoney(clientSpendNpr, "NPR")} incl. founder-paid`} icon="expense" tone="amber" />
+      <div className="kpi-grid kpi-grid-5 mb-6">
+        <Kpi label="Active clients" icon="users" value={<span className="tnum">{active.length}</span>} foot={`${agreements.length} total · ${agreements.length - active.length} not active`} />
+        <Kpi label="Received" icon="income" tone="green" value={<Money value={collected} />} foot="All client payments, excl. VAT" />
+        <Kpi
+          label="To collect now"
+          icon="clock"
+          tone="amber"
+          value={<Money value={dueNow} />}
+          foot={overdueTotal > 0 ? <span className="text-red">NPR {formatNumber(overdueTotal)} overdue</span> : "Nothing overdue"}
+        />
+        <Kpi label="Monthly recurring" icon="subscription" tone="blue" value={<Money value={recurringTotal} />} foot="From active clients" />
+        <Kpi label="Cost to serve" icon="expense" tone="red" value={<Money value={clientCosts} />} foot={`Company money ${formatNumber(companyClientCosts)}`} />
       </div>
 
-      <div className="grid lg:grid-cols-[252px_minmax(0,1fr)] gap-5 items-start">
-        <aside className="card p-3 lg:sticky lg:top-5 max-h-[72vh] overflow-y-auto">
-          <Link href="/clients" className={`client-channel ${!selected ? "client-channel-active" : ""}`}>
-            <span className="client-hash">#</span>
-            <span className="truncate">all-clients</span>
-            <span className="client-count">{agreements.length}</span>
-          </Link>
-          <ChannelGroup title="Active" agreements={active} selectedId={selected?.id} />
-          {pending.length > 0 && <ChannelGroup title="Pending" agreements={pending} selectedId={selected?.id} />}
-          {paused.length > 0 && <ChannelGroup title="Paused" agreements={paused} selectedId={selected?.id} />}
-          {former.length > 0 && <ChannelGroup title="Inactive" agreements={former} selectedId={selected?.id} />}
-          {agreements.length === 0 && <p className="px-3 py-5 text-xs muted">Add a client to create the first channel.</p>}
-        </aside>
+      <div className="grid lg:grid-cols-[268px_minmax(0,1fr)] gap-5 items-start">
+        <ClientRail clients={rail} selectedId={selected?.id} />
 
         {!selected ? (
-          <Portfolio agreements={agreements} payments={payments} expenses={expenses} summaries={summaries} />
-        ) : (
-          <section className="space-y-4 min-w-0">
-            <div className="card">
-              <div className="p-5 md:p-6 border-b" style={{ borderColor: "var(--line)" }}>
-                <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-4">
-                  <div className="flex items-start gap-3 min-w-0">
-                    <div className="avatar !w-12 !h-12 !rounded-xl">{initials(selected.client_name)}</div>
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <h2 className="text-xl font-bold truncate"># {selected.client_name}</h2>
-                        <StatusPill kind="billing" value={selectedSummary!.overallStatus} />
-                      </div>
-                      <div className="mt-1.5"><ServiceBadges services={agreementServices(selected)} /></div>
-                      <p className="text-xs muted mt-1.5">Contract signed {formatServiceDate(selected.agreement_date)}</p>
-                    </div>
+          <section className="min-w-0">
+            {agreements.length === 0 ? (
+              <div className="card">
+                <EmptyState title="No clients yet" description="Add your first client agreement. Payments, dues and linked costs appear here automatically." icon="users" />
+              </div>
+            ) : (
+              <div className="card overflow-hidden">
+                <div className="card-head">
+                  <div>
+                    <h3>Portfolio</h3>
+                    <p>Click a client for its full profile.</p>
                   </div>
-                  <div className="flex flex-wrap items-center justify-end gap-2.5">
-                    {canManage && <ClientStatusControl agreementId={selected.id} status={selected.status} />}
-                    {canManage && selectedSummary && (
-                      <RecordIncomePayment
-                        agreement={selected}
-                        summary={selectedSummary}
-                        moneyAccounts={moneyAccounts}
-                        compact
-                      />
-                    )}
-                    {canManage && (
-                      <IncomeAgreementControls
-                        agreement={selected}
-                        moneyAccounts={moneyAccounts}
-                        paymentCount={selectedPayments.length}
-                        recurringPaymentCount={selectedPayments.filter((payment) => payment.payment_for === "recurring").length}
-                        redirectOnDelete="/clients"
-                        showEditButton
-                        agreementFiles={selectedAgreementFiles}
-                        payments={selectedPayments}
-                        vatBills={selectedVatBills}
-                      />
-                    )}
-                  </div>
+                  <Link href="/income" className="btn btn-sm">Income ledger</Link>
+                </div>
+                <div className="table-wrap">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Client</th>
+                        <th className="num">Received</th>
+                        <th className="num">Due now</th>
+                        <th className="num">Monthly</th>
+                        <th className="num">Net</th>
+                        <th>Next payment</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {agreements.map((agreement) => {
+                        const summary = summaries.get(agreement.id)!;
+                        const costs = costsFor(agreement).reduce((sum, e) => sum + expenseNpr(e), 0);
+                        const net = summary.totalCollected - costs;
+                        const due = dueLabel(summary.nextDueDate, today);
+                        return (
+                          <tr key={agreement.id}>
+                            <td>
+                              <Link href={`/clients?client=${agreement.id}`} className="flex items-center gap-3 min-w-[230px]">
+                                <Avatar name={agreement.client_name} size={34} />
+                                <span className="min-w-0">
+                                  <span className="block font-semibold truncate max-w-[260px]" title={agreement.client_name}>{agreement.client_name}</span>
+                                  <span className="flex flex-wrap items-center gap-1 mt-1">
+                                    <StatusPill kind="billing" value={summary.overallStatus} />
+                                    <ServiceBadges services={agreementServices(agreement)} />
+                                  </span>
+                                </span>
+                              </Link>
+                            </td>
+                            <td className="num text-green font-medium">{formatNumber(summary.totalCollected)}</td>
+                            <td className={`num font-medium ${summary.totalDueNow > 0 ? (summary.totalOverdue > 0 ? "text-red" : "text-amber") : "muted"}`}>
+                              {summary.totalDueNow > 0 ? formatNumber(summary.totalDueNow) : "—"}
+                            </td>
+                            <td className="num">{hasRecurringService(agreement) ? formatNumber(summary.recurring.monthlyTotal) : "—"}</td>
+                            <td className="num">
+                              <div className={`font-semibold ${net >= 0 ? "" : "text-red"}`}>{formatNumber(net)}</div>
+                              <div className="text-[12.5px] muted">{costs ? `cost ${formatNumber(costs)}` : "no costs"}</div>
+                            </td>
+                            <td className="whitespace-nowrap">
+                              <div className="text-[13.5px]">{summary.nextDueDate ? formatServiceDate(summary.nextDueDate) : "Settled"}</div>
+                              <div className={`text-[12.5px] ${due.tone}`}>{due.text}</div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
               </div>
-
-              <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-px overflow-hidden rounded-b-[17px]" style={{ background: "var(--line)" }}>
-                <Metric label="Collected" value={formatIncomeMoney(selectedSummary!.totalCollected, selected.currency)} tone="var(--green)" />
-                <Metric label="Due now" value={formatIncomeMoney(selectedSummary!.totalDueNow, selected.currency)} sub={dueLabel(selectedSummary!.nextDueDate)} tone={selectedSummary!.totalDueNow > 0 ? "var(--amber)" : "var(--green)"} />
-                <Metric label="Setup + website left" value={formatIncomeMoney(selectedSummary!.setup.remaining + (selectedSummary!.website?.remaining ?? 0), selected.currency)} />
-                <Metric label="Recurring / month" value={hasRecurringService(selected) ? formatIncomeMoney(selectedSummary!.recurring.monthlyTotal, selected.currency) : "—"} />
-                <Metric label="Client delivery cost" value={formatIncomeMoney(selectedAllSpend, "NPR")} sub={`${formatIncomeMoney(selectedCompanySpend, "NPR")} paid from company money`} tone="var(--red)" />
-                <Metric label="Net contribution" value={selectedNet == null ? "Mixed currencies" : formatIncomeMoney(selectedNet, "NPR")} sub="Collected minus all linked client costs" tone={selectedNet != null && selectedNet < 0 ? "var(--red)" : "var(--green)"} />
-              </div>
-            </div>
-
-            <div className="grid xl:grid-cols-2 gap-4">
-              <ActivityCard
-                title="Payments in"
-                empty="No payments recorded for this client."
-                items={selectedPayments.map((payment) => ({
-                  id: payment.id,
-                  title:
-                    payment.payment_for === "setup"
-                      ? "Setup · month 1"
-                      : payment.payment_for === "website"
-                        ? "Website payment"
-                        : "Monthly fee",
-                  meta: `${formatServiceDate(payment.paid_on)} · ${payment.account_name ?? "Company account"}${Number(payment.vat_amount) > 0 ? ` · +VAT ${formatIncomeMoney(Number(payment.vat_amount), selected.currency)}` : ""}${Number(payment.tds_amount) > 0 ? ` · −TDS ${formatIncomeMoney(Number(payment.tds_amount), selected.currency)}` : ""}${payment.reference ? ` · ${payment.reference}` : ""}`,
-                  amount: `+${formatIncomeMoney(Number(payment.amount), selected.currency)}`,
-                  color: "var(--green)",
-                  icon: "income" as const,
-                }))}
-              />
-              <ActivityCard
-                title="Money out / delivery costs"
-                empty="No expenses are linked to this client yet. Add the client name to an expense to see it here."
-                items={selectedExpenses.map((expense) => ({
-                  id: expense.id,
-                  title: expense.note || expense.vendor_name || expense.category_name || "Client expense",
-                  meta: `${expense.expense_date} · ${expense.money_account_name ?? (expense.funding_source === "company_funds" ? "Company money" : "Founder/team investment")}`,
-                  amount: `−${formatIncomeMoney(expenseNpr(expense), "NPR")}`,
-                  color: "var(--red)",
-                  icon: "expense" as const,
-                }))}
-              />
-            </div>
-
-            <div className="card p-5">
-              <h3 className="font-semibold">Client record</h3>
-              <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-4 mt-4 text-sm">
-                <Detail label="Contact" value={selected.contact_name ?? "Not added"} />
-                <Detail label="Services" value={servicesLabel(selected)} />
-                <Detail label="Contract signed" value={formatServiceDate(selected.agreement_date)} />
-                <Detail label="Day 1 · launched" value={hasRecurringService(selected) ? formatServiceDate(goLiveDate(selected), "Not launched yet") : "—"} />
-                <Detail label="Monthly fee from" value={hasRecurringService(selected) ? formatServiceDate(recurringFromDate(selected), "A month after Day 1") : "—"} />
-                <Detail label="Website delivered" value={selected.has_website ? formatServiceDate(selected.website_completed_date, "Not delivered yet") : "—"} />
-                <Detail label="Status" value={statusLabel(selected.status)} />
-              </div>
-              <div className="flex flex-wrap gap-2 mt-5 pt-4 border-t" style={{ borderColor: "var(--line)" }}>
-                <Link href={`/income/${selected.id}`} className="btn !h-9"><Icon name="income" size={14} /> Open billing details</Link>
-                <Link href={`/expenses?client=${encodeURIComponent(selected.client_name)}`} className="btn !h-9"><Icon name="expense" size={14} /> View client expenses</Link>
-              </div>
-              {selected.notes && <p className="text-xs muted mt-4 pt-4 border-t" style={{ borderColor: "var(--line)" }}>{selected.notes}</p>}
-            </div>
+            )}
           </section>
+        ) : (
+          <ClientProfile
+            agreement={selected}
+            summary={summaries.get(selected.id)!}
+            payments={payments.filter((payment) => payment.agreement_id === selected.id)}
+            costs={costsFor(selected)}
+            moneyAccounts={moneyAccounts}
+            canManage={canManage}
+            files={selectedAgreementFiles}
+            vatBills={selectedVatBills}
+            today={today}
+          />
         )}
       </div>
     </>
   );
 }
 
-function ChannelGroup({ title, agreements, selectedId }: { title: string; agreements: IncomeAgreement[]; selectedId?: string }) {
-  return (
-    <div className="mt-4">
-      <div className="px-3 mb-1 text-[11px] font-bold uppercase tracking-[0.13em] muted">{title} · {agreements.length}</div>
-      <div className="space-y-0.5">
-        {agreements.map((agreement) => (
-          <Link key={agreement.id} href={`/clients?client=${agreement.id}`} className={`client-channel ${selectedId === agreement.id ? "client-channel-active" : ""}`}>
-            <span className="client-hash">#</span>
-            <span className="truncate flex-1">{agreement.client_name.toLocaleLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "client"}</span>
-            {hasRecurringService(agreement) && <span className="client-live" title="Recurring client" />}
-          </Link>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function Portfolio({ agreements, payments, expenses, summaries }: {
-  agreements: IncomeAgreement[];
+function ClientProfile({
+  agreement,
+  summary,
+  payments,
+  costs,
+  moneyAccounts,
+  canManage,
+  files,
+  vatBills,
+  today,
+}: {
+  agreement: IncomeAgreement;
+  summary: ReturnType<typeof summarizeIncomeAgreement>;
   payments: IncomePayment[];
-  expenses: ClientExpense[];
-  summaries: Map<string, ReturnType<typeof summarizeIncomeAgreement>>;
+  costs: ClientExpense[];
+  moneyAccounts: MoneyAccount[];
+  canManage: boolean;
+  files: Attachment[];
+  vatBills: Attachment[];
+  today: string;
 }) {
-  if (!agreements.length) {
-    return <div className="card"><EmptyState title="No client channels yet" description="Add your first client agreement. Its revenue, outstanding amount, recurring cycle, and linked expenses will appear here automatically." icon="users" /></div>;
-  }
+  const allCost = costs.reduce((sum, expense) => sum + expenseNpr(expense), 0);
+  const companyCost = costs.filter((e) => e.funding_source === "company_funds").reduce((sum, e) => sum + expenseNpr(e), 0);
+  const net = summary.totalCollected - allCost;
+  const oneOffLeft = summary.setup.remaining + (summary.website?.remaining ?? 0);
+  const due = dueLabel(summary.nextDueDate, today);
+  const billedSoFar = summary.totalCollected + summary.outstanding;
+  const paidShare = billedSoFar > 0 ? Math.min(100, (summary.totalCollected / billedSoFar) * 100) : 100;
+
   return (
-    <section className="min-w-0">
-      <div className="flex items-start justify-between gap-3 mb-3">
-        <div><h2 className="section-title">All client channels</h2><p className="section-kicker mt-1">Open a channel for its complete cash and collection view.</p></div>
-        <Link href="/income" className="btn !h-9">Income ledger</Link>
+    <section className="space-y-4 min-w-0">
+      <div className="card overflow-hidden rise">
+        <div className="p-5 md:p-6 flex flex-wrap items-start justify-between gap-4 border-b dot-pattern">
+          <div className="flex items-start gap-4 min-w-0">
+            <Avatar name={agreement.client_name} size={52} />
+            <div className="min-w-0">
+              <h2 className="text-[22px] font-semibold tracking-tight">{agreement.client_name}</h2>
+              <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                <StatusPill kind="agreement" value={agreement.status} />
+                <StatusPill kind="billing" value={summary.overallStatus} />
+                <ServiceBadges services={agreementServices(agreement)} size="md" />
+              </div>
+              <p className="text-[13.5px] muted mt-2">
+                {agreement.contact_name ? `${agreement.contact_name} · ` : ""}Signed {formatServiceDate(agreement.agreement_date)}
+                {hasRecurringService(agreement) ? ` · Day 1 ${formatServiceDate(goLiveDate(agreement), "not set")}` : ""}
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {canManage && <ClientStatusControl agreementId={agreement.id} status={agreement.status} />}
+            {canManage && <RecordIncomePayment agreement={agreement} summary={summary} moneyAccounts={moneyAccounts} />}
+            {canManage && (
+              <IncomeAgreementControls
+                agreement={agreement}
+                moneyAccounts={moneyAccounts}
+                paymentCount={payments.length}
+                recurringPaymentCount={payments.filter((payment) => payment.payment_for === "recurring").length}
+                redirectOnDelete="/clients"
+                showEditButton
+                agreementFiles={files}
+                payments={payments}
+                vatBills={vatBills}
+              />
+            )}
+          </div>
+        </div>
+
+        <div className="px-5 md:px-6 py-4 border-b">
+          <div className="flex items-center justify-between text-[13.5px] mb-2">
+            <span className="muted">Paid so far</span>
+            <span className="tnum"><strong>{formatNumber(summary.totalCollected)}</strong> <span className="muted">of {formatNumber(billedSoFar)} billed</span></span>
+          </div>
+          <div className="stack-bar !h-2.5">
+            <span style={{ width: `${paidShare}%`, background: "var(--green)" }} />
+            {paidShare < 100 && <span style={{ width: `${100 - paidShare}%`, background: summary.totalOverdue > 0 ? "var(--red)" : "var(--amber)" }} />}
+          </div>
+        </div>
+
+        <dl className="metric-grid">
+          <div>
+            <dt>Received</dt>
+            <dd className="text-green">{formatNumber(summary.totalCollected)}</dd>
+            <small>{summary.lastPaymentDate ? `Last on ${formatServiceDate(summary.lastPaymentDate)}` : "No payment yet"}</small>
+          </div>
+          <div>
+            <dt>Due now</dt>
+            <dd className={summary.totalDueNow > 0 ? (summary.totalOverdue > 0 ? "text-red" : "text-amber") : ""}>{formatNumber(summary.totalDueNow)}</dd>
+            <small className={due.tone}>{summary.nextDueDate ? `${summary.nextDueLabel} · ${due.text}` : "All settled"}</small>
+          </div>
+          <div>
+            <dt>Monthly fee</dt>
+            <dd>{hasRecurringService(agreement) ? formatNumber(summary.recurring.monthlyTotal) : "—"}</dd>
+            <small>{hasRecurringService(agreement) ? `From ${formatServiceDate(recurringFromDate(agreement), "a month after Day 1")}` : "One-off project"}</small>
+          </div>
+          <div>
+            <dt>Setup & website left</dt>
+            <dd className={oneOffLeft > 0 ? "text-amber" : ""}>{formatNumber(oneOffLeft)}</dd>
+            <small>of {formatNumber(summary.totalAgreedOneOff)} agreed</small>
+          </div>
+          <div>
+            <dt>Cost to serve</dt>
+            <dd>{formatNumber(allCost)}</dd>
+            <small>{formatNumber(companyCost)} from company money</small>
+          </div>
+          <div>
+            <dt>Net from this client</dt>
+            <dd className={net >= 0 ? "text-green" : "text-red"}>{formatNumber(net)}</dd>
+            <small>Received minus costs</small>
+          </div>
+        </dl>
       </div>
-      <div className="grid xl:grid-cols-2 gap-3">
-        {agreements.map((agreement) => {
-          const summary = summaries.get(agreement.id)!;
-          const ownExpenses = expenses.filter((expense) => normalize(expense.client) === normalize(agreement.client_name));
-          const spend = ownExpenses.reduce((sum, expense) => sum + expenseNpr(expense), 0);
-          const paymentCount = payments.filter((payment) => payment.agreement_id === agreement.id).length;
-          return (
-            <Link key={agreement.id} href={`/clients?client=${agreement.id}`} className="card client-card p-4 block">
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="avatar">{initials(agreement.client_name)}</div>
-                  <div className="min-w-0"><h3 className="font-semibold truncate">{agreement.client_name}</h3><div className="mt-1"><ServiceBadges services={agreementServices(agreement)} /></div><p className="text-xs muted mt-1">{statusLabel(agreement.status)}</p></div>
+
+      <div className="grid xl:grid-cols-2 gap-4">
+        <div className="card overflow-hidden rise rise-1">
+          <div className="card-head">
+            <div><h3>Payments in</h3><p>{payments.length} payment{payments.length === 1 ? "" : "s"}</p></div>
+            <Link href={`/income/${agreement.id}`} className="link-more">Billing detail <Icon name="arrow" size={14} /></Link>
+          </div>
+          <div className="row-list">
+            {payments.length === 0 && <p className="px-5 py-6 text-[13.5px] muted">No payments recorded yet.</p>}
+            {payments.slice(0, 12).map((payment) => (
+              <div key={payment.id} className="row-item">
+                <div className="row-icon" style={{ "--tone": "var(--green)", "--tone-soft": "var(--green-soft)" } as React.CSSProperties}><Icon name="income" size={16} /></div>
+                <div className="min-w-0 flex-1">
+                  <div className="row-title">{payment.payment_for === "setup" ? "Setup fee" : payment.payment_for === "website" ? "Website" : "Monthly fee"}</div>
+                  <div className="row-meta">
+                    {formatServiceDate(payment.paid_on)} · {moneyAccounts.find((a) => a.id === payment.money_account_id)?.kind === "company_bank" ? "VAT account" : "Non-VAT account"}
+                    {Number(payment.vat_amount) > 0 ? ` · +VAT ${formatNumber(Number(payment.vat_amount))}` : ""}
+                    {Number(payment.tds_amount) > 0 ? ` · −TDS ${formatNumber(Number(payment.tds_amount))}` : ""}
+                  </div>
                 </div>
-                <Icon name="arrow" size={15} className="muted shrink-0 mt-2" />
+                <div className="text-right">
+                  <div className="row-amount text-green">+{formatNumber(Number(payment.amount))}</div>
+                  {bankAmount(payment) !== Number(payment.amount) && <div className="row-sub">bank {formatNumber(bankAmount(payment))}</div>}
+                </div>
               </div>
-              <div className="grid grid-cols-2 gap-2 mt-4">
-                <MiniMetric label="Collected" value={formatIncomeMoney(summary.totalCollected, agreement.currency)} />
-                <MiniMetric label="Due now" value={formatIncomeMoney(summary.totalDueNow, agreement.currency)} warn={summary.totalDueNow > 0} />
-                <MiniMetric label="Recurring" value={hasRecurringService(agreement) ? formatIncomeMoney(summary.recurring.monthlyTotal, agreement.currency) : "—"} />
-                <MiniMetric label="Client costs" value={formatIncomeMoney(spend, "NPR")} />
+            ))}
+          </div>
+        </div>
+
+        <div className="card overflow-hidden rise rise-2">
+          <div className="card-head">
+            <div><h3>Cost to serve</h3><p>Expenses tagged with this client</p></div>
+            <Link href={`/expenses?client=${encodeURIComponent(agreement.client_name)}&period=all`} className="link-more">All <Icon name="arrow" size={14} /></Link>
+          </div>
+          <div className="row-list">
+            {costs.length === 0 && <p className="px-5 py-6 text-[13.5px] muted">No expenses are tagged with this client. Pick the client on an expense to see it here.</p>}
+            {costs.slice(0, 12).map((expense) => (
+              <div key={expense.id} className="row-item">
+                <div className="row-icon" style={{ "--tone": "var(--red)", "--tone-soft": "var(--red-soft)" } as React.CSSProperties}><Icon name="expense" size={16} /></div>
+                <div className="min-w-0 flex-1">
+                  <div className="row-title">{expense.note || expense.vendor_name || expense.category_name || "Client expense"}</div>
+                  <div className="row-meta">
+                    {formatServiceDate(expense.expense_date)} · {expense.funding_source === "company_funds" ? expense.money_account_name ?? "Company money" : "Founder money"}
+                  </div>
+                </div>
+                <div className="row-amount">−{formatNumber(expenseNpr(expense))}</div>
               </div>
-              <p className="text-[11px] muted mt-3">{paymentCount} payment record{paymentCount === 1 ? "" : "s"} · {ownExpenses.length} linked expense{ownExpenses.length === 1 ? "" : "s"}</p>
-            </Link>
-          );
-        })}
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="card p-5 md:p-6 rise rise-3">
+        <SectionHeader title="Client record" action={<Link href={`/income/${agreement.id}`} className="btn btn-sm"><Icon name="income" size={14} /> Open billing</Link>} />
+        <dl className="grid sm:grid-cols-2 xl:grid-cols-4 gap-x-6 gap-y-4">
+          <Detail label="Contact" value={agreement.contact_name ?? "Not added"} />
+          <Detail label="Services" value={servicesLabel(agreement)} />
+          <Detail label="Status" value={AGREEMENT_STATUS_LABELS[agreement.status]} />
+          <Detail label="Contract signed" value={formatServiceDate(agreement.agreement_date)} />
+          <Detail label="Day 1 · launched" value={hasRecurringService(agreement) ? formatServiceDate(goLiveDate(agreement), "Not launched yet") : "—"} />
+          <Detail label="Monthly fee from" value={hasRecurringService(agreement) ? formatServiceDate(recurringFromDate(agreement), "A month after Day 1") : "—"} />
+          <Detail label="Website delivered" value={agreement.has_website ? formatServiceDate(agreement.website_completed_date, "Not delivered yet") : "—"} />
+          <Detail label="Client deducts TDS" value={agreement.deducts_tds ? "Yes · 1.5%" : "No"} />
+        </dl>
+        {agreement.notes && <p className="text-[13.5px] muted mt-5 pt-4 border-t">{agreement.notes}</p>}
       </div>
     </section>
   );
 }
 
-function Metric({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: string }) {
-  return <div className="p-4 min-h-[112px]" style={{ background: "var(--surface)" }}><div className="stat-label">{label}</div><div className="text-xl font-bold tnum mt-3" style={{ color: tone }}>{value}</div>{sub && <div className="text-[11px] muted mt-1">{sub}</div>}</div>;
-}
-
-function MiniMetric({ label, value, warn }: { label: string; value: string; warn?: boolean }) {
-  return <div className="rounded-xl p-3" style={{ background: "var(--surface-2)", border: "1px solid var(--line)" }}><div className="text-[10px] font-bold uppercase tracking-[0.12em] muted">{label}</div><div className="text-sm font-semibold tnum mt-1" style={{ color: warn ? "var(--amber)" : undefined }}>{value}</div></div>;
-}
-
 function Detail({ label, value }: { label: string; value: string }) {
-  return <div><div className="text-[11px] uppercase tracking-[0.12em] muted font-bold">{label}</div><div className="mt-1 font-medium">{value}</div></div>;
-}
-
-function ActivityCard({ title, empty, items }: { title: string; empty: string; items: { id: string; title: string; meta: string; amount: string; color: string; icon: "income" | "expense" }[] }) {
   return (
-    <div className="card overflow-hidden">
-      <div className="px-4 py-3 border-b font-semibold" style={{ borderColor: "var(--line)" }}>{title}</div>
-      {!items.length && <p className="p-5 text-xs muted">{empty}</p>}
-      {items.slice(0, 10).map((item) => <div key={item.id} className="px-4 py-3 flex items-center gap-3 border-b last:border-b-0" style={{ borderColor: "var(--line)" }}><div className="stat-icon !w-9 !h-9 shrink-0" style={{ color: item.color }}><Icon name={item.icon} size={14} /></div><div className="min-w-0 flex-1"><div className="text-sm font-medium truncate">{item.title}</div><div className="text-[11px] muted mt-0.5 truncate">{item.meta}</div></div><div className="text-sm font-semibold tnum shrink-0" style={{ color: item.color }}>{item.amount}</div></div>)}
+    <div>
+      <dt className="text-[12.5px] muted">{label}</dt>
+      <dd className="mt-1 text-[14.5px] font-medium">{value}</dd>
     </div>
   );
 }

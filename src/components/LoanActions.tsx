@@ -70,14 +70,12 @@ export function LendMoney({
             <div className="modal-header">
               <div>
                 <h2 className="text-lg font-bold">{loan ? "Edit loan" : "Lend company money"}</h2>
-                <p className="text-xs muted">
+                <p className="text-[13px] muted">
                   The money leaves the account now and comes back when you mark it paid back. It is not an
                   expense and repaying it is not income.
                 </p>
               </div>
-              <button type="button" onClick={() => setOpen(false)} className="icon-btn">
-                ✕
-              </button>
+              <button type="button" onClick={() => setOpen(false)} className="icon-btn"><Icon name="close" size={16} /></button>
             </div>
 
             <label className="block">
@@ -184,7 +182,7 @@ export function MarkLoanRepaid({
 
   return (
     <>
-      <button type="button" onClick={() => setOpen(true)} className="btn btn-primary !h-8 !px-3 text-xs">
+      <button type="button" onClick={() => setOpen(true)} className="btn btn-primary !h-8 !px-3 text-[13px]">
         <Icon name="check" size={13} /> Mark paid back
       </button>
       {open && (
@@ -194,14 +192,12 @@ export function MarkLoanRepaid({
             <div className="modal-header">
               <div>
                 <h2 className="text-lg font-bold">Paid back</h2>
-                <p className="text-xs muted">
+                <p className="text-[13px] muted">
                   {loan.borrower_name} returns {formatIncomeMoney(Number(loan.amount), source?.currency ?? "NPR")}. The
                   account balance goes back up and the loan is closed.
                 </p>
               </div>
-              <button type="button" onClick={() => setOpen(false)} className="icon-btn">
-                ✕
-              </button>
+              <button type="button" onClick={() => setOpen(false)} className="icon-btn"><Icon name="close" size={16} /></button>
             </div>
 
             <div>
@@ -252,7 +248,7 @@ export function UndoLoanRepaid({ id }: { id: string }) {
     <button
       type="button"
       disabled={pending}
-      className="btn !h-8 !px-3 text-xs"
+      className="btn !h-8 !px-3 text-[13px]"
       onClick={() =>
         window.confirm("Mark this loan as not paid back yet? The amount leaves the account again.") &&
         start(() => undoLoanRepaid(id))

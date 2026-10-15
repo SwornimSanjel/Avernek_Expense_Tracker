@@ -2,88 +2,147 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useCallback, useEffect, useState } from "react";
+import { motion } from "framer-motion";
 import { signOut } from "@/app/login/actions";
 import Icon, { type IconName } from "@/components/Icons";
-import { LogoWord } from "@/components/Logo";
+import { LogoMark } from "@/components/Logo";
 import ThemeToggle from "@/components/ThemeToggle";
-import { motion } from "framer-motion";
+import { displayName, initialsOf } from "@/lib/people";
 
-const items: { href: string; label: string; short: string; icon: IconName }[] = [
-  { href: "/", label: "Overview", short: "Home", icon: "home" },
-  { href: "/expenses", label: "Expenses", short: "Spend", icon: "expense" },
-  { href: "/income", label: "Income", short: "Income", icon: "income" },
-  { href: "/clients", label: "Clients", short: "Clients", icon: "users" },
-  { href: "/funds", label: "Company money", short: "Funds", icon: "wallet" },
-  { href: "/vat", label: "VAT & bills", short: "VAT", icon: "receipt" },
-  { href: "/subscriptions", label: "Subscriptions", short: "Subs", icon: "subscription" },
-  { href: "/settlements", label: "Contributions", short: "Team", icon: "contribution" },
-  { href: "/settings", label: "Settings", short: "Settings", icon: "settings" },
+type Item = { href: string; label: string; short: string; icon: IconName };
+
+const groups: { label: string | null; items: Item[] }[] = [
+  {
+    label: null,
+    items: [
+      { href: "/", label: "Overview", short: "Home", icon: "home" },
+      { href: "/statement", label: "Statement", short: "Statement", icon: "statement" },
+    ],
+  },
+  {
+    label: "Money",
+    items: [
+      { href: "/expenses", label: "Expenses", short: "Spend", icon: "expense" },
+      { href: "/income", label: "Income", short: "Income", icon: "income" },
+      { href: "/funds", label: "Company money", short: "Accounts", icon: "wallet" },
+      { href: "/vat", label: "VAT & bills", short: "VAT", icon: "receipt" },
+      { href: "/subscriptions", label: "Subscriptions", short: "Subs", icon: "subscription" },
+    ],
+  },
+  {
+    label: "People",
+    items: [
+      { href: "/clients", label: "Clients", short: "Clients", icon: "users" },
+      { href: "/settlements", label: "Contributions", short: "Partners", icon: "contribution" },
+    ],
+  },
 ];
+
+const allItems = [...groups.flatMap((group) => group.items), { href: "/settings", label: "Settings", short: "Settings", icon: "settings" as IconName }];
 
 export default function Nav({ name, isAdmin }: { name: string; isAdmin: boolean }) {
   const path = usePathname();
-  const active = (href: string) => href === "/" ? path === "/" : path.startsWith(href);
-  const firstName = name.split(" ")[0];
-  const initials = name.split(" ").filter(Boolean).slice(0, 2)
-    .map((part) => part[0]?.toUpperCase()).join("");
+  const active = (href: string) => (href === "/" ? path === "/" : path.startsWith(href));
+  const shown = displayName(name);
+  const [collapsed, setCollapsed] = useState(false);
+
+  useEffect(() => {
+    setCollapsed(document.documentElement.dataset.sidebar === "collapsed");
+  }, []);
+
+  const toggle = useCallback(() => {
+    setCollapsed((current) => {
+      const next = !current;
+      const root = document.documentElement;
+      if (next) root.dataset.sidebar = "collapsed";
+      else delete root.dataset.sidebar;
+      try {
+        localStorage.setItem("avernek-sidebar", next ? "collapsed" : "expanded");
+      } catch {}
+      return next;
+    });
+  }, []);
+
+  // ⌘B / Ctrl+B toggles the sidebar, like most desktop tools.
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "b") {
+        const target = event.target as HTMLElement | null;
+        if (target && /input|textarea|select/i.test(target.tagName)) return;
+        event.preventDefault();
+        toggle();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [toggle]);
 
   return (
     <>
-      <aside className="sidebar hidden md:flex md:flex-col w-[272px] shrink-0 h-screen sticky top-0 px-4 py-5">
-        <div className="px-2 pb-7">
-          <LogoWord />
-          <div className="mt-2 ml-[38px] text-[10px] uppercase tracking-[0.16em]" style={{ color: "var(--muted-2)" }}>
-            Finance workspace
-          </div>
+      <aside className="sidebar" aria-label="Main navigation">
+        <div className="sb-top">
+          <Link href="/" className="sb-brand" aria-label="Avernek overview">
+            <LogoMark size={28} />
+            <span className="logo-text">Avernek</span>
+          </Link>
+          <button
+            type="button"
+            onClick={toggle}
+            className="sb-toggle"
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            title={`${collapsed ? "Expand" : "Collapse"} sidebar (⌘B)`}
+          >
+            <Icon name="sidebar" size={17} />
+          </button>
         </div>
 
-        <nav className="flex-1 min-h-0 overflow-y-auto">
-          <div className="nav-section-label mb-2">Workspace</div>
-          <div className="space-y-1">
-            {items.slice(0, 7).map((item) => (
-              <NavLink key={item.href} item={item} active={active(item.href)} />
-            ))}
-          </div>
-          <div className="nav-section-label mt-7 mb-2">Organisation</div>
-          <div className="space-y-1">
-            {items.slice(7).map((item) => (
-              <NavLink key={item.href} item={item} active={active(item.href)} />
-            ))}
-          </div>
+        <nav className="sb-scroll">
+          {groups.map((group, index) => (
+            <div key={index} className="sb-group">
+              {group.label && <div className="sb-group-label">{group.label}</div>}
+              {group.items.map((item) => (
+                <NavLink key={item.href} item={item} active={active(item.href)} />
+              ))}
+            </div>
+          ))}
         </nav>
 
-        <div className="space-y-3 pt-4 mt-4" style={{ borderTop: "1px solid var(--line)" }}>
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-[11px] font-semibold uppercase tracking-[0.12em] muted">Appearance</span>
-            <ThemeToggle compact />
-          </div>
-          <div className="user-chip">
-            <div className="avatar">{initials || "A"}</div>
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-xs font-semibold">{name}</div>
-              <div className="text-[11px] muted">{isAdmin ? "Administrator" : "View only"}</div>
+        <div className="sb-foot">
+          <NavLink item={allItems[allItems.length - 1]} active={active("/settings")} />
+          <div className="sb-user">
+            <div className="avatar avatar-round !w-8 !h-8 !text-[12px]">{initialsOf(name)}</div>
+            <div className="sb-user-text min-w-0 flex-1">
+              <div className="sb-user-name">{shown}</div>
+              <div className="sb-user-role">{isAdmin ? "Administrator" : "View only"}</div>
             </div>
-            <form action={signOut}>
-              <button type="submit" className="icon-btn !w-8 !h-8" title="Sign out" aria-label="Sign out">
-                <Icon name="arrow" size={15} />
-              </button>
-            </form>
+            <div className="sb-foot-row flex items-center gap-0.5">
+              <ThemeToggle compact />
+              <form action={signOut} className="sb-hide-collapsed">
+                <button type="submit" className="sb-mini-btn" title="Sign out" aria-label="Sign out">
+                  <Icon name="logout" size={15} />
+                </button>
+              </form>
+            </div>
           </div>
         </div>
       </aside>
 
-      <header className="mobile-topbar md:hidden fixed top-0 inset-x-0 z-40 h-16 flex items-center justify-between px-4" style={{ borderBottom: "1px solid var(--line)" }}>
-        <LogoWord />
+      <header className="mobile-topbar md:hidden fixed top-0 inset-x-0 z-40 h-14 flex items-center justify-between px-4 border-b">
+        <Link href="/" className="flex items-center gap-2">
+          <LogoMark size={24} />
+          <span className="logo-text !text-[16px]">Avernek</span>
+        </Link>
         <div className="flex items-center gap-2">
-          <span className="text-[11px] muted">{firstName}</span>
+          <span className="text-[13px] muted">{shown}</span>
           <ThemeToggle compact />
         </div>
       </header>
 
-      <nav className="mobile-bottom-nav md:hidden fixed bottom-0 inset-x-0 z-40 grid grid-cols-9 h-[68px]" style={{ borderTop: "1px solid var(--line)" }}>
-        {items.map((item) => (
+      <nav className="mobile-bottom-nav md:hidden fixed bottom-0 inset-x-0 z-40 h-[66px] border-t">
+        {allItems.map((item) => (
           <Link key={item.href} href={item.href} className={`mobile-nav-item ${active(item.href) ? "mobile-nav-item-active" : ""}`}>
-            <Icon name={item.icon} size={18} strokeWidth={active(item.href) ? 2.2 : 1.8} />
+            <Icon name={item.icon} size={19} strokeWidth={active(item.href) ? 2.1 : 1.8} />
             <span className="truncate max-w-full px-1">{item.short}</span>
           </Link>
         ))}
@@ -92,22 +151,19 @@ export default function Nav({ name, isAdmin }: { name: string; isAdmin: boolean 
   );
 }
 
-function NavLink({ item, active }: { item: { href: string; label: string; icon: IconName }; active: boolean }) {
+function NavLink({ item, active }: { item: Item; active: boolean }) {
   return (
-    <motion.div whileHover={{ x: 2 }} whileTap={{ scale: 0.985 }} transition={{ duration: 0.16 }}>
-      <Link href={item.href} className={`nav-item ${active ? "nav-item-active" : ""}`}>
-        {active && (
-          <motion.span
-            layoutId="desktop-nav-active"
-            className="nav-active-shell"
-            transition={{ type: "spring", stiffness: 430, damping: 34 }}
-          >
-            <span className="nav-active-rail" />
-          </motion.span>
-        )}
-        <span className="nav-icon"><Icon name={item.icon} size={17} strokeWidth={active ? 2.1 : 1.75} /></span>
-        <span>{item.label}</span>
-      </Link>
-    </motion.div>
+    <Link href={item.href} className={`sb-link ${active ? "sb-link-active" : ""}`} aria-current={active ? "page" : undefined}>
+      {active && (
+        <motion.span
+          layoutId="sidebar-active"
+          className="sb-active-bg"
+          transition={{ type: "spring", stiffness: 500, damping: 38 }}
+        />
+      )}
+      <span className="sb-icon"><Icon name={item.icon} size={18} strokeWidth={active ? 2 : 1.75} /></span>
+      <span className="sb-label">{item.label}</span>
+      <span className="sb-tip">{item.label}</span>
+    </Link>
   );
 }

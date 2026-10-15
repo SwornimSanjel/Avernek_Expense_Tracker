@@ -1,5 +1,7 @@
 "use client";
 
+import Icon from "@/components/Icons";
+import { pickerPeople } from "@/lib/people";
 import { useState, useTransition } from "react";
 import { addRecurring } from "@/app/(app)/subscriptions/actions";
 import type { AppUser, Category, Vendor } from "@/lib/types";
@@ -13,7 +15,7 @@ function today() {
 export default function AddRecurring({
   categories,
   vendors,
-  users,
+  users: allUsers,
   meId,
 }: {
   categories: Category[];
@@ -21,6 +23,7 @@ export default function AddRecurring({
   users: AppUser[];
   meId: string;
 }) {
+  const users = pickerPeople(allUsers, []);
   const [open, setOpen] = useState(false);
   const [amount, setAmount] = useState("");
   const [currency, setCurrency] = useState<"NPR" | "USD">("USD");
@@ -29,7 +32,7 @@ export default function AddRecurring({
   if (!open)
     return (
       <button onClick={() => setOpen(true)} className="btn btn-primary">
-        <span className="text-base leading-none">＋</span> Add subscription
+        <Icon name="plus" size={15} /> Add subscription
       </button>
     );
 
@@ -46,10 +49,8 @@ export default function AddRecurring({
         className="modal-panel md:max-w-lg p-5 md:p-6 space-y-4"
       >
         <div className="modal-header">
-          <div><h2 className="text-lg font-bold">Add subscription</h2><p className="text-xs muted mt-1">Track a recurring cost and upcoming renewal.</p></div>
-          <button type="button" onClick={() => setOpen(false)} className="icon-btn">
-            ✕
-          </button>
+          <div><h2 className="text-lg font-bold">Add subscription</h2><p className="text-[13px] muted mt-1">Track a recurring cost and upcoming renewal.</p></div>
+          <button type="button" onClick={() => setOpen(false)} className="icon-btn"><Icon name="close" size={16} /></button>
         </div>
 
         <input
@@ -84,7 +85,7 @@ export default function AddRecurring({
             <option value="annual">Annual</option>
           </select>
         </div>
-        <label className="block text-xs muted">
+        <label className="block text-[13px] muted">
           Next renewal date
           <input
             name="next_renewal_date"

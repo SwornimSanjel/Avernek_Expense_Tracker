@@ -67,7 +67,7 @@ export default function AddOtherIncome({
         </span>
       ) : (
         <button type="button" onClick={() => setOpen(true)} className={`btn ${compact ? "!h-9 !px-3 text-sm" : ""}`}>
-          <span className="text-base leading-none">＋</span> Income without client
+          <Icon name="plus" size={15} /> Income without client
         </button>
       )}
 
@@ -78,13 +78,11 @@ export default function AddOtherIncome({
             <div className="modal-header">
               <div>
                 <h2 className="text-lg font-bold">{record ? "Edit income" : "Add income without a client"}</h2>
-                <p className="text-xs muted">
+                <p className="text-[13px] muted">
                   Extra work, a one-off website, consulting — anything earned outside a client agreement.
                 </p>
               </div>
-              <button type="button" onClick={() => setOpen(false)} className="icon-btn">
-                ✕
-              </button>
+              <button type="button" onClick={() => setOpen(false)} className="icon-btn"><Icon name="close" size={16} /></button>
             </div>
 
             <div className="grid sm:grid-cols-2 gap-3">

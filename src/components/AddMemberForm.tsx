@@ -54,7 +54,7 @@ export default function AddMemberForm() {
       {state.error && <p className="alert alert-error">{state.error}</p>}
       {state.ok && <p className="alert" style={{ color: "var(--green)", borderColor: "rgb(70 216 144 / .2)" }}>{state.ok}</p>}
 
-      <p className="text-xs muted">
+      <p className="text-[13px] muted">
         No password means they can be picked as a payer and included in splits,
         but cannot sign in. Administrators can edit and delete everything;
         everyone else has read-only access.

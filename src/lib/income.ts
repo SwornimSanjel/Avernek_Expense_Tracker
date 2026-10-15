@@ -12,6 +12,8 @@ import type {
   ServiceKey,
   WebsiteStatus,
 } from "@/lib/types";
+import { nepalToday } from "@/lib/dates";
+import { formatMoney } from "@/lib/format";
 
 /**
  * Everything money-related on a client is DERIVED here, never stored:
@@ -81,21 +83,16 @@ export function daysUntilDate(
 }
 
 /**
- * "Today" in the app's own convention: the calendar date as the browser/server
- * reads it locally, formatted as the same YYYY-MM-DD string every stored date
- * uses. Comparisons stay string-to-string, so no timezone shifts a due date.
+ * "Today" in Kathmandu, formatted as the same YYYY-MM-DD string every stored
+ * date uses. The server clock is UTC, so reading it locally made "today" lag a
+ * day until 05:45 NPT. Comparisons stay string-to-string.
  */
 export function todayIso(): string {
-  const now = new Date();
-  return new Date(now.getTime() - now.getTimezoneOffset() * 60_000)
-    .toISOString()
-    .slice(0, 10);
+  return nepalToday();
 }
 
 export function formatIncomeMoney(amount: number, currency: string): string {
-  return `${currency} ${new Intl.NumberFormat("en-NP", {
-    maximumFractionDigits: 2,
-  }).format(amount)}`;
+  return formatMoney(amount, currency);
 }
 
 export function formatServiceDate(value: string | null, fallback = "Not set"): string {

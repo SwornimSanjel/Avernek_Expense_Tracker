@@ -336,7 +336,7 @@ export default function FileUploader({
               <div className="uploader-failed">
                 <b>Not uploaded</b>
                 <small>{item.error}</small>
-                <button type="button" className="btn !h-7 !px-3 text-[11px]" onClick={() => upload(item)}>
+                <button type="button" className="btn !h-7 !px-3 text-[12.5px]" onClick={() => upload(item)}>
                   Retry
                 </button>
               </div>

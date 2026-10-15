@@ -1,5 +1,7 @@
 "use client";
 
+import Icon from "@/components/Icons";
+import { pickerPeople } from "@/lib/people";
 import { useState, useTransition } from "react";
 import { updateExpense } from "@/app/(app)/expenses/actions";
 import type {
@@ -18,7 +20,7 @@ export default function EditExpenseModal({
   expense,
   categories,
   vendors,
-  users,
+  users: allUsers,
   moneyAccounts,
   clients,
   onClose,
@@ -31,6 +33,7 @@ export default function EditExpenseModal({
   clients: string[];
   onClose: () => void;
 }) {
+  const users = pickerPeople(allUsers, [expense.paid_by_user_id, ...(expense.expense_shares ?? []).map((share) => share.user_id)]);
   const [amount, setAmount] = useState(String(expense.amount));
   const [currency, setCurrency] = useState<Currency>(expense.currency);
   const [fundingSource, setFundingSource] = useState<ExpenseFundingSource>(
@@ -62,12 +65,12 @@ export default function EditExpenseModal({
       >
         <input type="hidden" name="expense_id" value={expense.id} />
         <div className="modal-header">
-          <div><h2 className="text-lg font-bold">Edit expense</h2><p className="text-xs muted mt-1">Keep founder investment separate from company operating money.</p></div>
-          <button type="button" onClick={onClose} className="icon-btn">✕</button>
+          <div><h2 className="text-lg font-bold">Edit expense</h2><p className="text-[13px] muted mt-1">Keep founder investment separate from company operating money.</p></div>
+          <button type="button" onClick={onClose} className="icon-btn"><Icon name="close" size={16} /></button>
         </div>
 
         <div className="flex gap-2">
-          <label className="block flex-1 text-xs muted">
+          <label className="block flex-1 text-[13px] muted">
             Amount
             <input
               name="amount"
@@ -80,7 +83,7 @@ export default function EditExpenseModal({
               className="input tnum mt-1"
             />
           </label>
-          <label className="block w-28 text-xs muted">
+          <label className="block w-28 text-[13px] muted">
             Currency
             <select
               name="currency"
@@ -99,7 +102,7 @@ export default function EditExpenseModal({
 
         {currency === "USD" && (
           <div className="grid grid-cols-2 gap-2">
-            <label className="block text-xs muted">
+            <label className="block text-[13px] muted">
               Actual NPR charged{isNprAccountPayingUsd ? " · required" : ""}
               <input
                 name="actual_npr_charged"
@@ -112,7 +115,7 @@ export default function EditExpenseModal({
                 className="input tnum mt-1"
               />
             </label>
-            <label className="block text-xs muted">
+            <label className="block text-[13px] muted">
               Manual NPR/USD rate
               <input
                 name="manual_rate"
@@ -150,7 +153,7 @@ export default function EditExpenseModal({
           <input type="hidden" name="funding_source" value={fundingSource} />
           {fundingSource === "company_funds" && (
             <div className="mt-3">
-              <label className="block text-xs muted">
+              <label className="block text-[13px] muted">
                 Paid from which company-money account?
                 <select
                   name="money_account_id"
@@ -173,7 +176,7 @@ export default function EditExpenseModal({
         </div>
 
         <div className="grid grid-cols-2 gap-2">
-          <label className="block text-xs muted">
+          <label className="block text-[13px] muted">
             Payment date
             <input
               name="expense_date"
@@ -183,7 +186,7 @@ export default function EditExpenseModal({
               className="input mt-1"
             />
           </label>
-          <label className="block text-xs muted">
+          <label className="block text-[13px] muted">
             Billing month
             <input
               name="billing_month"
@@ -193,7 +196,7 @@ export default function EditExpenseModal({
             />
           </label>
           {fundingSource === "personal" && (
-            <label className="block text-xs muted">
+            <label className="block text-[13px] muted">
               Invested / paid personally by
               <select
                 name="paid_by_user_id"
@@ -204,14 +207,14 @@ export default function EditExpenseModal({
               </select>
             </label>
           )}
-          <label className="block text-xs muted">
+          <label className="block text-[13px] muted">
             Category
             <select name="category_id" defaultValue={expense.category_id ?? ""} className="input mt-1">
               <option value="">—</option>
               {categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
             </select>
           </label>
-          <label className="block text-xs muted col-span-2">
+          <label className="block text-[13px] muted col-span-2">
             Vendor
             <select name="vendor_id" defaultValue={expense.vendor_id ?? ""} className="input mt-1">
               <option value="">—</option>
@@ -232,7 +235,7 @@ export default function EditExpenseModal({
           />
         )}
 
-        <label className="block text-xs muted">
+        <label className="block text-[13px] muted">
           Client / project (optional)
           <input
             name="client"
@@ -245,7 +248,7 @@ export default function EditExpenseModal({
           </datalist>
           <span className="field-help">Leave blank when this is a shared company cost.</span>
         </label>
-        <label className="block text-xs muted">
+        <label className="block text-[13px] muted">
           Note
           <textarea name="note" defaultValue={expense.note ?? ""} className="input mt-1 min-h-20" />
         </label>

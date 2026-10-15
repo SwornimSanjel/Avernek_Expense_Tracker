@@ -21,6 +21,19 @@
         "3100"
       ],
       "port": 3100
+    },
+    {
+      "name": "preview",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "DATABASE_URL=postgresql://swornim@127.0.0.1:5432/avernek_preview",
+        "npx",
+        "next",
+        "dev",
+        "-p",
+        "3005"
+      ],
+      "port": 3005
     }
   ]
 }

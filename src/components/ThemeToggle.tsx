@@ -18,14 +18,16 @@ export default function ThemeToggle({ compact = false }: { compact?: boolean }) 
     document.documentElement.classList.add("theme-transition");
     setTheme(next);
     document.documentElement.dataset.theme = next;
-    localStorage.setItem("avernek-theme", next);
+    try {
+      localStorage.setItem("avernek-theme", next);
+    } catch {}
     window.setTimeout(() => document.documentElement.classList.remove("theme-transition"), 260);
   }
 
+  const label = theme === "dark" ? "Switch to light mode" : "Switch to dark mode";
+
   return (
-    <button type="button" onClick={toggle} className={compact ? "icon-btn !w-9 !h-9" : "btn"}
-      aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
-      title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}>
+    <button type="button" onClick={toggle} className={compact ? "sb-mini-btn" : "btn"} aria-label={label} title={label}>
       <AnimatePresence mode="wait" initial={false}>
         <motion.span
           key={theme}
@@ -35,7 +37,7 @@ export default function ThemeToggle({ compact = false }: { compact?: boolean }) 
           exit={{ opacity: 0, rotate: 35, scale: 0.75 }}
           transition={{ duration: 0.18 }}
         >
-          <Icon name={theme === "dark" ? "sun" : "moon"} size={16} />
+          <Icon name={theme === "dark" ? "sun" : "moon"} size={15} />
         </motion.span>
       </AnimatePresence>
       {!compact && <span>{theme === "dark" ? "Light" : "Dark"}</span>}

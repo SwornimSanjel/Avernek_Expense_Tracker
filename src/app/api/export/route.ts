@@ -1,22 +1,37 @@
+import type { NextRequest } from "next/server";
 import { query } from "@/lib/db";
 import { getSession } from "@/lib/auth/server";
 import type { AppUser, Category, Expense, MoneyAccount, Vendor } from "@/lib/types";
+import { expenseWhere, type ExpenseSearch } from "@/lib/expense-filters";
+import { assignedShareNpr } from "@/lib/individual";
+import { USER_COLUMNS } from "@/lib/people";
 
-// GET /api/export -> expenses.csv
-export async function GET() {
+// GET /api/export?<expense filters> -> expenses.csv, exactly what the Expenses page shows.
+export async function GET(request: NextRequest) {
   const session = await getSession();
   if (!session) return new Response("Unauthorized", { status: 401 });
 
+  const sp = Object.fromEntries(request.nextUrl.searchParams.entries()) as ExpenseSearch;
+  // An export link without filters keeps its old meaning: everything.
+  if (![...request.nextUrl.searchParams.keys()].length) sp.period = "all";
+  const accountRows = await query<{ id: string }>(`select id from public.money_accounts`);
+  const { where, params } = expenseWhere(sp, accountRows.map((row) => row.id));
+
   const [exp, shareRows, cats, vends, team, accounts, billCounts] = await Promise.all([
     query<Expense>(
-      `select * from public.expenses order by expense_date desc`
+      `select e.* from public.expenses e
+         left join public.vendors v on v.id = e.vendor_id
+         left join public.categories c on c.id = e.category_id
+       ${where}
+       order by e.expense_date desc, e.created_at desc`,
+      params
     ),
     query<{ expense_id: string; user_id: string; amount: number }>(
       `select * from public.expense_shares`
     ),
     query<Category>(`select * from public.categories`),
     query<Vendor>(`select * from public.vendors`),
-    query<AppUser>(`select id, name, email, is_core_member, is_admin from public.users`),
+    query<AppUser>(`select ${USER_COLUMNS} from public.users`),
     query<MoneyAccount>(`select * from public.money_accounts`),
     query<{ expense_id: string; bills: string }>(
       `select expense_id, count(*) as bills from public.attachments
@@ -28,12 +43,21 @@ export async function GET() {
   const categories = cats as Category[];
   const vendors = vends as Vendor[];
   const users = team as AppUser[];
-  const rows = exp.map((expense) => ({
+  const allRows = exp.map((expense) => ({
     ...expense,
     expense_shares: shareRows.filter(
       (share) => share.expense_id === expense.id
     ),
   })) as Expense[];
+  const person = users.find((user) => user.id === (sp.person ?? sp.payer));
+  const paidBasis = sp.basis === "paid" || (sp.payer && !sp.basis);
+  const rows = !person
+    ? allRows
+    : allRows.filter((expense) =>
+        paidBasis
+          ? expense.funding_source !== "company_funds" && expense.paid_by_user_id === person.id
+          : assignedShareNpr(expense, person, users) > 0
+      );
 
   const name = <T extends { id: string; name: string }>(
     list: T[],

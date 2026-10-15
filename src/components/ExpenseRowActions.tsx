@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import {
   toggleReimbursed,
   deleteExpense,
@@ -32,71 +33,92 @@ export default function ExpenseRowActions({
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [busy, startTransition] = useTransition();
+  const ref = useRef<HTMLDivElement>(null);
   const id = expense.id;
 
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: MouseEvent) => {
+      if (!ref.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => event.key === "Escape" && setOpen(false);
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
   return (
-    <div className="relative">
+    <div ref={ref} className="relative shrink-0">
       <button
         onClick={() => setOpen((o) => !o)}
         disabled={busy}
         className="icon-btn !w-8 !h-8"
-        aria-label="Row actions"
+        aria-label="Expense actions"
+        aria-expanded={open}
       >
         <Icon name="more" size={17} />
       </button>
-      {open && (
-        <div
-            className="absolute right-0 top-9 z-20 w-48 card !rounded-xl p-1 text-xs shadow-xl"
-          onMouseLeave={() => setOpen(false)}
-        >
-          {pending && (
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            className="menu-pop"
+            initial={{ opacity: 0, y: -4, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -4, scale: 0.98 }}
+            transition={{ duration: 0.12 }}
+          >
             <button
-              className="w-full text-left px-3 py-2 rounded-lg hover:bg-white/[.04]"
+              className="menu-item"
+              onClick={() => {
+                setOpen(false);
+                setEditing(true);
+              }}
+            >
+              <Icon name="edit" size={15} /> Edit expense
+            </button>
+            {pending && (
+              <button
+                className="menu-item"
+                onClick={() =>
+                  startTransition(async () => {
+                    await retryConversion(id);
+                    setOpen(false);
+                  })
+                }
+              >
+                <Icon name="refresh" size={15} /> Retry exchange rate
+              </button>
+            )}
+            <button
+              className="menu-item"
               onClick={() =>
                 startTransition(async () => {
-                  await retryConversion(id);
+                  await toggleReimbursed(id, !isReimbursed);
                   setOpen(false);
                 })
               }
             >
-              Retry exchange rate
+              <Icon name="check" size={15} /> {isReimbursed ? "Mark not reimbursed" : "Mark reimbursed"}
             </button>
-          )}
-          <button
-            className="w-full text-left px-3 py-2 rounded-lg hover:bg-white/[.04]"
-            onClick={() => {
-              setOpen(false);
-              setEditing(true);
-            }}
-          >
-            Edit
-          </button>
-          <button
-            className="w-full text-left px-3 py-2 rounded-lg hover:bg-white/[.04]"
-            onClick={() =>
-              startTransition(async () => {
-                await toggleReimbursed(id, !isReimbursed);
-                setOpen(false);
-              })
-            }
-          >
-            {isReimbursed ? "Mark not reimbursed" : "Mark reimbursed"}
-          </button>
-          <button
-            className="w-full text-left px-3 py-2 rounded-lg hover:bg-white/[.04]"
-            style={{ color: "var(--red)" }}
-            onClick={() => {
-              if (!window.confirm("Delete this expense? This cannot be undone.")) return;
-              startTransition(async () => {
-                await deleteExpense(id);
-                setOpen(false);
-              });
-            }}
-          >
-            Delete
-          </button>
-        </div>
-      )}
+            <button
+              className="menu-item"
+              style={{ color: "var(--red)" }}
+              onClick={() => {
+                if (!window.confirm("Delete this expense? This cannot be undone.")) return;
+                startTransition(async () => {
+                  await deleteExpense(id);
+                  setOpen(false);
+                });
+              }}
+            >
+              <Icon name="trash" size={15} /> Delete
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
       {editing && (
         <EditExpenseModal
           expense={expense}

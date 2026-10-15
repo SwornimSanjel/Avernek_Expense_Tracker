@@ -31,11 +31,9 @@ function ModalHeader({
     <div className="modal-header">
       <div>
         <h2 className="text-lg font-bold">{title}</h2>
-        {subtitle && <p className="text-xs muted mt-1">{subtitle}</p>}
+        {subtitle && <p className="text-[13px] muted mt-1">{subtitle}</p>}
       </div>
-      <button type="button" onClick={onClose} className="icon-btn">
-        ✕
-      </button>
+      <button type="button" onClick={onClose} className="icon-btn"><Icon name="close" size={16} /></button>
     </div>
   );
 }
@@ -209,9 +207,9 @@ export function ReimburseBill({
         type="button"
         disabled={!open_.length}
         onClick={() => setOpen(true)}
-        className={`btn ${billId ? "!h-8 !px-3 text-xs" : "btn-primary"} ${compact ? "!h-9 text-sm" : ""}`}
+        className={`btn ${billId ? "!h-8 !px-3 text-[13px]" : "btn-primary"} ${compact ? "!h-9 text-sm" : ""}`}
       >
-        {billId ? "Reimburse" : "⇄ Reimburse a bill"}
+        {billId ? "Reimburse" : "Reimburse a bill"}
       </button>
     );
   }
@@ -276,7 +274,7 @@ export function ReimburseBill({
           </dl>
         )}
         {bill && room < bill.pending && (
-          <p className="text-xs" style={{ color: "var(--amber)" }}>
+          <p className="text-[13px]" style={{ color: "var(--amber)" }}>
             Not enough room for the whole bill. Reimburse {formatIncomeMoney(room, "NPR")} now; the rest stays pending
             until more money comes in.
           </p>

@@ -1,5 +1,6 @@
 "use client";
 
+import Icon from "@/components/Icons";
 import { guardRequest } from "@/lib/stale-deploy";
 import { useActionState, useEffect, useMemo, useState } from "react";
 import {
@@ -99,9 +100,10 @@ export default function RecordIncomePayment({
     return (
       <button
         onClick={() => setOpen(true)}
-        className={`btn btn-primary ${compact ? "!h-9 !px-3 text-sm" : ""}`}
+        className={`btn btn-primary ${compact ? "btn-sm" : ""}`}
+        title="Record a payment from this client"
       >
-        <span className="text-base leading-none">＋</span> Add payment
+        <Icon name="plus" size={15} /> {compact ? "Payment" : "Add payment"}
       </button>
     );
   }
@@ -124,11 +126,9 @@ export default function RecordIncomePayment({
         <div className="modal-header">
           <div>
             <h2 className="text-lg font-bold">Add payment</h2>
-            <p className="text-xs muted">{agreement.client_name}</p>
+            <p className="text-[13px] muted">{agreement.client_name}</p>
           </div>
-          <button type="button" onClick={() => setOpen(false)} className="icon-btn">
-            ✕
-          </button>
+          <button type="button" onClick={() => setOpen(false)} className="icon-btn"><Icon name="close" size={16} /></button>
         </div>
 
         <div>

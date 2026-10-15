@@ -2,7 +2,7 @@ import Link from "next/link";
 import { query } from "@/lib/db";
 import { requireSession } from "@/lib/auth/server";
 import { isAppOwner } from "@/lib/authz";
-import { EmptyState, PageHeader, SectionHeader, StatTile } from "@/components/ui";
+import { Avatar, Callout, Delta, EmptyState, Kpi, Money, PageHeader, SectionHeader } from "@/components/ui";
 import Icon from "@/components/Icons";
 import AddIncomeAgreement from "@/components/AddIncomeAgreement";
 import AddOtherIncome from "@/components/AddOtherIncome";
@@ -10,27 +10,27 @@ import RecordIncomePayment from "@/components/RecordIncomePayment";
 import IncomeAgreementControls from "@/components/IncomeAgreementControls";
 import ServiceBadges from "@/components/ServiceBadges";
 import StatusPill from "@/components/StatusPill";
+import UrlFilters from "@/components/UrlFilters";
 import {
   AGREEMENT_STATUS_LABELS,
-  ADS_STATUS_LABELS,
-  AUTOMATION_STATUS_LABELS,
-  WEBSITE_STATUS_LABELS,
   OTHER_INCOME_LABELS,
   daysUntilDate,
-  formatIncomeMoney,
   formatServiceDate,
   goLiveDate,
   hasRecurringService,
-  recurringFromDate,
   summarizeIncomeAgreement,
   todayIso,
   type IncomeAgreementSummary,
 } from "@/lib/income";
 import { loadLedger } from "@/lib/ledger";
 import { bankAmount } from "@/lib/tax";
-import type { IncomeAgreement, MoneyAccount, ServiceKey } from "@/lib/types";
+import { formatNumber, percentChange } from "@/lib/format";
+import type { IncomeAgreement, ServiceKey } from "@/lib/types";
 import { ATTACHMENT_COLUMNS, type Attachment } from "@/lib/attachments";
 import { LendMoney, MarkLoanRepaid } from "@/components/LoanActions";
+import { accountLabel } from "@/lib/statement";
+import { USER_COLUMNS, partnersOf } from "@/lib/people";
+import { monthName, shiftMonth } from "@/lib/dates";
 
 export const dynamic = "force-dynamic";
 
@@ -43,29 +43,12 @@ type Filters = {
   q?: string;
 };
 
-function dueTimingLabel(date: string | null) {
-  if (!date) return "Nothing scheduled";
-  const days = daysUntilDate(date);
-  if (days < 0) return `${Math.abs(days)} day${days === -1 ? "" : "s"} overdue`;
-  if (days === 0) return "Due today";
-  return `Due in ${days} day${days === 1 ? "" : "s"}`;
-}
-
-function accountLabel(account: MoneyAccount) {
-  if (account.kind === "company_bank") return "VAT account";
-  if (account.kind === "personal_custody") return "Non-VAT account";
-  return account.name;
-}
-
-/** What the client is currently getting, in one line. */
-function serviceStateLabel(agreement: IncomeAgreement) {
-  const parts: string[] = [];
-  if (agreement.has_website) parts.push(`Website ${WEBSITE_STATUS_LABELS[agreement.website_status].toLowerCase()}`);
-  if (agreement.has_ads) parts.push(`Ads ${ADS_STATUS_LABELS[agreement.ads_status].toLowerCase()}`);
-  if (agreement.has_automation) {
-    parts.push(`Automation ${AUTOMATION_STATUS_LABELS[agreement.automation_status].toLowerCase()}`);
-  }
-  return parts.join(" · ") || "No service";
+function dueTiming(date: string | null, today: string) {
+  if (!date) return { text: "Nothing scheduled", tone: "" };
+  const days = daysUntilDate(date, today);
+  if (days < 0) return { text: `${Math.abs(days)} day${days === -1 ? "" : "s"} late`, tone: "text-red" };
+  if (days === 0) return { text: "Due today", tone: "text-amber" };
+  return { text: `In ${days} day${days === 1 ? "" : "s"}`, tone: days <= 7 ? "text-amber" : "" };
 }
 
 export default async function IncomePage({
@@ -77,6 +60,8 @@ export default async function IncomePage({
   const canManage = isAppOwner(session);
   const filters = await searchParams;
   const today = todayIso();
+  const thisMonth = today.slice(0, 7);
+  const lastMonth = shiftMonth(thisMonth, -1);
 
   const [agreements, ledger, agreementFileRows, people, vatBillRows] = await Promise.all([
     query<IncomeAgreement>(
@@ -90,7 +75,7 @@ export default async function IncomePage({
         where kind = 'client_agreement'
         order by created_at`
     ),
-    query<{ name: string }>(`select name from public.users order by name`),
+    query<{ id: string; name: string; is_partner: boolean }>(`select ${USER_COLUMNS} from public.users order by name`),
     query<Attachment>(
       `select ${ATTACHMENT_COLUMNS} from public.attachments
         where kind = 'vat_bill'
@@ -105,19 +90,28 @@ export default async function IncomePage({
     agreementFilesById.set(file.agreement_id!, list);
   }
   const { payments, accounts: moneyAccounts, balances, otherIncome, tax } = ledger;
+  const partnerNames = partnersOf(people).map((person) => person.name);
 
   const summaries = new Map<string, IncomeAgreementSummary>(
-    agreements.map((agreement) => [
-      agreement.id,
-      summarizeIncomeAgreement(agreement, payments, today),
-    ])
-  );
-  const nonVat = balances.find((item) => item.account.kind === "personal_custody");
-  const vat = balances.find((item) => item.account.kind === "company_bank");
-  const primaryAccounts = [vat, nonVat].filter(
-    (item): item is NonNullable<typeof item> => Boolean(item)
+    agreements.map((agreement) => [agreement.id, summarizeIncomeAgreement(agreement, payments, today)])
   );
   const accountById = new Map(moneyAccounts.map((account) => [account.id, account]));
+
+  // ---- KPIs (money that reached the bank)
+  const receiptsIn = (key: string) =>
+    payments.filter((p) => p.paid_on.startsWith(key)).reduce((sum, p) => sum + bankAmount(p), 0) +
+    otherIncome.filter((o) => o.received_on.startsWith(key)).reduce((sum, o) => sum + bankAmount(o), 0);
+  const monthIn = receiptsIn(thisMonth);
+  const lastMonthIn = receiptsIn(lastMonth);
+  const revenueAll =
+    payments.reduce((sum, p) => sum + Number(p.amount), 0) + otherIncome.reduce((sum, o) => sum + Number(o.amount), 0);
+  const allSummaries = [...summaries.values()];
+  const dueNow = allSummaries.reduce((sum, s) => sum + s.totalDueNow, 0);
+  const overdue = allSummaries.reduce((sum, s) => sum + s.totalOverdue, 0);
+  const recurring = agreements
+    .filter((agreement) => agreement.status === "active")
+    .reduce((sum, agreement) => sum + summaries.get(agreement.id)!.recurring.monthlyTotal, 0);
+  const activeCount = agreements.filter((agreement) => agreement.status === "active").length;
 
   // Filters run over the computed summaries because payment status and service
   // status are derived, not stored.
@@ -129,11 +123,7 @@ export default async function IncomePage({
     if (filters.live === "live" && !summary.serviceLive) return false;
     if (filters.live === "not_live" && summary.serviceLive) return false;
     if (filters.account && agreement.default_money_account_id !== filters.account) {
-      const paidInto = payments.some(
-        (payment) =>
-          payment.agreement_id === agreement.id &&
-          payment.money_account_id === filters.account
-      );
+      const paidInto = payments.some((p) => p.agreement_id === agreement.id && p.money_account_id === filters.account);
       if (!paidInto) return false;
     }
     if (filters.q) {
@@ -143,406 +133,262 @@ export default async function IncomePage({
     return true;
   });
 
-  const filtered =
-    Boolean(filters.service || filters.status || filters.pay || filters.live || filters.account || filters.q);
-
   return (
-    <div className="income-workspace">
+    <>
       <PageHeader
-        eyebrow="Revenue operations"
         title="Income"
-        subtitle="See where client money arrived, what remains in each account, and exactly what every client owes next."
+        subtitle="What clients paid, what they still owe, and what comes in next."
         action={
           canManage ? (
-            <div className="flex flex-wrap gap-2">
+            <>
               <AddOtherIncome accounts={moneyAccounts} />
               <AddIncomeAgreement moneyAccounts={moneyAccounts} />
-            </div>
+            </>
           ) : undefined
         }
       />
 
-      <section className="income-account-overview">
-        <SectionHeader
-          title="Where the money is"
-          subtitle="VAT sitting in an account belongs to IRD — only “free to use” is really yours."
-          action={
-            <div className="flex flex-wrap gap-2">
-              {canManage && (
-                <LendMoney balances={balances} people={people.map((person) => person.name)} compact />
-              )}
-              <Link href="/funds" className="btn !h-9 text-sm">
-                <Icon name="wallet" size={14} /> Company money
-              </Link>
-            </div>
-          }
+      <div className="kpi-grid">
+        <Kpi
+          label={`Received · ${monthName(thisMonth, "long")}`}
+          icon="income"
+          tone="green"
+          value={<Money value={monthIn} />}
+          foot={<><Delta value={percentChange(monthIn, lastMonthIn)} /><span>vs {monthName(lastMonth, "long")} ({formatNumber(lastMonthIn)})</span></>}
         />
-        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 mt-3">
-          {primaryAccounts.map((item) => (
-            <StatTile
-              key={`${item.account.id}-in`}
-              label={`${accountLabel(item.account)} · in the account`}
-              value={formatIncomeMoney(item.balance, item.account.currency)}
-              hint={
-                item.vatReserved > 0
-                  ? `${formatIncomeMoney(item.vatReserved, item.account.currency)} of it is VAT — don't touch`
-                  : item.account.name
-              }
-              emphasis
-              icon={item.account.kind === "company_bank" ? "bank" : "wallet"}
-              tone={item.account.kind === "company_bank" ? "green" : "blue"}
-            />
-          ))}
-          {primaryAccounts.map((item) => (
-            <StatTile
-              key={`${item.account.id}-free`}
-              label={`${accountLabel(item.account)} · free to use`}
-              value={formatIncomeMoney(item.free, item.account.currency)}
-              hint="After keeping VAT aside"
-              icon="wallet"
-              tone="accent"
-            />
-          ))}
-        </div>
-        {openLoans.length > 0 && (
-          <div className="capital-strip mt-3 !items-start">
-            <div className="capital-strip-icon">
-              <Icon name="user" size={15} />
+        <Kpi label="Earned all time" icon="trendUp" tone="accent" value={<Money value={revenueAll} />} foot="Bills excluding VAT" />
+        <Kpi
+          label="To collect now"
+          icon="clock"
+          tone="amber"
+          value={<Money value={dueNow} />}
+          foot={overdue > 0 ? <span className="text-red">NPR {formatNumber(overdue)} is overdue</span> : "Nothing overdue"}
+        />
+        <Kpi label="Monthly recurring" icon="subscription" tone="blue" value={<Money value={recurring} />} foot={`${activeCount} active client${activeCount === 1 ? "" : "s"}`} />
+      </div>
+
+      {/* accounts strip */}
+      <div className="grid md:grid-cols-2 gap-3 mt-4">
+        {balances.map((item) => (
+          <Link key={item.account.id} href="/funds" className="card card-interactive px-5 py-4 flex items-center gap-4">
+            <div className="row-icon" style={{ "--tone": item.account.kind === "company_bank" ? "var(--green)" : "var(--blue)", "--tone-soft": item.account.kind === "company_bank" ? "var(--green-soft)" : "var(--blue-soft)" } as React.CSSProperties}>
+              <Icon name={item.account.kind === "company_bank" ? "bank" : "wallet"} size={18} />
             </div>
             <div className="min-w-0 flex-1">
-              <strong>
-                Loans out · {formatIncomeMoney(openLoans.reduce((sum, loan) => sum + Number(loan.amount), 0), "NPR")} not paid back yet
-              </strong>
-              <p>Already taken out of the balances above. Mark a loan paid back when the money returns.</p>
-              <div className="mt-2 space-y-1.5">
-                {openLoans.map((loan) => {
-                  const account = moneyAccounts.find((item) => item.id === loan.money_account_id);
-                  return (
-                    <div key={loan.id} className="flex flex-wrap items-center gap-2 text-xs">
-                      <span className="min-w-0 flex-1">
-                        <strong className="text-[12.5px]">{loan.borrower_name}</strong>{" "}
-                        {formatIncomeMoney(Number(loan.amount), account?.currency ?? "NPR")} from{" "}
-                        {accountLabel(account ?? moneyAccounts[0])} · taken {formatServiceDate(loan.lent_on)}
-                        {loan.note ? ` · ${loan.note}` : ""}
-                      </span>
-                      {canManage && (
-                        <span className="flex items-center gap-1">
-                          <MarkLoanRepaid loan={loan} accounts={moneyAccounts} />
-                          <LendMoney balances={balances} people={people.map((person) => person.name)} loan={loan} />
-                        </span>
-                      )}
-                    </div>
-                  );
-                })}
+              <div className="text-[14.5px] font-semibold">{accountLabel(item.account)}</div>
+              <div className="text-[13px] muted">
+                Free to use <strong className="tnum text-[var(--ink-2)]">NPR {formatNumber(item.free)}</strong>
+                {item.vatReserved > 0 ? <> · VAT kept aside <span className="text-amber tnum">{formatNumber(item.vatReserved)}</span></> : null}
               </div>
             </div>
-          </div>
-        )}
-        {(tax.vatOwed > 0 || tax.tdsCredit > 0) && (
-          <div className="capital-strip mt-3">
-            <div className="capital-strip-icon">
-              <Icon name="receipt" size={15} />
+            <div className="text-right">
+              <div className="text-[12.5px] muted">Balance</div>
+              <div className="text-[19px] font-semibold tnum">{formatNumber(item.balance)}</div>
             </div>
-            <div className="min-w-0">
-              <strong>VAT owed {formatIncomeMoney(tax.vatOwed, "NPR")} · TDS credit {formatIncomeMoney(tax.tdsCredit, "NPR")}</strong>
-              <p>
-                VAT collected minus input VAT from company bills minus VAT already paid. TDS withheld by clients is
-                claimed back in the income tax return.
-              </p>
-            </div>
-            <Link href="/funds" className="btn !h-9 shrink-0 text-xs">
-              Details
-            </Link>
-          </div>
-        )}
-      </section>
+          </Link>
+        ))}
+      </div>
 
-      <section className="income-client-board">
+      {openLoans.length > 0 && (
+        <div className="card mt-3 overflow-hidden">
+          <div className="card-head">
+            <div>
+              <h3>Loans out · NPR {formatNumber(openLoans.reduce((sum, loan) => sum + Number(loan.amount), 0))} not back yet</h3>
+              <p>Already taken out of the balances above. Mark it paid back when the money returns.</p>
+            </div>
+            {canManage && <LendMoney balances={balances} people={partnerNames} compact />}
+          </div>
+          <div className="row-list">
+            {openLoans.map((loan) => {
+              const account = accountById.get(loan.money_account_id);
+              return (
+                <div key={loan.id} className="row-item">
+                  <Avatar name={loan.borrower_name} size={36} round />
+                  <div className="min-w-0 flex-1">
+                    <div className="row-title">{loan.borrower_name}</div>
+                    <div className="row-meta">
+                      From {account ? accountLabel(account) : "account"} · taken {formatServiceDate(loan.lent_on)}
+                      {loan.note ? ` · ${loan.note}` : ""}
+                    </div>
+                  </div>
+                  <div className="row-amount">{formatNumber(Number(loan.amount))}</div>
+                  {canManage && (
+                    <div className="flex items-center gap-1.5">
+                      <MarkLoanRepaid loan={loan} accounts={moneyAccounts} />
+                      <LendMoney balances={balances} people={partnerNames} loan={loan} />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {(tax.vatOwed > 0 || tax.tdsCredit > 0) && (
+        <Callout
+          className="mt-3"
+          tone="amber"
+          icon="receipt"
+          title={<>VAT to pay IRD: NPR {formatNumber(tax.vatOwed)}{tax.tdsCredit > 0 ? ` · TDS credit NPR ${formatNumber(tax.tdsCredit)}` : ""}</>}
+          action={<Link href="/vat" className="btn btn-sm">Open VAT</Link>}
+        >
+          Keep this in the VAT account — it is collected for the government, not Avernek&apos;s money.
+        </Callout>
+      )}
+
+      {/* clients */}
+      <section className="section">
         <SectionHeader
-          title={`Clients (${filtered ? `${visible.length} of ${agreements.length}` : agreements.length})`}
-          subtitle="One record per client. Open a client for its full billing detail and payment history."
+          title={`Clients · ${visible.length === agreements.length ? agreements.length : `${visible.length} of ${agreements.length}`}`}
+          subtitle="Open a client for its full billing history."
+          action={!openLoans.length && canManage ? <LendMoney balances={balances} people={partnerNames} compact /> : undefined}
+        />
+        <UrlFilters
+          values={filters as Record<string, string | undefined>}
+          search={{ name: "q", placeholder: "Search clients…" }}
+          fields={[
+            { name: "status", label: "Any status", options: Object.entries(AGREEMENT_STATUS_LABELS).map(([value, label]) => ({ value, label })) },
+            { name: "pay", label: "Any payment", options: [{ value: "paid", label: "Paid" }, { value: "partial", label: "Partly paid" }, { value: "unpaid", label: "Unpaid" }, { value: "overdue", label: "Overdue" }] },
+            { name: "service", label: "Any service", options: [{ value: "website", label: "Website" }, { value: "ads", label: "Ads / marketing" }, { value: "automation", label: "AI automation" }] },
+            { name: "live", label: "Live or not", options: [{ value: "live", label: "Live" }, { value: "not_live", label: "Not live" }] },
+            { name: "account", label: "Both accounts", options: moneyAccounts.map((account) => ({ value: account.id, label: accountLabel(account) })) },
+          ]}
         />
 
-        <form className="card p-3 flex flex-wrap gap-2 mt-3 text-sm">
-          <input
-            name="q"
-            defaultValue={filters.q ?? ""}
-            placeholder="Search client…"
-            aria-label="Search clients"
-            className="input !w-full sm:!w-52 !h-10"
-          />
-          <select
-            name="service"
-            defaultValue={filters.service ?? ""}
-            aria-label="Service filter"
-            className="input !w-[calc(50%-4px)] sm:!w-auto !h-10"
-          >
-            <option value="">All services</option>
-            <option value="website">Website</option>
-            <option value="ads">Ads / Marketing</option>
-            <option value="automation">AI Automation</option>
-          </select>
-          <select
-            name="status"
-            defaultValue={filters.status ?? ""}
-            aria-label="Client status filter"
-            className="input !w-[calc(50%-4px)] sm:!w-auto !h-10"
-          >
-            <option value="">All client statuses</option>
-            {Object.entries(AGREEMENT_STATUS_LABELS).map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </select>
-          <select
-            name="pay"
-            defaultValue={filters.pay ?? ""}
-            aria-label="Payment status filter"
-            className="input !w-[calc(50%-4px)] sm:!w-auto !h-10"
-          >
-            <option value="">All payment statuses</option>
-            <option value="paid">Paid</option>
-            <option value="partial">Partial</option>
-            <option value="unpaid">Unpaid</option>
-            <option value="overdue">Overdue</option>
-          </select>
-          <select
-            name="live"
-            defaultValue={filters.live ?? ""}
-            aria-label="Service status filter"
-            className="input !w-[calc(50%-4px)] sm:!w-auto !h-10"
-          >
-            <option value="">Live and not live</option>
-            <option value="live">Live</option>
-            <option value="not_live">Not live</option>
-          </select>
-          <select
-            name="account"
-            defaultValue={filters.account ?? ""}
-            aria-label="Account filter"
-            className="input !w-full sm:!w-auto !h-10"
-          >
-            <option value="">VAT and non-VAT</option>
-            {moneyAccounts.map((account) => (
-              <option key={account.id} value={account.id}>
-                {accountLabel(account)}
-              </option>
-            ))}
-          </select>
-          <button className="btn !h-10">
-            <Icon name="filter" size={14} /> Apply
-          </button>
-          {filtered && (
-            <Link href="/income" className="btn !h-10">
-              Clear
-            </Link>
-          )}
-        </form>
-
-        <div className="space-y-3 mt-4">
+        <div className="card mt-3 overflow-hidden">
           {agreements.length === 0 && (
-            <div className="card">
-              <EmptyState
-                title="No clients yet"
-                description="Add the first client to track services, setup billing, website billing, monthly renewals and every payment."
-                icon="income"
-              />
-            </div>
+            <EmptyState title="No clients yet" description="Add the first client to track setup, monthly fees and every payment." icon="income" />
           )}
           {agreements.length > 0 && visible.length === 0 && (
-            <div className="card">
-              <EmptyState
-                title="No clients match these filters"
-                description="Clear the filters to see every client again."
-                icon="filter"
-              />
+            <EmptyState title="No clients match" description="Clear the filters to see every client." icon="filter" />
+          )}
+          {visible.length > 0 && (
+            <div className="hidden lg:grid grid-cols-[minmax(0,2.4fr)_minmax(0,0.85fr)_minmax(0,0.85fr)_minmax(0,0.85fr)_minmax(0,1.45fr)_auto] gap-4 px-5 py-2.5 border-b text-[12.5px] muted font-medium bg-[var(--surface-2)]">
+              <span>Client</span>
+              <span className="text-right">Received</span>
+              <span className="text-right">Setup left</span>
+              <span className="text-right">Monthly</span>
+              <span>Next payment</span>
+              <span className="w-[150px]" />
             </div>
           )}
-
-          {visible.map((agreement) => {
-            const summary = summaries.get(agreement.id)!;
-            const agreementPayments = payments.filter(
-              (payment) => payment.agreement_id === agreement.id
-            );
-            const recurringPaymentCount = agreementPayments.filter(
-              (payment) => payment.payment_for === "recurring"
-            ).length;
-            const oneOffRemaining = summary.setup.remaining + (summary.website?.remaining ?? 0);
-
-            return (
-              <article id={`client-${agreement.id}`} key={agreement.id} className="client-summary-card">
-                <div className="client-summary-main">
-                  <Link href={`/income/${agreement.id}`} className="client-summary-identity">
-                    <div className="avatar !w-11 !h-11 text-sm">
-                      {agreement.client_name
-                        .split(" ")
-                        .map((part) => part[0])
-                        .slice(0, 2)
-                        .join("")
-                        .toUpperCase()}
-                    </div>
+          <div className="row-list">
+            {visible.map((agreement) => {
+              const summary = summaries.get(agreement.id)!;
+              const agreementPayments = payments.filter((p) => p.agreement_id === agreement.id);
+              const oneOffLeft = summary.setup.remaining + (summary.website?.remaining ?? 0);
+              const timing = dueTiming(summary.nextDueDate, today);
+              return (
+                <div key={agreement.id} className="grid lg:grid-cols-[minmax(0,2.4fr)_minmax(0,0.85fr)_minmax(0,0.85fr)_minmax(0,0.85fr)_minmax(0,1.45fr)_auto] gap-x-4 gap-y-3 items-center px-5 py-4 hover:bg-[var(--hover)] transition-colors">
+                  <Link href={`/income/${agreement.id}`} className="flex items-center gap-3 min-w-0">
+                    <Avatar name={agreement.client_name} size={40} />
                     <div className="min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <h2 className="text-base font-bold truncate">{agreement.client_name}</h2>
+                      <div className="text-[15px] font-semibold truncate" title={agreement.client_name}>{agreement.client_name}</div>
+                      <div className="flex items-center gap-1.5 mt-1 flex-wrap">
                         <StatusPill kind="agreement" value={agreement.status} />
                         <StatusPill kind="billing" value={summary.overallStatus} />
-                      </div>
-                      <div className="mt-1.5">
                         <ServiceBadges services={summary.services} />
                       </div>
                     </div>
                   </Link>
-
-                  <div className="client-summary-actions">
+                  <Metric label="Received" value={formatNumber(summary.totalCollected)} tone="text-green" />
+                  <Metric label="Setup left" value={oneOffLeft > 0 ? formatNumber(oneOffLeft) : "—"} tone={oneOffLeft > 0 ? "text-amber" : "muted"} sub={summary.totalAgreedOneOff ? `of ${formatNumber(summary.totalAgreedOneOff)}` : undefined} />
+                  <Metric label="Monthly" value={hasRecurringService(agreement) ? formatNumber(summary.recurring.monthlyTotal) : "—"} sub={hasRecurringService(agreement) && summary.recurring.awaitingStart ? "Not started" : undefined} />
+                  <div className="min-w-0">
+                    <div className="lg:hidden text-[12.5px] muted">Next payment</div>
+                    <div className="text-[14px] font-medium">{summary.nextDueDate ? formatServiceDate(summary.nextDueDate) : "All settled"}</div>
+                    <div className="text-[12.5px] truncate">
+                      {summary.nextDueDate ? <><span className="muted">{summary.nextDueLabel} · </span><span className={timing.tone || "muted"}>{timing.text}</span></> : <span className="muted">{hasRecurringService(agreement) ? `Day 1 ${formatServiceDate(goLiveDate(agreement), "not set")}` : `Signed ${formatServiceDate(agreement.agreement_date)}`}</span>}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 justify-end">
                     {canManage && (
                       <>
-                        <RecordIncomePayment
-                          agreement={agreement}
-                          summary={summary}
-                          moneyAccounts={moneyAccounts}
-                          compact
-                        />
+                        <RecordIncomePayment agreement={agreement} summary={summary} moneyAccounts={moneyAccounts} compact />
                         <IncomeAgreementControls
                           agreement={agreement}
                           moneyAccounts={moneyAccounts}
                           paymentCount={agreementPayments.length}
-                          recurringPaymentCount={recurringPaymentCount}
+                          recurringPaymentCount={agreementPayments.filter((p) => p.payment_for === "recurring").length}
                           agreementFiles={agreementFilesById.get(agreement.id) ?? []}
                           payments={agreementPayments}
                           vatBills={vatBillRows}
                         />
                       </>
                     )}
+                    <Link href={`/income/${agreement.id}`} className="icon-btn !w-9 !h-9" aria-label={`Open ${agreement.client_name}`}>
+                      <Icon name="chevronRight" size={16} />
+                    </Link>
                   </div>
                 </div>
-
-                <dl className="client-summary-metrics">
-                  <MetricCell
-                    label={hasRecurringService(agreement) ? "Day 1 · launched" : "Contract signed"}
-                    value={
-                      hasRecurringService(agreement)
-                        ? formatServiceDate(goLiveDate(agreement), "Not launched yet")
-                        : formatServiceDate(agreement.agreement_date)
-                    }
-                    sub={`Signed ${formatServiceDate(agreement.agreement_date)}`}
-                  />
-                  <MetricCell
-                    label="Setup + website left"
-                    value={formatIncomeMoney(oneOffRemaining, agreement.currency)}
-                    tone={oneOffRemaining > 0 ? "var(--amber)" : "var(--green)"}
-                    sub={`of ${formatIncomeMoney(summary.totalAgreedOneOff, agreement.currency)} agreed`}
-                  />
-                  <MetricCell
-                    label="Monthly recurring"
-                    value={
-                      hasRecurringService(agreement)
-                        ? `${formatIncomeMoney(summary.recurring.monthlyTotal, agreement.currency)}`
-                        : "—"
-                    }
-                    sub={
-                      !hasRecurringService(agreement)
-                        ? "One-off project only"
-                        : summary.recurring.awaitingStart
-                          ? "Starts a month after Day 1"
-                          : `From ${formatServiceDate(recurringFromDate(agreement))}`
-                    }
-                  />
-                  <MetricCell label="Service status" value={serviceStateLabel(agreement)} small />
-                  <MetricCell
-                    label="Next payment due"
-                    value={summary.nextDueDate ? formatServiceDate(summary.nextDueDate) : "Nothing due"}
-                    sub={
-                      summary.nextDueDate
-                        ? `${summary.nextDueLabel} · ${dueTimingLabel(summary.nextDueDate)}`
-                        : "All balances settled"
-                    }
-                    tone={summary.totalOverdue > 0 ? "var(--red)" : undefined}
-                  />
-                  <MetricCell
-                    label="Total received"
-                    value={formatIncomeMoney(summary.totalCollected, agreement.currency)}
-                    sub={
-                      summary.lastPaymentDate
-                        ? `Last ${formatServiceDate(summary.lastPaymentDate)}`
-                        : "No payment yet"
-                    }
-                    tone="var(--green)"
-                  />
-                </dl>
-
-                <Link href={`/income/${agreement.id}`} className="client-summary-open">
-                  Open client detail
-                  <Icon name="arrow" size={14} />
-                </Link>
-              </article>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
       </section>
 
-      <section>
+      {/* other income */}
+      <section className="section">
         <SectionHeader
-          title={`Income without a client (${otherIncome.length})`}
-          subtitle="One-off jobs and extra work that never had an agreement. Counted as income; amounts exclude VAT."
+          title={`Income without a client · ${otherIncome.length}`}
+          subtitle="One-off jobs and extra work with no agreement. Counted as income; amounts exclude VAT."
           action={canManage ? <AddOtherIncome accounts={moneyAccounts} compact /> : undefined}
         />
-        <div className="card mt-3 overflow-hidden">
+        <div className="card overflow-hidden">
           {otherIncome.length === 0 ? (
-            <p className="px-5 py-5 text-sm muted">
-              Nothing yet. Use “Income without client” for extra work or a website done without an agreement.
-            </p>
+            <EmptyState title="Nothing yet" description="Use “Income without client” for extra work or a website done without an agreement." icon="sparkles" />
           ) : (
-            otherIncome.map((row) => {
-              const account = accountById.get(row.money_account_id);
-              return (
-                <div key={row.id} className="list-row px-4 py-3 flex items-center gap-3 border-b last:border-b-0" style={{ borderColor: "var(--line)" }}>
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm font-medium truncate">{row.description}</div>
-                    <div className="text-[11px] muted mt-0.5 truncate">
-                      {formatServiceDate(row.received_on)} · {OTHER_INCOME_LABELS[row.category]}
-                      {row.source_name ? ` · from ${row.source_name}` : ""} · {account ? accountLabel(account) : "Account"}
-                      {Number(row.vat_amount) > 0 ? ` · VAT ${formatIncomeMoney(Number(row.vat_amount), account?.currency ?? "NPR")}` : ""}
-                      {Number(row.tds_amount) > 0 ? ` · TDS ${formatIncomeMoney(Number(row.tds_amount), account?.currency ?? "NPR")}` : ""}
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-sm font-semibold tnum" style={{ color: "var(--green)" }}>
-                      {formatIncomeMoney(Number(row.amount), account?.currency ?? "NPR")}
-                    </div>
-                    <div className="text-[10px] muted tnum">bank {formatIncomeMoney(bankAmount(row), account?.currency ?? "NPR")}</div>
-                  </div>
-                  {canManage && <AddOtherIncome accounts={moneyAccounts} record={row} />}
-                </div>
-              );
-            })
+            <div className="table-wrap">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>What</th>
+                    <th>Account</th>
+                    <th className="num">Amount</th>
+                    <th className="num">Reached bank</th>
+                    {canManage && <th />}
+                  </tr>
+                </thead>
+                <tbody>
+                  {otherIncome.map((row) => {
+                    const account = accountById.get(row.money_account_id);
+                    return (
+                      <tr key={row.id}>
+                        <td className="whitespace-nowrap">{formatServiceDate(row.received_on)}</td>
+                        <td>
+                          <div className="font-medium">{row.description}</div>
+                          <div className="text-[12.5px] muted">
+                            {OTHER_INCOME_LABELS[row.category]}
+                            {row.source_name ? ` · from ${row.source_name}` : ""}
+                            {Number(row.vat_amount) > 0 ? ` · VAT ${formatNumber(Number(row.vat_amount))}` : ""}
+                            {Number(row.tds_amount) > 0 ? ` · TDS ${formatNumber(Number(row.tds_amount))}` : ""}
+                          </div>
+                        </td>
+                        <td>{account ? accountLabel(account) : "—"}</td>
+                        <td className="num font-semibold text-green">{formatNumber(Number(row.amount))}</td>
+                        <td className="num">{formatNumber(bankAmount(row))}</td>
+                        {canManage && <td className="w-12"><AddOtherIncome accounts={moneyAccounts} record={row} /></td>}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
       </section>
-    </div>
+    </>
   );
 }
 
-function MetricCell({
-  label,
-  value,
-  sub,
-  tone,
-  small,
-}: {
-  label: string;
-  value: string;
-  sub?: string;
-  tone?: string;
-  small?: boolean;
-}) {
+function Metric({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: string }) {
   return (
-    <div>
-      <dt>{label}</dt>
-      <dd className={small ? "!text-[12.5px] !font-semibold" : ""} style={{ color: tone }}>
-        {value}
-      </dd>
-      {sub && <p>{sub}</p>}
+    <div className="min-w-0 lg:text-right">
+      <div className="lg:hidden text-[12.5px] muted">{label}</div>
+      <div className={`text-[15px] font-semibold tnum ${tone ?? ""}`}>{value}</div>
+      {sub && <div className="text-[12.5px] muted tnum">{sub}</div>}
     </div>
   );
 }

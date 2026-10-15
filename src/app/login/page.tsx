@@ -28,7 +28,7 @@ export default function LoginPage() {
           <h1 className="text-5xl font-bold tracking-[-.05em] leading-[1.05]">Every rupee.<br />Every agreement.<br /><span style={{ color: "#9a6bff" }}>One clear view.</span></h1>
           <p className="muted mt-5 max-w-md leading-relaxed">Avernek’s internal workspace for expenses, client revenue, subscriptions, and team contributions.</p>
         </div>
-        <div className="text-xs muted">Avernek Technologies · Internal use only</div>
+        <div className="text-[13px] muted">Avernek Technologies · Internal use only</div>
       </section>
 
       <section className="flex items-center justify-center px-4 py-12">
@@ -79,7 +79,7 @@ export default function LoginPage() {
           </p>
         )}
 
-        <p className="muted text-xs mt-6">
+        <p className="muted text-[13px] mt-6">
           Accounts are created by an administrator. Ask them for access or a
           password reset.
         </p>

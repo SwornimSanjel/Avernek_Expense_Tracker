@@ -72,8 +72,8 @@ export default function ClientStatusControl({
         aria-expanded={open}
       >
         <span className="min-w-0 flex-1">
-          <span className="block text-[10px] font-bold uppercase tracking-[0.12em] muted leading-none">Status</span>
-          <span className="mt-1.5 flex items-center gap-2 text-xs font-semibold leading-none">
+          <span className="block text-[12px] font-bold uppercase tracking-[0.12em] muted leading-none">Status</span>
+          <span className="mt-1.5 flex items-center gap-2 text-[13px] font-semibold leading-none">
             <span className="client-status-dot" style={{ background: current.color }} />
             <span>{pending ? "Updating…" : current.label}</span>
           </span>
@@ -87,7 +87,7 @@ export default function ClientStatusControl({
           style={{ borderColor: "var(--line-strong)", background: "var(--surface)", boxShadow: "var(--shadow-float)" }}
           role="menu"
         >
-          <div className="px-3 pt-1 pb-2 text-[10px] font-bold uppercase tracking-[0.14em] muted">Change client status</div>
+          <div className="px-3 pt-1 pb-2 text-[12px] font-bold uppercase tracking-[0.14em] muted">Change client status</div>
           <div className="space-y-1">
             {options.map((option) => {
               const selected = option.value === status;
@@ -105,15 +105,15 @@ export default function ClientStatusControl({
                 >
                   <span className="client-status-dot" style={{ background: option.color }} />
                   <span className="min-w-0 flex-1">
-                    <span className="block text-xs font-semibold">{option.label}</span>
-                    <span className="block text-[11px] muted mt-1 leading-relaxed">{option.description}</span>
+                    <span className="block text-[13px] font-semibold">{option.label}</span>
+                    <span className="block text-[12.5px] muted mt-1 leading-relaxed">{option.description}</span>
                   </span>
                   {selected && <span className="grid h-6 w-6 place-items-center rounded-lg" style={{ background: "var(--surface)" }}><Icon name="check" size={13} /></span>}
                 </button>
               );
             })}
           </div>
-          <p className="mx-2 mt-2 border-t pt-2 text-[10px] leading-relaxed muted" style={{ borderColor: "var(--line)" }}>
+          <p className="mx-2 mt-2 border-t pt-2 text-[12px] leading-relaxed muted" style={{ borderColor: "var(--line)" }}>
             Completed and cancelled stop future recurring dues and keep the complete history.
           </p>
         </div>
