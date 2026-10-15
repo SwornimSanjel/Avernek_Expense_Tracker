@@ -3,7 +3,8 @@ import { GeistSans } from "geist/font/sans";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Avernek Finance",
+  // scripts/healthcheck.sh matches this exact title after every deploy; change both together.
+  title: "Avernek Finance Tracker",
   description: "Internal expense, income, and client payment tracker for Avernek Technologies.",
   icons: {
     icon: [{ url: "/avernek-mark.svg", type: "image/svg+xml" }],
