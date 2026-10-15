@@ -83,9 +83,9 @@ A failed deployment always ends as **FAILURE**, even when the rollback works.
 
 Install versions compatible with your Jenkins core (Manage Jenkins → Plugins):
 **Pipeline**, **Git**, **GitHub** (webhook trigger), **Credentials Binding**,
-**Workspace Cleanup** (`ws-cleanup`), **Timestamper**, **Discord Notifier**
-(`discord-notifier`). Do not install or configure Slack: the old Slack
-notification has been removed.
+**Workspace Cleanup** (`ws-cleanup`), **Timestamper**. No Discord plugin is
+needed: the pipeline posts to the Discord webhook itself with `curl`. Do not
+install or configure Slack: the old Slack notification has been removed.
 
 Set **Manage Jenkins → System → Jenkins URL** (for example
 `https://jenkins.avernek.com/`) so notifications link to the build.
@@ -174,7 +174,10 @@ silently. Required: `APP_PORT`, `DATABASE_URL`, `POSTGRES_USER`,
 `POSTGRES_PASSWORD`, `POSTGRES_DB`, `SESSION_SECRET` (32+ characters),
 `ADMIN_EMAIL`, `ADMIN_PASSWORD` (10+ characters), `CRON_SECRET`. Optional:
 `PUBLIC_URL`, `DATABASE_SSL`, `DATABASE_POOL_MAX`, `ADMIN_NAME`,
-`FX_CRON_SCHEDULE`. Descriptions are in `.env.example`.
+`FX_CRON_SCHEDULE`, and for the AI assistant `OPENROUTER_API_KEY`,
+`AI_PRIMARY_MODEL`, `AI_TRANSCRIPTION_MODEL`, `AI_TRANSCRIPTION_LANGUAGE`
+(setup, costs and security: [AI-ASSISTANT.md](AI-ASSISTANT.md)). Descriptions
+are in `.env.example`.
 
 - `DATABASE_URL` must use host `db` and the same user, password and database as
   `POSTGRES_*`.
@@ -408,7 +411,9 @@ returns `true`. Set it back to `false` before the site is reachable publicly.
 ## Discord notifications
 
 Every build sends exactly one message to the deployment-alerts channel, from
-the top-level `post` block: job, build number, result, branch, commit, release
+the top-level `post` block, as a webhook embed posted with `curl` (sender
+"Avernek Jenkins", green for SUCCESS and red otherwise, the title linking to the
+build): job, build number, result, branch, commit, release
 tag, deployment outcome and rollback outcome. It contains no secrets, customer
 data or exception text. A failure to post is logged as a warning and never
 changes the build result.
@@ -418,10 +423,10 @@ the Avernek DevOps owner. To rotate the webhook: create a new one in Discord
 (channel → Edit → Integrations → Webhooks), update the `discord-webhook-avernek`
 credential, delete the old webhook.
 
-**Prerequisites**: the Discord Notifier plugin, the Secret text credential
-`discord-webhook-avernek`, the Jenkins URL set, and outbound HTTPS from the
-Jenkins controller to `discord.com` (configure the proxy under Manage Jenkins →
-Plugins → Advanced if one is required).
+**Prerequisites**: the Secret text credential `discord-webhook-avernek`, the
+Jenkins URL set, `curl` on the build agent, and outbound HTTPS from it to
+`discord.com`. The webhook URL reaches `curl` on stdin, so it never appears in
+the process list or the console log.
 
 **Stand-alone test** (sends one harmless message, deploys nothing, never prints
 the webhook). From an administrator workstation with the Jenkins CLI:
@@ -434,13 +439,14 @@ java -jar jenkins-cli.jar -s "https://YOUR-JENKINS-URL/" \
 ```
 
 `OK: Discord accepted the test message` means the credential and network work.
-This does not exercise the plugin itself; the next pipeline run does.
+The test runs on the Jenkins controller and the pipeline posts from the build
+agent; on this VPS they are the same machine.
 
 **Troubleshooting**
 
 | Console / output | Cause |
 |---|---|
-| `WARNING: Discord notification could not be sent` | Credential missing or misnamed, plugin not installed, or no egress. Run the CLI test. |
+| `WARNING: Discord notification could not be sent` | Credential missing or misnamed, Discord rejected the payload, or no egress. The `curl:` line above it shows the HTTP status. Run the CLI test. |
 | `FAILED: no Secret text credential` | Create `discord-webhook-avernek` (kind Secret text) in the global store. |
 | `FAILED: Discord answered HTTP 401/404` | The webhook was deleted or the URL is wrong. |
 | `HTTP 429` | Rate limited; retry later. |

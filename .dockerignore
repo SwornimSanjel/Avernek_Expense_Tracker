@@ -36,3 +36,4 @@ graphify-out
 netlify
 netlify.toml
 vercel.json
+compose.override.yaml

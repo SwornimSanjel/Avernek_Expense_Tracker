@@ -5,7 +5,7 @@
  * Proves that the 'discord-webhook-avernek' credential exists and holds a
  * working webhook, and that the controller can reach Discord over HTTPS. It
  * deploys nothing and never prints the webhook URL. It does not replace a real
- * pipeline run, which also exercises the Discord Notifier plugin (discordSend).
+ * pipeline run, which posts its own embed from the build agent with curl.
  *
  * Run by a Jenkins administrator, with the Jenkins CLI:
  *

@@ -29,16 +29,16 @@ function n(v: FormDataEntryValue | null): number | null {
  * thrown server-action message with a generic one, and "this file is not a
  * bill" has to reach the person who picked it.
  */
-export async function addExpense(formData: FormData): Promise<{ error: string | null }> {
+export async function addExpense(formData: FormData): Promise<{ error: string | null; id?: string }> {
   try {
-    await saveNewExpense(formData);
-    return { error: null };
+    const id = await saveNewExpense(formData);
+    return { error: null, id };
   } catch (error) {
     return { error: error instanceof Error ? error.message : "Could not save expense" };
   }
 }
 
-async function saveNewExpense(formData: FormData) {
+async function saveNewExpense(formData: FormData): Promise<string> {
   const session = await requireSession();
 
   const amount = n(formData.get("amount")) ?? 0;
@@ -96,7 +96,7 @@ async function saveNewExpense(formData: FormData) {
   // The expense and its shares must both land or neither: a saved expense with
   // no shares silently breaks the split. Previously this was a delete-on-failure
   // compensation, which left orphans if the delete itself failed.
-  await transaction(async (client) => {
+  const expenseId = await transaction(async (client) => {
     const inserted = await client.query<{ id: string }>(
       `insert into public.expenses
          (amount, currency, expense_date, billing_month, category_id, vendor_id,
@@ -144,6 +144,7 @@ async function saveNewExpense(formData: FormData) {
     // Bills land in the same transaction: an expense is never saved with half
     // of its attachments, and a rejected bill never leaves an expense behind.
     await insertAttachments(client, { kind: "expense_bill", id: expenseId }, bills, session.sub);
+    return expenseId;
   });
 
   revalidatePath("/expenses");
@@ -151,6 +152,7 @@ async function saveNewExpense(formData: FormData) {
   revalidatePath("/income");
   revalidatePath("/clients");
   revalidatePath("/");
+  return expenseId;
 }
 
 export async function updateExpense(formData: FormData) {

@@ -50,7 +50,9 @@ export type IconName =
   | "shield"
   | "globe"
   | "zap"
-  | "megaphone";
+  | "megaphone"
+  | "mic"
+  | "send";
 
 export default function Icon({
   name,
@@ -129,6 +131,8 @@ export default function Icon({
     globe: <><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></>,
     zap: <path d="M13 2 4 14h7l-1 8 9-12h-7Z"/>,
     megaphone: <><path d="m3 11 15-6v14L3 13Z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/></>,
+    mic: <><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3M9 21h6"/></>,
+    send: <><path d="M4 12 20 4l-4 16-4-7Z"/><path d="m12 13 8-9"/></>,
   };
 
   return <svg {...common}>{content[name]}</svg>;

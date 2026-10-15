@@ -9,6 +9,7 @@ import { CashflowChart, CategoryChart } from "@/components/LazyCharts";
 import type { CashflowPoint, CategorySlice } from "@/components/DashboardCharts";
 import { GlowTracker } from "@/components/controls";
 import { compactNumber, formatNumber, percentChange } from "@/lib/format";
+import { sumMoney } from "@/lib/money";
 import type { AppUser, Category, Expense, IncomeAgreement, Recurring } from "@/lib/types";
 import { computeIndividualSpending } from "@/lib/individual";
 import { loadStatement } from "@/lib/statement-data";
@@ -56,7 +57,8 @@ export default async function Dashboard() {
   const lifetimeRows = allExpenses.filter((expense) => expense.amount_npr != null);
   const spentRows = lifetimeRows.filter((expense) => expense.expense_date <= today);
   const nprOf = (expense: Expense) => Number(expense.amount_npr ?? 0);
-  const sumOf = (rows: Expense[]) => rows.reduce((total, row) => total + nprOf(row), 0);
+  // Exact to the paisa, as the AI assistant sums the same expenses (lib/money).
+  const sumOf = (rows: Expense[]) => sumMoney(rows.map((row) => row.amount_npr));
   const isCompany = (expense: Expense) => expense.funding_source === "company_funds";
 
   const totalSpent = sumOf(lifetimeRows);

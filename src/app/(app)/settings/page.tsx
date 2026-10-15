@@ -11,6 +11,8 @@ import ThemeToggle from "@/components/ThemeToggle";
 import { isAppOwner } from "@/lib/authz";
 import Icon, { type IconName } from "@/components/Icons";
 import { displayName, personTone } from "@/lib/people";
+import AiUsagePanel from "@/components/assistant/AiUsagePanel";
+import { isAiEnabled } from "@/lib/ai/config";
 
 export const dynamic = "force-dynamic";
 
@@ -157,6 +159,13 @@ export default async function SettingsPage() {
           </form>
         )}
       </div>
+
+      {/* AI assistant usage: administrators, when the assistant is configured */}
+      {canManage && isAiEnabled() && (
+        <div className="mt-4">
+          <AiUsagePanel />
+        </div>
+      )}
     </>
   );
 }
