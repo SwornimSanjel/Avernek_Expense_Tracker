@@ -16,6 +16,8 @@ import { loadLedger } from "@/lib/ledger";
 import { formatIncomeMoney } from "@/lib/income";
 import { format, startOfMonth, addMonths } from "date-fns";
 import DashboardCharts from "@/components/DashboardCharts";
+import { expenseTotals, groupExpenses, projectedRenewalsNpr } from "@/lib/expense-summary";
+import { sumMoney } from "@/lib/money";
 
 export const dynamic = "force-dynamic";
 
@@ -51,10 +53,10 @@ export default async function Dashboard() {
   const users = team as AppUser[];
   const individualSpending = computeIndividualSpending(users, expenses);
   const assignedTotal = individualSpending.reduce((sum, row) => sum + row.assigned, 0);
-  const founderExpenseTotal = sum(
+  const founderExpenseTotal = sumMoney(
     expenses
       .filter((expense) => expense.funding_source !== "company_funds")
-      .map((expense) => Number(expense.amount_npr ?? 0))
+      .map((expense) => expense.amount_npr)
   );
   // Client payments are revenue; capital raises the balance without ever being
   // revenue. Both reach the balance, only one reaches "money in".
@@ -65,42 +67,32 @@ export default async function Dashboard() {
   ].filter((item): item is NonNullable<typeof item> => Boolean(item));
   const firstName = (me?.name ?? "there").split(" ")[0];
 
-  const withNpr = expenses.filter((e) => e.amount_npr != null);
-  const totalNpr = sum(withNpr.map((e) => e.amount_npr!));
-  const usdForeign = sum(
-    expenses.filter((e) => e.currency === "USD").map((e) => e.amount)
-  );
+  // Totals come from lib/expense-summary, which the AI assistant uses too, so
+  // the dashboard and the assistant always agree (exact to the paisa).
+  const allTime = expenseTotals(expenses);
+  const totalNpr = allTime.totalNpr;
+  const usdForeign = allTime.usdAmount;
 
   const monthStart = format(startOfMonth(new Date()), "yyyy-MM-dd");
-  const thisMonth = sum(
-    withNpr.filter((e) => e.expense_date >= monthStart).map((e) => e.amount_npr!)
-  );
+  const thisMonth = expenseTotals(expenses, { from: monthStart }).totalNpr;
 
   const nextMonthStart = format(addMonths(startOfMonth(new Date()), 1), "yyyy-MM-dd");
   const nextMonthEnd = format(addMonths(startOfMonth(new Date()), 2), "yyyy-MM-dd");
-  const projected = sum(
-    recurring.map((r) => {
-      const val =
-        r.currency === "USD"
-          ? Number(r.amount) * (currentRate?.rate ?? 0)
-          : Number(r.amount);
-      if (r.cycle === "monthly") return val;
-      return r.next_renewal_date >= nextMonthStart && r.next_renewal_date < nextMonthEnd
-        ? val
-        : 0;
-    })
-  );
+  const projected = projectedRenewalsNpr(recurring, currentRate?.rate, nextMonthStart, nextMonthEnd);
 
   // ---- Donut: category share (top 4 + Other) ----
+  const categoryTotals = new Map(
+    groupExpenses(expenses, (e) => e.category_id).map((group) => [group.key, group.totalNpr])
+  );
   const byCatAll = categories
     .map((c) => ({
       name: c.name,
-      value: sum(withNpr.filter((e) => e.category_id === c.id).map((e) => e.amount_npr!)),
+      value: categoryTotals.get(c.id) ?? 0,
     }))
     .filter((d) => d.value > 0)
     .sort((a, b) => b.value - a.value);
   const top = byCatAll.slice(0, 4);
-  const otherVal = sum(byCatAll.slice(4).map((d) => d.value));
+  const otherVal = sumMoney(byCatAll.slice(4).map((d) => d.value));
   const slices = otherVal > 0 ? [...top, { name: "Other", value: otherVal }] : top;
 
   // ---- Bars: last 6 months ----
@@ -111,11 +103,7 @@ export default async function Dashboard() {
     const to = format(addMonths(s, 1), "yyyy-MM-dd");
     months.push({
       label: format(s, "MMM"),
-      value: sum(
-        withNpr
-          .filter((x) => x.expense_date >= from && x.expense_date < to)
-          .map((x) => x.amount_npr!)
-      ),
+      value: expenseTotals(expenses, { from, before: to }).totalNpr,
       current: i === 0,
     });
   }
@@ -270,8 +258,4 @@ function Empty() {
   return (
     <EmptyState title="Nothing here yet" description="Add your first expense to unlock this financial view." />
   );
-}
-
-function sum(xs: number[]): number {
-  return xs.reduce((a, b) => a + Number(b), 0);
 }

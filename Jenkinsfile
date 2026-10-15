@@ -13,7 +13,7 @@
 // scripts/ci/release.sh; images are built by scripts/ci/build.sh.
 //
 // Jenkins plugins: Pipeline, Git, GitHub, Credentials Binding, Workspace Cleanup,
-// Timestamper, Discord Notifier.
+// Timestamper. Discord is a plain webhook POST with curl (no Discord plugin).
 // Credentials: 'avernek-expense-tracker-env' (Secret file, bootstraps .env only),
 //              'discord-webhook-avernek' (Secret text, Discord webhook URL).
 
@@ -212,8 +212,7 @@ pipeline {
             def deployment = env.DEPLOY_ENABLED == 'true'
               ? (env.DEPLOY_FAILED == 'true' ? "failed at ${env.FAILED_STEP ?: 'deployment'}" : (outcome == 'SUCCESS' ? 'deployed and verified' : 'not completed'))
               : "skipped (branch ${env.SOURCE_BRANCH ?: 'unknown'})"
-            discordSend(
-              webhookURL: env.DISCORD_WEBHOOK_URL,
+            def embed = [
               title: "${env.JOB_NAME} #${env.BUILD_NUMBER}",
               description: "Result: ${outcome}\n" +
                 "Branch: ${env.SOURCE_BRANCH ?: env.BRANCH_NAME ?: 'main'}\n" +
@@ -221,14 +220,32 @@ pipeline {
                 "Release: ${env.IMAGE_TAG ?: 'not built'}\n" +
                 "Deployment: ${deployment}\n" +
                 "Rollback: ${env.ROLLBACK_STATUS ?: 'not required / not attempted'}",
-              result: outcome,
-              link: env.BUILD_URL,
-              footer: 'Avernek Technologies | Jenkins Deployment'
-            )
+              color: outcome == 'SUCCESS' ? 5763719 : 15548997,   // green / red
+              footer: [
+                text: 'Avernek Technologies | Jenkins Deployment'
+              ]
+            ]
+            // The title links to the build only when Jenkins knows its URL.
+            if (env.BUILD_URL) {
+              embed.url = env.BUILD_URL
+            }
+            def payload = groovy.json.JsonOutput.toJson([
+              username: 'Avernek Jenkins',
+              embeds: [embed]
+            ])
+            // Posted straight to the webhook. curl reads the URL on stdin (-K -),
+            // so it never appears in the process list or the console log.
+            writeFile file: '.discord-payload.json', text: payload
+            sh '''
+              set +x
+              printf 'url = "%s"\\n' "$DISCORD_WEBHOOK_URL" \\
+                | curl -fsS --max-time 15 -K - -H 'Content-Type: application/json' \\
+                    --data-binary @.discord-payload.json -o /dev/null
+            '''
           }
         } catch (Exception notificationError) {
           // Reporting failure must never conceal or overwrite a build failure.
-          echo 'WARNING: Discord notification could not be sent. Check the credential, plugin and Jenkins egress.'
+          echo 'WARNING: Discord notification could not be sent. Check the credential and outbound HTTPS to discord.com.'
         } finally {
           cleanWs(deleteDirs: true,
                   disableDeferredWipeout: true,

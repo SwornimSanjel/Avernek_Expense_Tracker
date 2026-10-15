@@ -9,6 +9,8 @@ import AddMemberForm from "@/components/AddMemberForm";
 import SetPasswordForm from "@/components/SetPasswordForm";
 import { isAppOwner } from "@/lib/authz";
 import Icon from "@/components/Icons";
+import AiUsagePanel from "@/components/assistant/AiUsagePanel";
+import { isAiEnabled } from "@/lib/ai/config";
 
 export const dynamic = "force-dynamic";
 
@@ -147,6 +149,7 @@ export default async function SettingsPage() {
             </form>
           )}
         </div>
+        {canManage && isAiEnabled() && <AiUsagePanel />}
       </div>
     </>
   );

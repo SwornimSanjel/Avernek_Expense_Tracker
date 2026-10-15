@@ -1,4 +1,6 @@
 import Nav from "@/components/Nav";
+import AssistantLauncher from "@/components/assistant/AssistantLauncher";
+import { isAiEnabled } from "@/lib/ai/config";
 import MotionPage from "@/components/MotionPage";
 import { requireSession } from "@/lib/auth/server";
 import { one } from "@/lib/db";
@@ -23,6 +25,8 @@ export default async function AppLayout({
       <main className="app-main flex-1 min-w-0 pt-16 md:pt-0">
         <MotionPage>{children}</MotionPage>
       </main>
+      {/* Only with OPENROUTER_API_KEY set; without it the app is unchanged. */}
+      {isAiEnabled() && <AssistantLauncher firstName={(profile?.name ?? session.name ?? "there").split(" ")[0]} />}
     </div>
   );
 }

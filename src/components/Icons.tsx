@@ -25,7 +25,10 @@ export type IconName =
   | "check"
   | "clock"
   | "chevronDown"
-  | "bank";
+  | "bank"
+  | "mic"
+  | "send"
+  | "stop";
 
 export default function Icon({
   name,
@@ -79,6 +82,9 @@ export default function Icon({
     clock: <><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></>,
     chevronDown: <path d="m7 10 5 5 5-5"/>,
     bank: <><path d="m3 9 9-5 9 5M5 10h14M6 10v8M10 10v8M14 10v8M18 10v8M4 20h16"/></>,
+    mic: <><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3M9 21h6"/></>,
+    send: <><path d="M4 12 20 4l-4 16-4-7Z"/><path d="m12 13 8-9"/></>,
+    stop: <><rect x="6" y="6" width="12" height="12" rx="2"/></>,
   };
 
   return <svg {...common}>{content[name]}</svg>;
