@@ -57,6 +57,9 @@ services:
       - .env
     environment:
       NODE_ENV: production
+      # "Today" on every page (and in the assistant) is Nepal's date, not UTC's,
+      # which is still yesterday until 05:45 in Kathmandu.
+      TZ: Asia/Kathmandu
     depends_on:
       db:
         condition: service_healthy

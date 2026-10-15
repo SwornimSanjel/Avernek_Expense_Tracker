@@ -24,7 +24,7 @@ export type ChatMessage =
 
 export type ToolDefinition = {
   type: "function";
-  function: { name: string; description: string; parameters: Record<string, unknown> };
+  function: { name: string; description: string; parameters: Record<string, unknown>; strict?: boolean };
 };
 
 export type Usage = {

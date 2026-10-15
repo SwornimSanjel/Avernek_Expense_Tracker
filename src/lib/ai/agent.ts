@@ -211,6 +211,9 @@ export async function runChat(
   for (const call of calls) {
     const tool = byName.get(call.function.name);
     const parsedArgs = parseArgs(call.function.arguments);
+    if (!parsedArgs) {
+      console.error(`[ai] unreadable arguments for ${call.function.name}:`, String(call.function.arguments ?? "").slice(0, 300));
+    }
     const allowed = declared.get(call.function.name);
     const args = parsedArgs && allowed ? Object.fromEntries(Object.entries(parsedArgs).filter(([key]) => allowed.has(key))) : parsedArgs;
     if (!tool) {

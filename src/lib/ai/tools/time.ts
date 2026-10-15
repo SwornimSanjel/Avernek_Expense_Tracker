@@ -50,7 +50,7 @@ export const getDateTime: ReadTool = {
       { label: "Time in Nepal", value: now.time },
     ];
     let extra = "";
-    if (parsed.data.date) {
+    if (parsed.data.date && parsed.data.date !== now.date) {
       const days = daysBetween(now.date, parsed.data.date);
       const phrase = days === 0 ? "that is today" : days > 0 ? `${durationLabel(days)} from today` : `${durationLabel(-days)} ago`;
       items.push({ label: formatDate(parsed.data.date), value: phrase });

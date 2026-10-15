@@ -5,7 +5,7 @@ import type { Client, RequestData } from "../data";
 import type { ToolContext } from "./types";
 
 // The save actions are the app's own; here they only record what they receive.
-const saved = vi.hoisted(() => ({ forms: [] as FormData[] }));
+const saved = vi.hoisted(() => ({ forms: [] as FormData[], expenses: [] as unknown[] }));
 vi.mock("@/app/(app)/expenses/actions", () => ({
   addExpense: vi.fn(async (form: FormData) => {
     saved.forms.push(form);
@@ -19,7 +19,8 @@ vi.mock("@/app/(app)/expenses/actions", () => ({
 // The payment tool looks up the id of the payment it just recorded.
 vi.mock("@/lib/db", () => ({
   one: vi.fn(async () => ({ id: "p-new", client_name: "Kalika Technical", currency: "NPR" })),
-  query: vi.fn(async () => []),
+  // The edit tool re-reads the expense right before saving.
+  query: vi.fn(async (sql: string) => (sql.includes("from public.expenses ") ? saved.expenses : [])),
   exec: vi.fn(async () => 0),
 }));
 vi.mock("@/app/(app)/income/actions", () => ({
@@ -149,6 +150,7 @@ const savedExpense = {
   billing_month: null,
   fx_source: "actual",
 } as unknown as Expense;
+saved.expenses = [savedExpense];
 
 function context(isAdmin = true, conversation?: ToolContext["conversation"]): ToolContext {
   const agreements = [kalika];
