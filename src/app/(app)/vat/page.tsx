@@ -1,7 +1,8 @@
 import { query } from "@/lib/db";
 import { requireSession } from "@/lib/auth/server";
 import { isAppOwner } from "@/lib/authz";
-import { EmptyState, PageHeader, SectionHeader, StatTile } from "@/components/ui";
+import { EmptyState, Money, PageHeader } from "@/components/ui";
+import PanelTabs from "@/components/PanelTabs";
 import {
   AddCompanyBill,
   ConfirmDelete,
@@ -11,11 +12,13 @@ import {
 import { accountShortName } from "@/lib/funds";
 import { loadLedger } from "@/lib/ledger";
 import { bankAmount } from "@/lib/tax";
-import { OTHER_INCOME_LABELS, formatIncomeMoney, formatServiceDate } from "@/lib/income";
+import { OTHER_INCOME_LABELS, formatServiceDate } from "@/lib/income";
 import { deleteCompanyBill, deleteMoneyTransfer, deleteTaxPayment } from "../funds/actions";
 import type { IncomeAgreement } from "@/lib/types";
 import Icon from "@/components/Icons";
 import { ATTACHMENT_COLUMNS, attachmentUrl, type Attachment } from "@/lib/attachments";
+import { formatNumber } from "@/lib/format";
+import { monthLabel } from "@/lib/dates";
 
 export const dynamic = "force-dynamic";
 
@@ -36,31 +39,14 @@ type VatRow = {
 function FileLinks({ files, label }: { files: Attachment[]; label: string }) {
   if (!files.length) return null;
   return (
-    <span className="flex flex-wrap gap-1 mt-1">
+    <span className="flex flex-wrap gap-1 mt-1.5">
       {files.map((file, index) => (
-        <a
-          key={file.id}
-          href={attachmentUrl(file.id)}
-          target="_blank"
-          rel="noopener"
-          className="pill bill-pill"
-          title={file.file_name}
-        >
-          <Icon name="receipt" size={11} />
+        <a key={file.id} href={attachmentUrl(file.id)} target="_blank" rel="noopener" className="pill accent" title={file.file_name}>
+          <Icon name="receipt" size={12} />
           {files.length > 1 ? `${label} ${index + 1}` : label}
         </a>
       ))}
     </span>
-  );
-}
-
-function monthKey(date: string) {
-  return date.slice(0, 7);
-}
-
-function monthLabel(key: string) {
-  return new Intl.DateTimeFormat("en", { month: "long", year: "numeric", timeZone: "UTC" }).format(
-    new Date(`${key}-01T00:00:00Z`)
   );
 }
 
@@ -90,7 +76,6 @@ export default async function VatPage() {
   const clientById = new Map(agreements.map((agreement) => [agreement.id, agreement.client_name]));
   const accountById = new Map(accounts.map((account) => [account.id, account]));
 
-  // ---- VAT we collected: one row per receipt that carried VAT ---------------
   const collected: VatRow[] = [
     ...payments
       .filter((payment) => Number(payment.vat_amount) > 0)
@@ -100,7 +85,7 @@ export default async function VatPage() {
         from: clientById.get(payment.agreement_id) ?? "Client",
         forWhat:
           payment.payment_for === "setup"
-            ? "Setup · month 1"
+            ? "Setup fee"
             : payment.payment_for === "website"
               ? "Website"
               : payment.billing_period_start
@@ -129,196 +114,222 @@ export default async function VatPage() {
       })),
   ].sort((a, b) => b.date.localeCompare(a.date));
 
-  const months = [...new Set(collected.map((row) => monthKey(row.date)))];
+  const months = [...new Set(collected.map((row) => row.date.slice(0, 7)))];
   const pendingTotal = billStatuses.reduce((sum, item) => sum + item.pending, 0);
   const vatRoom = Math.max(0, balances.find((item) => item.account.kind === "company_bank")?.free ?? 0);
-  const money = (value: number) => formatIncomeMoney(value, "NPR");
+
+  const collectedPanel =
+    collected.length === 0 ? (
+      <EmptyState title="No VAT collected yet" description="Payments recorded with “VAT bill · 13% on top” show up here." icon="receipt" />
+    ) : (
+      <div className="table-wrap">
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>From</th>
+              <th className="num">Our charge</th>
+              <th className="num">VAT 13%</th>
+              <th className="num">TDS kept</th>
+              <th className="num">Reached bank</th>
+            </tr>
+          </thead>
+          <tbody>
+            {months.map((key) => {
+              const rows = collected.filter((row) => row.date.startsWith(key));
+              const sum = (pick: (row: VatRow) => number) => rows.reduce((total, row) => total + pick(row), 0);
+              return [
+                <tr key={`h-${key}`} className="!bg-[var(--surface-2)]">
+                  <td colSpan={2} className="font-semibold">{monthLabel(key)}</td>
+                  <td className="num font-semibold">{formatNumber(sum((row) => row.charge))}</td>
+                  <td className="num font-semibold text-amber">{formatNumber(sum((row) => row.vat))}</td>
+                  <td className="num font-semibold">{formatNumber(sum((row) => row.tds))}</td>
+                  <td className="num font-semibold">{formatNumber(sum((row) => row.bank))}</td>
+                </tr>,
+                ...rows.map((row) => (
+                  <tr key={row.key}>
+                    <td className="whitespace-nowrap">{formatServiceDate(row.date)}</td>
+                    <td>
+                      <div className="font-medium">{row.from}</div>
+                      <div className="text-[12.5px] muted">{row.forWhat} · {row.account}</div>
+                      <FileLinks files={row.bills} label="VAT bill" />
+                    </td>
+                    <td className="num">{formatNumber(row.charge)}</td>
+                    <td className="num text-amber font-medium">{formatNumber(row.vat)}</td>
+                    <td className="num">{row.tds > 0 ? formatNumber(row.tds) : "—"}</td>
+                    <td className="num font-medium">{formatNumber(row.bank)}</td>
+                  </tr>
+                )),
+              ];
+            })}
+          </tbody>
+        </table>
+      </div>
+    );
+
+  const billsPanel = (
+    <>
+      <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5 border-b bg-[var(--surface-2)]">
+        <p className="text-[13.5px] muted max-w-2xl">
+          {pendingTotal > 0
+            ? <>NPR {formatNumber(pendingTotal)} still to reimburse · NPR {formatNumber(vatRoom)} can be used from the VAT account right now.</>
+            : "Lawyer, rent, printing… bills issued to Avernek and paid first from another account. Their VAT lowers what we owe IRD."}
+        </p>
+        {canManage && <AddCompanyBill compact />}
+      </div>
+      {billStatuses.length === 0 && (
+        <EmptyState title="No bills yet" description="Press “Add VAT bill”, then “Reimburse” on it when the VAT account has room." icon="receipt" />
+      )}
+      <div className="row-list">
+        {billStatuses.map((item) => (
+          <div key={item.bill.id} className="px-5 py-4">
+            <div className="flex flex-wrap items-start gap-4">
+              <div className="row-icon" style={{ "--tone": "var(--amber)", "--tone-soft": "var(--amber-soft)" } as React.CSSProperties}>
+                <Icon name="file" size={17} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="text-[15px] font-semibold">{item.bill.description}</div>
+                <div className="text-[13px] muted mt-0.5">
+                  {formatServiceDate(item.bill.bill_date)}
+                  {item.bill.vendor_name ? ` · ${item.bill.vendor_name}` : ""}
+                  {item.bill.bill_number ? ` · bill ${item.bill.bill_number}` : ""}
+                  {item.bill.paid_by ? ` · paid by ${item.bill.paid_by}` : ""}
+                </div>
+                <FileLinks files={filesByOwner.get(item.bill.id) ?? []} label="Bill" />
+              </div>
+              <dl className="grid grid-cols-4 gap-5 text-right">
+                <BillFigure label="Bill" value={formatNumber(Number(item.bill.total_amount))} />
+                <BillFigure label="VAT in it" value={formatNumber(Number(item.bill.vat_amount))} tone="text-amber" />
+                <BillFigure label="Paid back" value={formatNumber(item.reimbursed)} tone="text-green" />
+                <BillFigure label="Pending" value={item.pending > 0 ? formatNumber(item.pending) : "Done"} tone={item.pending > 0 ? "text-amber" : "text-green"} />
+              </dl>
+              {canManage && (
+                <div className="flex items-center gap-1.5">
+                  {item.pending > 0 && <ReimburseBill bills={billStatuses} balances={balances} billId={item.bill.id} />}
+                  <AddCompanyBill bill={item.bill} files={filesByOwner.get(item.bill.id) ?? []} />
+                  {item.reimbursements.length === 0 && <ConfirmDelete id={item.bill.id} action={deleteCompanyBill} message="Delete this bill?" />}
+                </div>
+              )}
+            </div>
+            {item.reimbursements.length > 0 && (
+              <div className="mt-3 ml-[52px] space-y-1.5">
+                {item.reimbursements.map((transfer) => (
+                  <div key={transfer.id} className="flex items-center gap-3 text-[13px] card-soft px-3 py-2">
+                    <Icon name="swap" size={14} className="text-blue" />
+                    <span className="flex-1 min-w-0 truncate muted">
+                      Reimbursed {formatServiceDate(transfer.transfer_date)} · {accountShortName(accountById.get(transfer.from_account_id))} → {accountShortName(accountById.get(transfer.to_account_id))}
+                    </span>
+                    <strong className="tnum">{formatNumber(Number(transfer.from_amount))}</strong>
+                    {canManage && <ConfirmDelete id={transfer.id} action={deleteMoneyTransfer} message="Delete this reimbursement? The money goes back to the VAT account." />}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </>
+  );
+
+  const paidPanel = (
+    <>
+      <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5 border-b bg-[var(--surface-2)]">
+        <p className="text-[13.5px] muted">Each deposit lowers both the VAT account and the VAT still to pay.</p>
+        {canManage && <PayVat balances={balances} vatOwed={tax.vatOwed} />}
+      </div>
+      {taxPayments.length === 0 && <EmptyState title="No VAT payment recorded yet" description="Record each deposit to IRD here." icon="bank" />}
+      <div className="row-list">
+        {taxPayments.map((row) => (
+          <div key={row.id} className="row-item">
+            <div className="row-icon" style={{ "--tone": "var(--accent-ink)", "--tone-soft": "var(--accent-soft)" } as React.CSSProperties}><Icon name="bank" size={17} /></div>
+            <div className="min-w-0 flex-1">
+              <div className="row-title">VAT paid{row.period_label ? ` · ${row.period_label}` : ""}</div>
+              <div className="row-meta">{formatServiceDate(row.paid_on)}{row.reference ? ` · ${row.reference}` : ""} · {accountShortName(accountById.get(row.money_account_id))}</div>
+            </div>
+            <div className="row-amount">{formatNumber(Number(row.amount))}</div>
+            {canManage && <ConfirmDelete id={row.id} action={deleteTaxPayment} message="Delete this VAT payment record?" />}
+          </div>
+        ))}
+      </div>
+    </>
+  );
 
   return (
     <>
       <PageHeader
-        eyebrow="Tax"
         title="VAT & bills"
-        subtitle="Who paid us VAT and on how much, bills in Avernek's name that need reimbursing, and VAT paid to IRD."
+        subtitle="What Avernek owes IRD, how it is worked out, and company bills that need reimbursing."
         action={
           canManage ? (
-            <div className="flex flex-wrap gap-2">
+            <>
               <AddCompanyBill />
               <ReimburseBill bills={billStatuses} balances={balances} />
               <PayVat balances={balances} vatOwed={tax.vatOwed} />
-            </div>
+            </>
           ) : undefined
         }
       />
 
-      {/* ------------------------------------------------------------ totals */}
-      <div className="grid sm:grid-cols-2 xl:grid-cols-5 gap-3 mb-6">
-        <StatTile label="VAT we collected" value={money(tax.outputVat)} hint="13% on top of our service charges" icon="receipt" tone="blue" />
-        <StatTile label="VAT on our bills" value={`−${money(tax.inputVat)}`} hint="Inside bills in Avernek's name · we claim it" icon="receipt" tone="green" />
-        <StatTile label="VAT paid to IRD" value={`−${money(tax.vatDeposited)}`} hint="Deposits recorded so far" icon="bank" tone="accent" />
-        <StatTile
-          label="VAT still to pay"
-          value={money(tax.vatOwed)}
-          hint={tax.vatCarryForward > 0 ? `${money(tax.vatCarryForward)} extra input VAT to carry forward` : "Keep this in the VAT account · estimate"}
-          emphasis
-          icon="clock"
-          tone="amber"
-        />
-        <StatTile label="TDS credit" value={money(tax.tdsCredit)} hint="Withheld by clients · claim in income tax" icon="contribution" tone="green" />
+      {/* the VAT sum, as an equation anyone can follow */}
+      <div className="card p-6 dot-pattern rise">
+        <div className="text-[14px] font-semibold">VAT position</div>
+        <p className="text-[13.5px] muted mt-0.5">An estimate from what is recorded here — not the official return.</p>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-5 mt-5">
+          <Term label="VAT we collected" sub="13% on top of our charges" value={tax.outputVat} />
+          <Op>−</Op>
+          <Term label="VAT on our bills" sub="We can claim this back" value={tax.inputVat} />
+          <Op>−</Op>
+          <Term label="Already paid to IRD" sub={`${taxPayments.length} deposit${taxPayments.length === 1 ? "" : "s"}`} value={tax.vatDeposited} />
+          <Op>=</Op>
+          <div className="rounded-2xl px-5 py-4 border" style={{ borderColor: "rgb(251 191 36 / 0.3)", background: "var(--amber-soft)" }}>
+            <div className="text-[13px] text-amber font-semibold">Still to pay</div>
+            <div className="text-[30px] font-semibold tracking-tight leading-tight mt-1"><Money value={tax.vatOwed} /></div>
+            <div className="text-[12.5px] muted mt-1">
+              {tax.vatCarryForward > 0 ? `NPR ${formatNumber(tax.vatCarryForward)} extra to carry forward` : "Keep it in the VAT account"}
+            </div>
+          </div>
+        </div>
+        {tax.tdsCredit > 0 && (
+          <div className="mt-5 pt-4 border-t text-[13.5px]">
+            <span className="text-green font-semibold">TDS credit NPR {formatNumber(tax.tdsCredit)}</span>
+            <span className="muted"> — withheld by clients; claim it in the income tax return.</span>
+          </div>
+        )}
       </div>
 
-      {/* ------------------------------------------------- VAT we collected */}
-      <div className="mb-6">
-        <SectionHeader
-          title="VAT we collected"
-          subtitle="Every payment that came with VAT: who paid, our service charge, the VAT on top and any TDS they kept."
+      <div className="section">
+        <PanelTabs
+          initial={pendingTotal > 0 ? "bills" : "collected"}
+          tabs={[
+            { key: "collected", label: "VAT we collected", count: collected.length, content: collectedPanel },
+            { key: "bills", label: "Bills in Avernek's name", count: billStatuses.length, content: billsPanel },
+            { key: "paid", label: "Paid to IRD", count: taxPayments.length, content: paidPanel },
+          ]}
         />
-        <div className="card mt-3 overflow-hidden">
-          {collected.length === 0 ? (
-            <EmptyState
-              title="No VAT collected yet"
-              description="Payments recorded with “VAT bill · 13% on top” show up here."
-              icon="receipt"
-            />
-          ) : (
-            <div className="price-table-wrap !border-0 !rounded-none">
-              <table className="price-table register-table">
-                <thead>
-                  <tr>
-                    <th>Date</th>
-                    <th>From whom</th>
-                    <th>Service charge</th>
-                    <th>VAT 13%</th>
-                    <th>TDS kept</th>
-                    <th>Reached bank</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {months.map((key) => {
-                    const rows = collected.filter((row) => monthKey(row.date) === key);
-                    const sum = (pick: (row: VatRow) => number) => rows.reduce((total, row) => total + pick(row), 0);
-                    return [
-                      <tr key={`h-${key}`} className="register-month">
-                        <td colSpan={2}>{monthLabel(key)} · total</td>
-                        <td>{money(sum((row) => row.charge))}</td>
-                        <td>{money(sum((row) => row.vat))}</td>
-                        <td>{money(sum((row) => row.tds))}</td>
-                        <td>{money(sum((row) => row.bank))}</td>
-                      </tr>,
-                      ...rows.map((row) => (
-                        <tr key={row.key}>
-                          <td>{formatServiceDate(row.date)}</td>
-                          <td className="register-who">
-                            <strong>{row.from}</strong>
-                            <small>{row.forWhat} · {row.account}</small>
-                            <FileLinks files={row.bills} label="VAT bill" />
-                          </td>
-                          <td>{money(row.charge)}</td>
-                          <td className="register-vat">{money(row.vat)}</td>
-                          <td>{row.tds > 0 ? money(row.tds) : "—"}</td>
-                          <td>{money(row.bank)}</td>
-                        </tr>
-                      )),
-                    ];
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* ------------------------------------------------------------- bills */}
-      <div className="mb-6">
-        <SectionHeader
-          title="Bills in Avernek's name"
-          subtitle={
-            pendingTotal > 0
-              ? `${money(pendingTotal)} still to reimburse · ${money(vatRoom)} can be used from the VAT account right now (VAT is kept aside)`
-              : "Lawyer, rent, printing… bills issued to the company and paid first from another account. Their VAT lowers what we owe IRD."
-          }
-          action={canManage ? <AddCompanyBill compact /> : undefined}
-        />
-        <div className="card mt-3 overflow-hidden">
-          {billStatuses.length === 0 && (
-            <EmptyState
-              title="No bills yet"
-              description="Press “Add VAT bill”, then “Reimburse” on it when the VAT account has room."
-              icon="receipt"
-            />
-          )}
-          {billStatuses.map((item) => (
-            <div key={item.bill.id} className="bill-row">
-              <div className="bill-row-main">
-                <div className="min-w-0">
-                  <div className="font-medium truncate">{item.bill.description}</div>
-                  <div className="text-xs muted mt-0.5 truncate">
-                    {formatServiceDate(item.bill.bill_date)}
-                    {item.bill.vendor_name ? ` · ${item.bill.vendor_name}` : ""}
-                    {item.bill.bill_number ? ` · bill ${item.bill.bill_number}` : ""}
-                    {item.bill.paid_by ? ` · paid by ${item.bill.paid_by}` : ""}
-                  </div>
-                  <FileLinks files={filesByOwner.get(item.bill.id) ?? []} label="Bill" />
-                </div>
-                <dl className="bill-row-figures">
-                  <div><dt>Bill</dt><dd>{money(Number(item.bill.total_amount))}</dd></div>
-                  <div><dt>VAT in it</dt><dd>{money(Number(item.bill.vat_amount))}</dd></div>
-                  <div><dt>Paid back</dt><dd style={{ color: "var(--green)" }}>{money(item.reimbursed)}</dd></div>
-                  <div><dt>Pending</dt><dd style={{ color: item.pending > 0 ? "var(--amber)" : "var(--green)" }}>{item.pending > 0 ? money(item.pending) : "Done"}</dd></div>
-                </dl>
-                {canManage && (
-                  <div className="flex items-center gap-1 justify-end">
-                    {item.pending > 0 && <ReimburseBill bills={billStatuses} balances={balances} billId={item.bill.id} />}
-                    <AddCompanyBill bill={item.bill} files={filesByOwner.get(item.bill.id) ?? []} />
-                    {item.reimbursements.length === 0 && (
-                      <ConfirmDelete id={item.bill.id} action={deleteCompanyBill} message="Delete this bill?" />
-                    )}
-                  </div>
-                )}
-              </div>
-              {item.reimbursements.length > 0 && (
-                <div className="bill-row-history">
-                  {item.reimbursements.map((transfer) => (
-                    <div key={transfer.id} className="flex items-center gap-3 text-xs">
-                      <span className="flex-1 min-w-0 truncate muted">
-                        Reimbursed {formatServiceDate(transfer.transfer_date)} ·{" "}
-                        {accountShortName(accountById.get(transfer.from_account_id))} →{" "}
-                        {accountShortName(accountById.get(transfer.to_account_id))}
-                      </span>
-                      <strong className="tnum">{money(Number(transfer.from_amount))}</strong>
-                      {canManage && (
-                        <ConfirmDelete id={transfer.id} action={deleteMoneyTransfer} message="Delete this reimbursement? The money goes back to the VAT account." />
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* ------------------------------------------------- VAT paid to IRD */}
-      <div>
-        <SectionHeader
-          title="VAT paid to IRD"
-          subtitle="Each VAT deposit lowers both the VAT account and the VAT still to pay."
-          action={canManage ? <PayVat balances={balances} vatOwed={tax.vatOwed} /> : undefined}
-        />
-        <div className="card mt-3 divide-y" style={{ borderColor: "var(--line)" }}>
-          {taxPayments.length === 0 && <p className="px-5 py-5 text-sm muted">No VAT payment recorded yet.</p>}
-          {taxPayments.map((row) => (
-            <div key={row.id} className="px-4 py-3 flex items-center gap-3 text-sm" style={{ borderColor: "var(--line)" }}>
-              <span className="flex-1 min-w-0 truncate">
-                VAT paid{row.period_label ? ` · ${row.period_label}` : ""}
-                <span className="muted text-xs"> · {formatServiceDate(row.paid_on)}{row.reference ? ` · ${row.reference}` : ""}</span>
-              </span>
-              <strong className="tnum">{money(Number(row.amount))}</strong>
-              {canManage && <ConfirmDelete id={row.id} action={deleteTaxPayment} message="Delete this VAT payment record?" />}
-            </div>
-          ))}
-        </div>
       </div>
     </>
+  );
+}
+
+function Term({ label, sub, value }: { label: string; sub: string; value: number }) {
+  return (
+    <div className="min-w-[150px]">
+      <div className="text-[13px] muted">{label}</div>
+      <div className="text-[24px] font-semibold tracking-tight tnum mt-1">{formatNumber(value)}</div>
+      <div className="text-[12.5px] muted-2 mt-0.5">{sub}</div>
+    </div>
+  );
+}
+
+function Op({ children }: { children: React.ReactNode }) {
+  return <div className="text-[26px] font-light muted-2 px-1">{children}</div>;
+}
+
+function BillFigure({ label, value, tone }: { label: string; value: string; tone?: string }) {
+  return (
+    <div>
+      <dt className="text-[12.5px] muted">{label}</dt>
+      <dd className={`mt-0.5 text-[15px] font-semibold tnum ${tone ?? ""}`}>{value}</dd>
+    </div>
   );
 }

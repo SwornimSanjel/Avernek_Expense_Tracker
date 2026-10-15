@@ -36,14 +36,14 @@ export default function AddMemberForm() {
         className="input"
       />
 
-      <div className="flex flex-wrap gap-x-5 gap-y-2">
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" name="is_core_member" defaultChecked />
-          Include in default split
+      <div className="grid sm:grid-cols-2 gap-2">
+        <label className="checkbox-row">
+          <input type="checkbox" name="is_partner" defaultChecked />
+          <span><strong>Partner</strong><small>Shown in investment totals and payer lists</small></span>
         </label>
-        <label className="flex items-center gap-2 text-sm">
+        <label className="checkbox-row">
           <input type="checkbox" name="is_admin" />
-          Administrator
+          <span><strong>Administrator</strong><small>Can add, edit and delete everything</small></span>
         </label>
       </div>
 
@@ -55,9 +55,7 @@ export default function AddMemberForm() {
       {state.ok && <p className="alert" style={{ color: "var(--green)", borderColor: "rgb(70 216 144 / .2)" }}>{state.ok}</p>}
 
       <p className="text-[13px] muted">
-        No password means they can be picked as a payer and included in splits,
-        but cannot sign in. Administrators can edit and delete everything;
-        everyone else has read-only access.
+        No password = they can be picked as a payer and split into, but cannot sign in. Non-administrators get read-only access.
       </p>
     </form>
   );

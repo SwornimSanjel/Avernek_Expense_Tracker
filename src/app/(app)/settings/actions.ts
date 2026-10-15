@@ -77,6 +77,21 @@ export async function setCoreMember(id: string, value: boolean) {
 }
 
 /**
+ * Partners are the people whose money is tracked: they appear in rankings,
+ * investment totals and payer / split pickers. Turning it off hides a person
+ * from those lists without touching any amount they paid or were split into.
+ */
+export async function setPartner(id: string, value: boolean) {
+  await requireOwner();
+
+  await exec(`update public.users set is_partner = $1 where id = $2`, [value, id]);
+
+  for (const path of ["/settings", "/settlements", "/expenses", "/subscriptions", "/income", "/"]) {
+    revalidatePath(path);
+  }
+}
+
+/**
  * Result of the two team-management forms. `ok` carries a confirmation rather
  * than redirecting, because the admin usually adds several people in a row.
  */
@@ -100,6 +115,7 @@ export async function addMember(
   const password = String(formData.get("password") ?? "");
   const isAdmin = formData.get("is_admin") === "on";
   const isCore = formData.get("is_core_member") === "on";
+  const isPartner = formData.get("is_partner") === "on";
 
   if (!name) return { error: "Enter a name.", ok: null };
   if (!email) return { error: "Enter an email address.", ok: null };
@@ -119,9 +135,9 @@ export async function addMember(
 
   try {
     await exec(
-      `insert into public.users (name, email, password_hash, is_admin, is_core_member)
-       values ($1, $2, $3, $4, $5)`,
-      [name, email, passwordHash, isAdmin, isCore]
+      `insert into public.users (name, email, password_hash, is_admin, is_core_member, is_partner)
+       values ($1, $2, $3, $4, $5, $6)`,
+      [name, email, passwordHash, isAdmin, isCore, isPartner]
     );
   } catch (error) {
     // users_email_lower_key. Checking first and inserting after would still

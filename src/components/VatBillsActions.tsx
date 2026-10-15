@@ -207,7 +207,8 @@ export function ReimburseBill({
         type="button"
         disabled={!open_.length}
         onClick={() => setOpen(true)}
-        className={`btn ${billId ? "!h-8 !px-3 text-[13px]" : "btn-primary"} ${compact ? "!h-9 text-sm" : ""}`}
+        className={`btn ${billId ? "btn-sm" : open_.length ? "btn-primary" : ""} ${compact ? "btn-sm" : ""}`}
+        title={open_.length ? undefined : "No bill is waiting to be reimbursed"}
       >
         {billId ? "Reimburse" : "Reimburse a bill"}
       </button>

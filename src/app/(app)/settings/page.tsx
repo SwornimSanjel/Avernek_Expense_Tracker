@@ -1,153 +1,176 @@
 import { query } from "@/lib/db";
 import { requireSession } from "@/lib/auth/server";
-import { PageHeader } from "@/components/ui";
-import { npr } from "@/lib/format";
+import { Avatar, PageHeader } from "@/components/ui";
+import { formatNumber } from "@/lib/format";
 import type { Category, TeamMember } from "@/lib/types";
 import { addCategory, updateMyName } from "./actions";
-import TeamToggle from "@/components/TeamToggle";
+import TeamToggle, { PartnerToggle } from "@/components/TeamToggle";
 import AddMemberForm from "@/components/AddMemberForm";
 import SetPasswordForm from "@/components/SetPasswordForm";
+import ThemeToggle from "@/components/ThemeToggle";
 import { isAppOwner } from "@/lib/authz";
-import Icon from "@/components/Icons";
+import Icon, { type IconName } from "@/components/Icons";
+import { displayName, personTone } from "@/lib/people";
 
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
   const session = await requireSession();
-  const [cats, team] = await Promise.all([
+  const [categories, users, usage] = await Promise.all([
     query<Category>(`select * from public.categories order by name`),
     // Never select password_hash: these rows are handed to client components.
     query<TeamMember>(
-      `select id, name, email, is_core_member, is_admin,
+      `select id, name, email, is_core_member, is_admin, is_partner,
               (password_hash is not null) as can_sign_in
          from public.users
-        order by name`
+        order by is_partner desc, name`
+    ),
+    query<{ category_id: string; count: string; total: string }>(
+      `select category_id, count(*) as count, coalesce(sum(amount_npr), 0) as total
+         from public.expenses where category_id is not null group by category_id`
     ),
   ]);
-  const categories = cats as Category[];
-  const users = team as TeamMember[];
   const me = users.find((u) => u.id === session.sub);
   const canManage = isAppOwner(session);
+  const usageById = new Map(usage.map((row) => [row.category_id, row]));
+  const partners = users.filter((u) => u.is_partner);
+  const others = users.filter((u) => !u.is_partner);
 
   return (
     <>
-      <PageHeader eyebrow="Workspace control" title="Settings" subtitle="Manage your profile, access, participants, and financial categories." />
+      <PageHeader title="Settings" subtitle="Your profile, the team, sign-in access and spending categories." />
 
-      <div className="grid lg:grid-cols-2 gap-4">
-        {/* Your profile */}
-        <div className="card p-5 md:p-6">
-          <div className="flex items-center gap-3 mb-4"><div className="stat-icon" style={{ color: "#b8a0fb" }}><Icon name="user" size={16} /></div><div><h2 className="section-title">Your profile</h2><p className="section-kicker mt-0.5">Identity used across the workspace</p></div></div>
-          <p className="text-xs muted mb-3">
-            Shown everywhere instead of your email.
-          </p>
-          {canManage ? (
-            <form action={updateMyName} className="flex gap-2">
-              <input
-                name="name"
-                defaultValue={me?.name ?? ""}
-                placeholder="e.g. Swornim Sanjel"
-                className="input flex-1"
-              />
-              <button className="btn btn-primary">Save</button>
-            </form>
-          ) : (
-            <div className="input flex items-center">{me?.name ?? "Team member"}</div>
-          )}
-          <p className="text-xs muted mt-2">Signed in as {me?.email}</p>
-        </div>
-
-        {/* Team */}
-        <div className="card p-5 md:p-6">
-          <div className="flex items-center gap-3 mb-4"><div className="stat-icon" style={{ color: "var(--blue)" }}><Icon name="users" size={16} /></div><div><h2 className="section-title">Team</h2><p className="section-kicker mt-0.5">Participants and allocation defaults</p></div></div>
-          <div className="space-y-2">
-            {users.map((u) => (
-              <div key={u.id} className="list-row flex items-center gap-3 p-2 -mx-2 rounded-xl">
-                <div className="avatar !w-9 !h-9">{u.name.split(" ").map((part) => part[0]).slice(0, 2).join("")}</div>
-                <div className="flex-1 min-w-0">
-                  <div className="font-medium truncate">
-                    {u.name}
-                    {u.is_admin && <span className="pill ml-2">Admin</span>}
-                  </div>
-                  <div className="text-xs muted truncate">
-                    {u.can_sign_in ? u.email : `${u.email} · no login`}
-                  </div>
-                </div>
-                {canManage ? (
-                  <TeamToggle id={u.id} isCore={u.is_core_member} />
-                ) : (
-                  <span className="pill">
-                    {u.is_core_member ? "Default split" : "Manual only"}
-                  </span>
-                )}
+      <div className="grid lg:grid-cols-2 xl:grid-cols-3 gap-4 items-stretch">
+        {/* profile */}
+        <div className="card overflow-hidden rise flex flex-col">
+          <Head icon="user" title="Your profile" text="How you appear across the workspace" />
+          <div className="p-5 space-y-5">
+            <div className="flex items-center gap-4">
+              <Avatar name={me?.name ?? "Admin"} size={52} round />
+              <div className="min-w-0">
+                <div className="text-[17px] font-semibold">{displayName(me?.name)}</div>
+                <div className="text-[13.5px] muted truncate">{me?.email}</div>
+                <span className="pill accent mt-1.5">{me?.is_admin ? "Administrator" : "View only"}</span>
               </div>
-            ))}
-            {users.length === 0 && (
-              <p className="text-sm muted">No participants yet.</p>
-            )}
+            </div>
+            {canManage ? (
+              <form action={updateMyName} className="space-y-2">
+                <label className="field-label" htmlFor="profile-name">Display name</label>
+                <div className="flex gap-2">
+                  <input id="profile-name" name="name" defaultValue={me?.name ?? ""} placeholder="e.g. Swornim Sanjel" className="input flex-1" />
+                  <button className="btn btn-primary">Save</button>
+                </div>
+              </form>
+            ) : null}
+            <div className="card-soft p-4 flex items-center justify-between gap-3">
+              <div>
+                <div className="text-[14px] font-semibold">Appearance</div>
+                <div className="text-[13px] muted">Dark or light. Collapse the sidebar with ⌘B.</div>
+              </div>
+              <ThemeToggle />
+            </div>
           </div>
-          <p className="text-xs muted mt-3">
-            “Default split” is used only for older expenses without exact shares;
-            named splits always override it.
-          </p>
         </div>
 
         {canManage && (
           <>
-            <div className="card p-5 md:p-6">
-              <div className="flex items-center gap-3 mb-4"><div className="stat-icon" style={{ color: "var(--green)" }}><Icon name="plus" size={16} /></div><div><h2 className="section-title">Add member</h2><p className="section-kicker mt-0.5">Create a participant or login account</p></div></div>
-              <AddMemberForm />
+          <div className="card overflow-hidden rise rise-2">
+            <Head icon="plus" title="Add a person" text="A partner, or a sign-in account" tone="var(--green)" />
+            <div className="p-5"><AddMemberForm /></div>
+          </div>
+          <div className="card overflow-hidden rise rise-2">
+            <Head icon="shield" title="Sign-in access" text="Set or replace someone's password" tone="var(--amber)" />
+            <div className="p-5">
+              <SetPasswordForm members={users.map((u) => ({ id: u.id, name: u.name, email: u.email, can_sign_in: u.can_sign_in }))} />
             </div>
-
-            <div className="card p-5 md:p-6">
-              <div className="flex items-center gap-3 mb-4"><div className="stat-icon" style={{ color: "var(--amber)" }}><Icon name="settings" size={16} /></div><div><h2 className="section-title">Login access</h2><p className="section-kicker mt-0.5">Set or replace a member password</p></div></div>
-              <SetPasswordForm
-                members={users.map((u) => ({
-                  id: u.id,
-                  name: u.name,
-                  email: u.email,
-                  can_sign_in: u.can_sign_in,
-                }))}
-              />
-            </div>
+          </div>
           </>
         )}
+      </div>
 
-        {/* Categories */}
-        <div className="card p-5 md:p-6 lg:col-span-2">
-          <div className="flex items-center gap-3 mb-4"><div className="stat-icon" style={{ color: "#b8a0fb" }}><Icon name="wallet" size={16} /></div><div><h2 className="section-title">Categories &amp; budgets</h2><p className="section-kicker mt-0.5">Structure reporting and optional monthly limits</p></div></div>
-          <div className="grid sm:grid-cols-2 gap-2">
-            {categories.map((c) => (
-              <div key={c.id} className="card-soft flex items-center gap-3 px-3 py-2.5">
-                <span className="flex-1">{c.name}</span>
-                <span className="tnum text-sm muted">
-                  {c.monthly_budget != null
-                    ? `${npr(c.monthly_budget)}/mo`
-                    : "no budget"}
-                </span>
-              </div>
-            ))}
+      <div className="mt-4">
+        <div className="card overflow-hidden rise rise-1">
+          <Head icon="users" title="Team" text={`${partners.length} partners · ${others.length} sign-in account${others.length === 1 ? "" : "s"}`} />
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Person</th>
+                  <th>Sign-in</th>
+                  <th title="Partners appear in investment totals, rankings and payer / split lists">Partner</th>
+                  <th title="Only used for old expenses saved without an exact split">Old default split</th>
+                </tr>
+              </thead>
+              <tbody>
+                {users.map((u, index) => (
+                  <tr key={u.id} className={u.is_partner ? "" : "opacity-80"}>
+                    <td>
+                      <div className="flex items-center gap-3">
+                        <Avatar name={u.name} size={34} round color={u.is_partner ? personTone(index) : "var(--muted)"} />
+                        <div className="min-w-0">
+                          <div className="font-medium truncate">{displayName(u.name)}</div>
+                          <div className="text-[12.5px] muted truncate max-w-[240px]">{u.email}</div>
+                        </div>
+                      </div>
+                    </td>
+                    <td>
+                      {u.is_admin ? <span className="pill accent">Admin</span> : u.can_sign_in ? <span className="pill info">Can sign in</span> : <span className="pill">No login</span>}
+                    </td>
+                    <td>{canManage ? <PartnerToggle id={u.id} isPartner={u.is_partner} /> : <span className="pill">{u.is_partner ? "Partner" : "—"}</span>}</td>
+                    <td>{canManage ? <TeamToggle id={u.id} isCore={u.is_core_member} /> : <span className="pill">{u.is_core_member ? "Included" : "—"}</span>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-          {canManage && (
-            <form action={addCategory} className="flex gap-2 mt-4">
-              <input
-                name="name"
-                required
-                placeholder="New category"
-                className="input flex-1"
-              />
-              <input
-                name="monthly_budget"
-                type="number"
-                min="0"
-                step="0.01"
-                placeholder="Budget"
-                className="input tnum !w-28"
-              />
-              <button className="btn btn-primary">Add</button>
-            </form>
-          )}
+          <p className="px-5 py-3 text-[13px] muted border-t">
+            Only partners are shown in investment totals, rankings and payer lists. Turning a partner off hides them — every amount they paid or were split into stays exactly as it is.
+          </p>
         </div>
       </div>
+
+      {/* categories */}
+      <div className="card overflow-hidden mt-4 rise rise-3">
+        <Head icon="tag" title="Categories & budgets" text={`${categories.length} categories · used to group spending everywhere`} />
+        <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-px bg-[var(--line)]">
+          {categories.map((c) => {
+            const used = usageById.get(c.id);
+            return (
+              <div key={c.id} className="flex items-center gap-3 px-5 py-3.5 bg-[var(--surface)]">
+                <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: c.color && c.color !== "#1e3a5f" ? c.color : "var(--accent)" }} />
+                <div className="min-w-0 flex-1">
+                  <div className="text-[14px] font-medium truncate">{c.name}</div>
+                  <div className="text-[12.5px] muted">{used ? `${used.count} expense${used.count === "1" ? "" : "s"} · NPR ${formatNumber(Number(used.total))}` : "Not used yet"}</div>
+                </div>
+                <span className="text-[13px] muted tnum whitespace-nowrap">
+                  {c.monthly_budget != null ? `${formatNumber(Number(c.monthly_budget))}/mo` : "No budget"}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+        {canManage && (
+          <form action={addCategory} className="flex flex-wrap gap-2 p-4 border-t bg-[var(--surface-2)]">
+            <input name="name" required placeholder="New category name" className="input flex-1 min-w-[200px]" />
+            <input name="monthly_budget" type="number" min="0" step="0.01" placeholder="Monthly budget (optional)" className="input tnum !w-[220px]" />
+            <button className="btn btn-primary"><Icon name="plus" size={15} /> Add category</button>
+          </form>
+        )}
+      </div>
     </>
+  );
+}
+
+function Head({ icon, title, text, tone = "var(--accent-ink)" }: { icon: IconName; title: string; text: string; tone?: string }) {
+  return (
+    <div className="flex items-center gap-3 px-5 py-4 border-b">
+      <div className="row-icon !w-9 !h-9" style={{ "--tone": tone, "--tone-soft": `color-mix(in srgb, ${tone} 14%, transparent)` } as React.CSSProperties}>
+        <Icon name={icon} size={17} />
+      </div>
+      <div>
+        <h2 className="text-[15.5px] font-semibold">{title}</h2>
+        <p className="text-[13px] muted">{text}</p>
+      </div>
+    </div>
   );
 }

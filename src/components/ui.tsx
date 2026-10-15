@@ -1,5 +1,6 @@
 import type { ConversionStatus, FxSource } from "@/lib/types";
 import { formatNumber, fxSourceLabel } from "@/lib/format";
+import Link from "next/link";
 import Icon, { type IconName } from "@/components/Icons";
 
 /**
@@ -28,17 +29,25 @@ export function PageHeader({
   subtitle,
   action,
   meta,
+  back,
 }: {
   title: React.ReactNode;
   subtitle?: React.ReactNode;
   action?: React.ReactNode;
   meta?: React.ReactNode;
+  /** A "← Back" link above the title for detail pages. */
+  back?: { href: string; label: string };
   /** Kept for older call sites; no longer shown. */
   eyebrow?: React.ReactNode;
 }) {
   return (
     <div className="page-header rise">
       <div className="page-header-main">
+        {back && (
+          <Link href={back.href} className="link-more mb-2">
+            <Icon name="arrowLeft" size={14} /> {back.label}
+          </Link>
+        )}
         <h1 className="page-title">{title}</h1>
         {subtitle && <p className="page-subtitle">{subtitle}</p>}
         {meta && <div className="page-meta">{meta}</div>}

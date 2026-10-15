@@ -5,7 +5,8 @@ import { Avatar, Callout, Delta, Kpi, Money, PageHeader, SectionHeader } from "@
 import Icon from "@/components/Icons";
 import StatementView from "@/components/StatementView";
 import LiveFxChip from "@/components/LiveFxChip";
-import { CashflowChart, CategoryChart, type CashflowPoint, type CategorySlice } from "@/components/DashboardCharts";
+import { CashflowChart, CategoryChart } from "@/components/LazyCharts";
+import type { CashflowPoint, CategorySlice } from "@/components/DashboardCharts";
 import { GlowTracker } from "@/components/controls";
 import { compactNumber, formatNumber, percentChange } from "@/lib/format";
 import type { AppUser, Category, Expense, IncomeAgreement, Recurring } from "@/lib/types";
@@ -49,14 +50,17 @@ export default async function Dashboard() {
       expense_shares: shareRows.filter((share) => share.expense_id === expense.id) as unknown as Expense["expense_shares"],
     })),
   ];
+  // Lifetime totals count every expense; month views and "latest" only count
+  // what is dated up to today, so a mistyped year never inflates a month.
   const future = allExpenses.filter((expense) => expense.expense_date > today);
-  const spentRows = allExpenses.filter((expense) => expense.expense_date <= today && expense.amount_npr != null);
+  const lifetimeRows = allExpenses.filter((expense) => expense.amount_npr != null);
+  const spentRows = lifetimeRows.filter((expense) => expense.expense_date <= today);
   const nprOf = (expense: Expense) => Number(expense.amount_npr ?? 0);
   const sumOf = (rows: Expense[]) => rows.reduce((total, row) => total + nprOf(row), 0);
   const isCompany = (expense: Expense) => expense.funding_source === "company_funds";
 
-  const totalSpent = sumOf(spentRows);
-  const totalCompany = sumOf(spentRows.filter(isCompany));
+  const totalSpent = sumOf(lifetimeRows);
+  const totalCompany = sumOf(lifetimeRows.filter(isCompany));
   const monthRows = spentRows.filter((expense) => expense.expense_date.startsWith(thisMonth));
   const monthSpent = sumOf(monthRows);
   const monthCompany = sumOf(monthRows.filter(isCompany));
@@ -83,12 +87,12 @@ export default async function Dashboard() {
   const vat = ledger.balances.find((item) => item.account.kind === "company_bank");
   const nonVat = ledger.balances.find((item) => item.account.kind === "personal_custody");
   const freeToUse = ledger.balances.reduce((total, item) => total + item.free, 0);
-  const founderTotal = sumOf(founderExpenses.filter((expense) => expense.expense_date <= today));
+  const founderTotal = sumOf(founderExpenses);
 
   // ---- partners
   const users = team;
   const partners = partnersOf(users);
-  const spending = computeIndividualSpending(users, allExpenses.filter((expense) => !isCompany(expense) && expense.expense_date <= today));
+  const spending = computeIndividualSpending(users, allExpenses.filter((expense) => !isCompany(expense)));
   const partnerRows = spending.filter((row) => partners.some((partner) => partner.id === row.member.id));
   const partnerTotal = partnerRows.reduce((total, row) => total + row.assigned, 0);
   const attributedTotal = spending.reduce((total, row) => total + row.assigned, 0);
@@ -107,7 +111,7 @@ export default async function Dashboard() {
   });
   const slicesFor = (from: string) => {
     const map = new Map<string, number>();
-    for (const expense of spentRows) {
+    for (const expense of from === "0000-01-01" ? lifetimeRows : spentRows) {
       if (expense.expense_date < from) continue;
       const name = expense.category_id ? categoryName.get(expense.category_id) ?? "Uncategorised" : "Uncategorised";
       map.set(name, (map.get(name) ?? 0) + nprOf(expense));
@@ -219,7 +223,7 @@ export default async function Dashboard() {
             .slice(0, 3)
             .map((expense) => `${shortDate(expense.expense_date)} · NPR ${formatNumber(nprOf(expense))}`)
             .join("  ·  ")}
-          {" "}— left out of every total until that day. They were probably meant for this year.
+          {" "}— counted in lifetime totals, but left out of every month until the date is fixed. They were probably meant for this year.
         </Callout>
       )}
 

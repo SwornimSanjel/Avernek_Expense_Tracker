@@ -2,8 +2,7 @@
 
 import { useActionState, useEffect, useState } from "react";
 import { signIn, type LoginState } from "./actions";
-import { LogoWord } from "@/components/Logo";
-import Icon from "@/components/Icons";
+import { LogoMark, LogoWord } from "@/components/Logo";
 
 const initialState: LoginState = { error: null };
 
@@ -21,12 +20,12 @@ export default function LoginPage() {
 
   return (
     <main className="min-h-screen grid lg:grid-cols-2">
-      <section className="hidden lg:flex relative overflow-hidden flex-col justify-between p-12" style={{ borderRight: "1px solid var(--line)", background: "linear-gradient(145deg, rgb(139 92 246 / .12), transparent 54%)" }}>
+      <section className="hidden lg:flex relative overflow-hidden flex-col justify-between p-12 border-r dot-pattern" style={{ background: "radial-gradient(ellipse at 20% 0%, rgb(139 92 246 / .16), transparent 60%)" }}>
         <LogoWord />
         <div className="max-w-lg">
-          <div className="eyebrow"><Icon name="sparkles" size={12} /> Private finance workspace</div>
-          <h1 className="text-5xl font-bold tracking-[-.05em] leading-[1.05]">Every rupee.<br />Every agreement.<br /><span style={{ color: "#9a6bff" }}>One clear view.</span></h1>
-          <p className="muted mt-5 max-w-md leading-relaxed">Avernek’s internal workspace for expenses, client revenue, subscriptions, and team contributions.</p>
+          <LogoMark size={64} />
+          <h1 className="mt-8 text-[44px] font-semibold tracking-[-.035em] leading-[1.08]">Every rupee.<br />Every client.<br /><span style={{ color: "#a274ff" }}>One clear view.</span></h1>
+          <p className="muted mt-5 max-w-md text-[15px] leading-relaxed">Avernek&apos;s finance workspace for expenses, client income, company accounts, VAT and partner investment.</p>
         </div>
         <div className="text-[13px] muted">Avernek Technologies · Internal use only</div>
       </section>
@@ -37,8 +36,7 @@ export default function LoginPage() {
           <LogoWord />
         </div>
         <div className="mb-7">
-          <div className="eyebrow">Secure access</div>
-          <h2 className="text-2xl font-bold tracking-tight">Welcome back</h2>
+          <h2 className="text-[26px] font-semibold tracking-tight">Welcome back</h2>
           <p className="muted text-sm mt-1">Sign in to the Avernek finance workspace.</p>
         </div>
 

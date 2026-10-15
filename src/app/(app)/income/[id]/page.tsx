@@ -133,14 +133,7 @@ export default async function ClientBillingPage({
   return (
     <div className="income-workspace">
       <PageHeader
-        eyebrow={
-          <>
-            <Link href="/income" className="hover:opacity-80">
-              Income
-            </Link>
-            {" · client detail"}
-          </>
-        }
+        back={{ href: "/income", label: "Income" }}
         title={agreement.client_name}
         subtitle={agreement.agreement_name ?? "Every date, balance and payment for this client."}
         action={
