@@ -1,5 +1,6 @@
 "use client";
 
+import Icon from "@/components/Icons";
 import type { ConfirmRequest } from "@/lib/ai/types";
 
 /**
@@ -28,15 +29,15 @@ export default function AssistantConfirm({
         ))}
       </dl>
       {confirm.warnings?.length ? (
-        <div className="alert alert-warn mt-3" style={{ flexDirection: "column", gap: 4 }}>
+        <div className="alert alert-warn assistant-warnings">
           {confirm.warnings.map((warning, index) => (
             <span key={index}>{warning}</span>
           ))}
         </div>
       ) : null}
-      <div className="assistant-confirm-actions mt-3">
+      <div className="assistant-confirm-actions">
         <button type="button" className="btn btn-primary" disabled={disabled} onClick={() => onDecide("confirm")}>
-          ✓ {confirm.confirmLabel}
+          <Icon name="check" size={18} strokeWidth={2.2} /> {confirm.confirmLabel}
         </button>
         <div className="assistant-actions">
           <button type="button" className="btn" disabled={disabled} onClick={() => onDecide("edit")}>
@@ -47,7 +48,7 @@ export default function AssistantConfirm({
           </button>
         </div>
       </div>
-      <div className="assistant-note">Is this right? Nothing is saved until you press {confirm.confirmLabel}.</div>
+      <div className="assistant-note">Nothing is saved until you press {confirm.confirmLabel}.</div>
     </section>
   );
 }

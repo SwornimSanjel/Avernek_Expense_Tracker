@@ -22,15 +22,23 @@ const SUGGESTIONS: { icon: IconName; text: string }[] = [
   { icon: "users", text: "Who still owes us money?" },
   { icon: "plus", text: "Add an expense" },
   { icon: "income", text: "Income this month with VAT and TDS" },
-  { icon: "calendar", text: "What is today's date?" },
+  { icon: "bank", text: "What's in our accounts right now?" },
 ];
 
-const RESOLVED_LABEL: Record<Resolution, string> = {
-  sent: "✓ Details sent",
-  confirmed: "✓ You confirmed",
-  cancelled: "✕ Cancelled",
-  editing: "✎ Changing it below",
+const RESOLVED: Record<Resolution, { icon: IconName; text: string }> = {
+  sent: { icon: "check", text: "Details sent" },
+  confirmed: { icon: "check", text: "You confirmed" },
+  cancelled: { icon: "close", text: "Cancelled" },
+  editing: { icon: "edit", text: "Changing it below" },
 };
+
+/** The composer grows with what is typed, up to about six lines. */
+function fitHeight(element: HTMLTextAreaElement | null) {
+  if (!element) return;
+  element.style.height = "auto";
+  element.style.height = `${Math.min(element.scrollHeight, 168)}px`;
+  element.style.overflowY = element.scrollHeight > 168 ? "auto" : "hidden";
+}
 
 const newId = () => Math.random().toString(36).slice(2, 10);
 
@@ -74,8 +82,14 @@ export default function AssistantLauncher({ firstName }: { firstName: string }) 
   });
 
   useEffect(() => {
-    bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight, behavior: "smooth" });
-  }, [messages.length, busy, heard, voice.state.phase, open]);
+    const body = bodyRef.current;
+    if (!body) return;
+    // A new answer opens at its first line, so a long table is read from the
+    // top; anything else (a question, "Thinking…") keeps the view at the end.
+    const answer = !busy && messages.at(-1)?.role === "assistant" ? (body.lastElementChild as HTMLElement | null) : null;
+    body.scrollTo({ top: answer ? answer.offsetTop - 16 : body.scrollHeight, behavior: "smooth" });
+  }, [messages, busy, heard, voice.state.phase, open]);
+  useEffect(() => fitHeight(inputRef.current), [draft, open]);
   useEffect(() => {
     if (!open) return;
     inputRef.current?.focus();
@@ -162,8 +176,8 @@ export default function AssistantLauncher({ firstName }: { firstName: string }) 
   if (!open) {
     return (
       <button type="button" className="assistant-launcher" onClick={() => setOpen(true)} aria-label="Open the finance assistant">
-        <Icon name="sparkles" />
-        <span>Ask</span>
+        <Icon name="sparkles" size={19} />
+        <span>Ask AI</span>
       </button>
     );
   }
@@ -175,40 +189,62 @@ export default function AssistantLauncher({ firstName }: { firstName: string }) 
   return (
     <div className="assistant-panel" role="dialog" aria-label="Finance assistant">
       <div className="assistant-head">
-        <Icon name="sparkles" />
+        <span className="assistant-avatar" aria-hidden="true">
+          <Icon name="sparkles" size={19} />
+        </span>
         <div className="assistant-head-title">
-          Ask me anything
-          <div className="assistant-head-sub">I look things up in your books, and I always ask before saving.</div>
+          <strong>Avernek AI</strong>
+          <div className="assistant-head-sub">
+            <span>Reads your books · asks before saving</span>
+          </div>
         </div>
         {messages.length > 0 && (
-          <button type="button" className="btn !h-9 !px-3 text-[12px]" onClick={newChat} disabled={busy}>
-            <Icon name="plus" size={14} /> New chat
+          <button type="button" className="icon-btn" onClick={newChat} disabled={busy} aria-label="New chat" title="New chat">
+            <Icon name="plus" />
           </button>
         )}
-        <button type="button" className="icon-btn" onClick={() => setOpen(false)} aria-label="Close">
+        <button type="button" className="icon-btn" onClick={() => setOpen(false)} aria-label="Close" title="Close (Esc)">
           <Icon name="close" />
         </button>
       </div>
 
       <div className="assistant-body" ref={bodyRef} aria-live="polite">
         {messages.length === 0 && (
-          <div className="assistant-reply">
-            <div className="assistant-hello">Hi {firstName}! What would you like to know?</div>
-            <div className="assistant-text">Tap a question, type one, or tap the microphone and speak.</div>
-            <div className="assistant-suggestions">
-              {SUGGESTIONS.map((suggestion) => (
-                <button key={suggestion.text} type="button" className="assistant-suggestion" onClick={() => send(suggestion.text)}>
-                  <Icon name={suggestion.icon} size={18} />
-                  <span>{suggestion.text}</span>
-                </button>
-              ))}
+          <div className="assistant-welcome">
+            <div>
+              <span className="assistant-orb" aria-hidden="true">
+                <Icon name="sparkles" size={26} />
+              </span>
+              <h2 className="assistant-hello">Hi {firstName}, how can I help?</h2>
+              <p className="assistant-hello-sub">Ask about spending, income, clients or VAT — type it, or tap the mic and speak.</p>
+            </div>
+            <div>
+              <div className="assistant-suggest-label">Try asking</div>
+              <div className="assistant-suggestions">
+                {SUGGESTIONS.map((suggestion) => (
+                  <button key={suggestion.text} type="button" className="assistant-suggestion" onClick={() => send(suggestion.text)}>
+                    <span className="assistant-suggestion-icon">
+                      <Icon name={suggestion.icon} size={18} />
+                    </span>
+                    <span className="assistant-suggestion-text">{suggestion.text}</span>
+                    <Icon name="arrow" size={16} className="assistant-suggestion-arrow" />
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         )}
 
         {messages.map((message) => {
           if (message.role === "user") return <div key={message.id} className="assistant-user">{message.text}</div>;
-          if (message.role === "error") return <div key={message.id} className="alert alert-error" role="alert">{message.text}</div>;
+          if (message.role === "error") {
+            return (
+              <div key={message.id} className="alert alert-error assistant-error" role="alert">
+                <Icon name="alert" size={18} />
+                <span>{message.text}</span>
+              </div>
+            );
+          }
           const { reply, resolved } = message;
           return (
             <div key={message.id} className="assistant-reply">
@@ -216,19 +252,25 @@ export default function AssistantLauncher({ firstName }: { firstName: string }) 
               <AssistantCards cards={reply.cards} />
               {reply.form &&
                 (resolved ? (
-                  <div className="assistant-resolved-line">{RESOLVED_LABEL[resolved]}</div>
+                  <div className="assistant-resolved-line">
+                    <Icon name={RESOLVED[resolved].icon} size={15} /> {RESOLVED[resolved].text}
+                  </div>
                 ) : (
                   <AssistantForm form={reply.form} disabled={busy} onSubmit={(values) => submitForm(message.id, reply.form!.tool, values)} />
                 ))}
               {reply.confirm &&
                 (resolved ? (
                   <div className="assistant-resolved-line">
-                    {RESOLVED_LABEL[resolved]} · {reply.confirm.title.replace(/^Confirm /, "")}
+                    <Icon name={RESOLVED[resolved].icon} size={15} /> {RESOLVED[resolved].text} · {reply.confirm.title.replace(/^Confirm /, "")}
                   </div>
                 ) : (
                   <AssistantConfirm confirm={reply.confirm} disabled={busy} onDecide={(decision) => decide(message.id, reply.confirm!, decision)} />
                 ))}
-              {reply.steps?.length ? <div className="assistant-steps">From: {reply.steps.join(" · ")}</div> : null}
+              {reply.steps?.length ? (
+                <div className="assistant-steps">
+                  <Icon name="layers" size={14} /> From {reply.steps.join(" · ")}
+                </div>
+              ) : null}
             </div>
           );
         })}
@@ -298,11 +340,10 @@ export default function AssistantLauncher({ firstName }: { firstName: string }) 
           >
             <textarea
               ref={inputRef}
-              className="input"
               rows={1}
               value={draft}
               maxLength={LIMITS.messageChars}
-              placeholder={voice.supported ? "Type here, or tap the mic and speak" : "Type your question here"}
+              placeholder="Ask anything…"
               onChange={(event) => setDraft(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === "Enter" && !event.shiftKey) {
@@ -315,11 +356,11 @@ export default function AssistantLauncher({ firstName }: { firstName: string }) 
             />
             {voice.supported && (
               <button type="button" className="assistant-mic" onClick={() => void voice.start()} disabled={busy} aria-label="Speak" title="Tap and speak">
-                <Icon name="mic" size={20} />
+                <Icon name="mic" size={21} />
               </button>
             )}
-            <button type="submit" className="assistant-send" disabled={busy || !draft.trim()} aria-label="Send">
-              <Icon name="send" size={20} />
+            <button type="submit" className="assistant-send" disabled={busy || !draft.trim()} aria-label="Send" title="Send (Enter)">
+              <Icon name="send" size={19} />
             </button>
           </form>
         )}

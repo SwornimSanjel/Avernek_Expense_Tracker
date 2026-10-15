@@ -31,6 +31,43 @@ export type MarketRate = {
 const UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";
 
+const isRate = (value: number) => Number.isFinite(value) && value >= 50 && value <= 500;
+
+/**
+ * Reads USD → NPR out of a Google Finance quote page.
+ *
+ * The page carries two different numbers. The headline card (e.g. 151.7957)
+ * comes from one feed; the 1-day chart series comes from the feed Google
+ * Search shows for "$ rate" (e.g. 151.94). The chart's *latest* point is used
+ * so the app matches a Google search; the headline is only the fallback.
+ */
+export function parseGoogleQuote(html: string): Pick<MarketRate, "rate" | "change" | "changePct"> | null {
+  // The 1-day series: "NPR",[[[1,[window]],[[[date,[]],[price, change, changeFraction, ...]], ...]]],
+  // null,0,previousClose,"USD / NPR",60,...  — one point per update, oldest first.
+  const start = html.indexOf('"NPR",[[[1,');
+  const end = start < 0 ? -1 : html.indexOf('"USD / NPR",60,', start);
+  if (start >= 0 && end > start) {
+    const points = [...html.slice(start, end).matchAll(/\[\]\],\[(-?\d+(?:\.\d+)?),(-?[\d.]+(?:E-?\d+)?),(-?[\d.]+(?:E-?\d+)?),/g)];
+    const latest = points.at(-1);
+    const rate = latest ? Number(latest[1]) : NaN;
+    if (latest && isRate(rate)) {
+      const change = Number(latest[2]);
+      const fraction = Number(latest[3]);
+      return {
+        rate,
+        change: Number.isFinite(change) ? change : null,
+        changePct: Number.isFinite(fraction) ? fraction * 100 : null,
+      };
+    }
+  }
+
+  // Fallback: the headline card, anchored on its title so a related quote on
+  // the page is never picked up: "...Nepalese Rupee</div>...<span jsname="Pdsbrc"><span>151.7957</span>"
+  const visible = /Nepalese Rupee<\/div>[\s\S]{0,800}?jsname="Pdsbrc"[^>]*>\s*<span>([\d,]+\.\d+)<\/span>/.exec(html);
+  const rate = visible ? Number(visible[1].replace(/,/g, "")) : NaN;
+  return isRate(rate) ? { rate, change: null, changePct: null } : null;
+}
+
 async function fromGoogle(): Promise<Pick<MarketRate, "rate" | "change" | "changePct"> | null> {
   const response = await fetch("https://www.google.com/finance/quote/USD-NPR?hl=en", {
     headers: { "User-Agent": UA, "Accept-Language": "en-US,en;q=0.9" },
@@ -38,24 +75,7 @@ async function fromGoogle(): Promise<Pick<MarketRate, "rate" | "change" | "chang
     signal: AbortSignal.timeout(4500),
   });
   if (!response.ok) return null;
-  const html = await response.text();
-
-  // The quote card, anchored on its title so a related quote on the page is
-  // never picked up: "...Nepalese Rupee</div>...<span jsname="Pdsbrc"><span>152.2298</span>"
-  const visible = /Nepalese Rupee<\/div>[\s\S]{0,800}?jsname="Pdsbrc"[^>]*>\s*<span>([\d,]+\.\d+)<\/span>/.exec(html);
-  // The structured quote: "NPR",[[[1,[date],[date]],[[[date],[price, change, changeFraction, ...
-  const structured = /"NPR",\[\[\[1,[\s\S]{0,120}?\]\],\[\[\[\d{4},[\s\S]{0,60}?\],\[(-?[\d.]+),(-?[\d.E-]+),(-?[\d.E-]+)/.exec(html);
-
-  const rate = visible ? Number(visible[1].replace(/,/g, "")) : structured ? Number(structured[1]) : NaN;
-  if (!Number.isFinite(rate) || rate < 50 || rate > 500) return null;
-
-  const change = structured ? Number(structured[2]) : NaN;
-  const fraction = structured ? Number(structured[3]) : NaN;
-  return {
-    rate,
-    change: Number.isFinite(change) ? change : null,
-    changePct: Number.isFinite(fraction) ? fraction * 100 : null,
-  };
+  return parseGoogleQuote(await response.text());
 }
 
 async function fromExchangeApi(): Promise<Pick<MarketRate, "rate" | "change" | "changePct"> | null> {
@@ -96,7 +116,7 @@ async function readLiveRate(): Promise<MarketRate | null> {
 }
 
 /** Cached for 5 minutes; refreshed in the background after that. */
-export const getLiveUsdNpr = unstable_cache(readLiveRate, ["live-usd-npr-v1"], {
+export const getLiveUsdNpr = unstable_cache(readLiveRate, ["live-usd-npr-v2"], {
   revalidate: 300,
   tags: ["live-fx"],
 });

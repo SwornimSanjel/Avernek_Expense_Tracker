@@ -1,5 +1,6 @@
 "use client";
 
+import Icon from "@/components/Icons";
 import type { Card, Tone } from "@/lib/ai/types";
 
 /**
@@ -26,15 +27,18 @@ function AssistantCard({ card }: { card: Card }) {
     if (card.tone === "success") {
       return (
         <div className="assistant-success" role="status">
-          <span className="assistant-success-mark" aria-hidden="true">✓</span>
-          {card.text}
+          <span className="assistant-success-mark" aria-hidden="true">
+            <Icon name="check" size={15} strokeWidth={2.4} />
+          </span>
+          <span>{card.text}</span>
         </div>
       );
     }
     const tone = card.tone === "error" ? "alert-error" : card.tone === "warn" ? "alert-warn" : "";
     return (
-      <div className={`alert ${tone}`} role={card.tone === "error" ? "alert" : undefined}>
-        {card.text}
+      <div className={`alert assistant-error ${tone}`} role={card.tone === "error" ? "alert" : undefined}>
+        <Icon name={card.tone === "error" || card.tone === "warn" ? "alert" : "info"} size={18} />
+        <span>{card.text}</span>
       </div>
     );
   }

@@ -36,9 +36,9 @@ export default function AssistantForm({
         onSubmit({ ...form.values, ...values });
       }}
     >
-      <div>
-        <div className="assistant-card-title" style={{ marginBottom: 2 }}>{form.title}</div>
-        {form.message && <div className="assistant-note" style={{ marginTop: 0 }}>{form.message}</div>}
+      <div className="assistant-form-head">
+        <div className="assistant-card-title">{form.title}</div>
+        {form.message && <div className="assistant-note">{form.message}</div>}
       </div>
       {form.fields.map((field) => (
         <Field key={field.name} field={field} value={values[field.name]} onChange={(value) => set(field.name, value)} />
@@ -80,8 +80,8 @@ function Field({ field, value, onChange }: { field: FieldSpec; value: Value | un
 
   if (field.type === "choice") {
     return (
-      <fieldset style={{ border: 0, padding: 0, margin: 0 }}>
-        <legend style={{ padding: 0 }}>{label}</legend>
+      <fieldset className="assistant-fieldset">
+        <legend>{label}</legend>
         <div className="assistant-options">
           {(field.options ?? []).map((option) => (
             <label key={option.value} className="assistant-option">
@@ -108,8 +108,8 @@ function Field({ field, value, onChange }: { field: FieldSpec; value: Value | un
   if (field.type === "multiselect") {
     const list = Array.isArray(value) ? value : [];
     return (
-      <fieldset style={{ border: 0, padding: 0, margin: 0 }}>
-        <legend style={{ padding: 0 }}>{label}</legend>
+      <fieldset className="assistant-fieldset">
+        <legend>{label}</legend>
         <div className="assistant-options">
           {(field.options ?? []).map((option) => (
             <label key={option.value} className="assistant-option">
@@ -133,7 +133,7 @@ function Field({ field, value, onChange }: { field: FieldSpec; value: Value | un
     <label htmlFor={id} className="block">
       {label}
       {field.type === "select" ? (
-        <select id={id} className="input mt-1" value={text} required={field.required} onChange={(event) => onChange(event.target.value)}>
+        <select id={id} className="input mt-1.5" value={text} required={field.required} onChange={(event) => onChange(event.target.value)}>
           {!field.options?.some((option) => option.value === "") && <option value="">Choose…</option>}
           {(field.options ?? []).map((option) => (
             <option key={option.value} value={option.value}>
@@ -144,8 +144,7 @@ function Field({ field, value, onChange }: { field: FieldSpec; value: Value | un
       ) : field.type === "textarea" ? (
         <textarea
           id={id}
-          className="input mt-1"
-          style={{ height: 90, paddingTop: 10 }}
+          className="input mt-1.5"
           value={text}
           required={field.required}
           placeholder={field.placeholder}
@@ -154,7 +153,7 @@ function Field({ field, value, onChange }: { field: FieldSpec; value: Value | un
       ) : (
         <input
           id={id}
-          className="input mt-1"
+          className="input mt-1.5"
           type={field.type}
           value={text}
           required={field.required}
