@@ -13,7 +13,14 @@ const body = z.object({
     .array(z.object({ role: z.enum(["user", "assistant"]), text: z.string().max(4000) }))
     .max(40)
     .default([]),
-  context: z.object({ client: z.string().max(120).optional() }).default({}),
+  context: z
+    .object({
+      client: z.string().max(120).optional(),
+      lastRecord: z
+        .object({ kind: z.enum(["expense", "payment"]), id: z.string().uuid(), label: z.string().max(200) })
+        .optional(),
+    })
+    .default({}),
 });
 
 /** A chat message: the model picks tools, the server runs them. */

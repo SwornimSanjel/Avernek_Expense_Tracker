@@ -259,7 +259,7 @@ export const createExpense: WriteTool = {
           message: showAll ? undefined : "Fill in what's missing. Nothing is saved until you confirm.",
           values: { ...values, _edit: false },
           fields,
-          submitLabel: "Review",
+          submitLabel: "Next",
         },
       } satisfies ToolAsk;
     }
@@ -343,7 +343,13 @@ export const createExpense: WriteTool = {
     }
     const result = await addExpense(form);
     if (result.error) return { ok: false, error: result.error };
-    return { ok: true, text: `Expense saved: ${money(expense.amount, expense.currency)}.`, recordId: result.id };
+    const label = `${money(expense.amount, expense.currency)} on ${formatDate(expense.expense_date)}${expense.note ? ` (${expense.note})` : ""}`;
+    return {
+      ok: true,
+      text: `Saved: ${label}.`,
+      recordId: result.id,
+      record: result.id ? { kind: "expense", id: result.id, label: `expense ${label}` } : undefined,
+    };
   },
 };
 
@@ -425,8 +431,13 @@ function expenseFields(
 
 // ---------------------------------------------------------------------------
 
+// No id here: the model cannot know one. "That expense" means just_saved; any
+// other is found from the match_* details. Ids come only from the panel's forms.
 const updateSchema = z.object({
-  expense_id: z.string().uuid().optional().describe("Only if known from an earlier choice"),
+  just_saved: z
+    .boolean()
+    .optional()
+    .describe("true when the user means the expense saved a moment ago in this conversation"),
   match_date: isoDate.optional().describe("Date of the expense to change, if said"),
   match_amount: z.number().positive().optional().describe("Current amount of the expense to change, if said"),
   match_text: z.string().max(80).optional().describe("Words identifying it: vendor, category or description"),
@@ -471,6 +482,16 @@ export const updateExpenseTool: WriteTool = {
   schema: updateSchema,
   async run(raw, ctx) {
     const v = clean(raw);
+    if (v.just_saved === true && !v.expense_id) {
+      const last = ctx.conversation?.lastRecord;
+      if (last?.kind !== "expense") {
+        return {
+          status: "error",
+          summary: "I haven't saved an expense in this chat yet. Tell me its date, amount or what it was for.",
+        };
+      }
+      v.expense_id = last.id;
+    }
     const [expenses, shares, r] = await Promise.all([ctx.data.expenses(), ctx.data.expenseShares(), refs(ctx)]);
 
     let expense = typeof v.expense_id === "string" ? expenses.find((e) => e.id === v.expense_id) : undefined;
@@ -595,7 +616,7 @@ export const updateExpenseTool: WriteTool = {
           message: describeExpense(current, r),
           values,
           fields,
-          submitLabel: "Review",
+          submitLabel: "Next",
         },
       };
     }
@@ -685,6 +706,8 @@ export const updateExpenseTool: WriteTool = {
     }
     const result = await updateExpense(form);
     if (result.error) return { ok: false, error: result.error };
-    return { ok: true, text: "Expense updated.", recordId: id };
+    const amount = Number(changes.amount ?? expense.amount);
+    const label = `${money(amount, expense.currency)} on ${formatDate(changes.expense_date ?? expense.expense_date)}`;
+    return { ok: true, text: `Updated: the expense is now ${label}.`, recordId: id, record: { kind: "expense", id, label: `expense ${label}` } };
   },
 };

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { recordIncomePayment, updateIncomePayment } from "@/app/(app)/income/actions";
 import { AGREEMENT_STATUS_LABELS, PAYMENT_METHOD_LABELS, servicesLabel } from "@/lib/income";
+import { one } from "@/lib/db";
 import { toPaisa } from "@/lib/money";
 import { billFromBankTotal, round2, tdsOn, vatOn } from "@/lib/tax";
 import type { IncomeAgreement, IncomePayment, IncomePaymentMethod, MoneyAccount } from "@/lib/types";
@@ -389,7 +390,7 @@ export const recordClientPayment: WriteTool = {
           message: showAll ? undefined : "Fill in what's missing. Nothing is recorded until you confirm.",
           values: { ...values, _edit: false },
           fields: shown,
-          submitLabel: "Review",
+          submitLabel: "Next",
         },
       } satisfies ToolAsk;
     }
@@ -446,7 +447,7 @@ export const recordClientPayment: WriteTool = {
     } satisfies ToolReady;
   },
 
-  async execute(args) {
+  async execute(args, ctx) {
     const payment = args as unknown as NewPayment;
     const form = new FormData();
     form.set("agreement_id", payment.agreement_id);
@@ -463,15 +464,34 @@ export const recordClientPayment: WriteTool = {
     form.set("note", payment.note ?? "");
     const result = await recordIncomePayment(STATE, form);
     if (result.error) return { ok: false, error: result.error };
-    return { ok: true, text: result.ok ?? "Payment recorded." };
+    // The action does not return the new id: it is this person's newest payment
+    // on this agreement, inserted a moment ago.
+    const saved = await one<{ id: string; client_name: string; currency: string }>(
+      `select p.id, a.client_name, a.currency from public.income_payments p
+         join public.income_agreements a on a.id = p.agreement_id
+        where p.agreement_id = $1 and p.recorded_by = $2
+        order by p.created_at desc limit 1`,
+      [payment.agreement_id, ctx.session.sub]
+    );
+    const label = `${money(payment.amount, saved?.currency ?? "NPR")} from ${saved?.client_name ?? "the client"} on ${formatDate(payment.paid_on)}`;
+    return {
+      ok: true,
+      text: `Recorded: ${label} (bill amount, excluding VAT).`,
+      recordId: saved?.id,
+      record: saved ? { kind: "payment", id: saved.id, label: `payment ${label}` } : undefined,
+    };
   },
 };
 
 // ---------------------------------------------------------------------------
 
+// No id here: the model cannot know one. "That payment" means just_saved.
 const updateSchema = z.object({
+  just_saved: z
+    .boolean()
+    .optional()
+    .describe("true when the user means the payment recorded a moment ago in this conversation"),
   client: z.string().max(120).optional(),
-  payment_id: z.string().uuid().optional().describe("Only if known from an earlier choice"),
   match_paid_on: isoDate.optional().describe("Date of the payment to change, if said"),
   match_amount: z.number().positive().optional().describe("Current amount of the payment to change, if said"),
   new_amount: z.number().positive().optional().describe("New bill amount excluding VAT"),
@@ -509,6 +529,13 @@ export const updateClientPayment: WriteTool = {
   schema: updateSchema,
   async run(raw, ctx) {
     const v = clean(raw);
+    if (v.just_saved === true && !v.payment_id) {
+      const last = ctx.conversation?.lastRecord;
+      if (last?.kind !== "payment") {
+        return { status: "error", summary: "I haven't recorded a payment in this chat yet. Tell me the client and the date or amount." };
+      }
+      v.payment_id = last.id;
+    }
     const { agreements, payments, accounts } = await loadPaymentRefs(ctx);
     const agreementById = new Map(agreements.map((a) => [a.id, a]));
 
@@ -617,7 +644,7 @@ export const updateClientPayment: WriteTool = {
           message: describePayment(current, agreement),
           values,
           fields,
-          submitLabel: "Review",
+          submitLabel: "Next",
         },
       };
     }
@@ -679,6 +706,7 @@ export const updateClientPayment: WriteTool = {
     form.set("billing_period_start", payment.billing_period_start ?? "");
     const result = await updateIncomePayment(STATE, form);
     if (result.error) return { ok: false, error: result.error };
-    return { ok: true, text: result.ok ?? "Payment updated.", recordId: id };
+    const label = `${money(Number(changes.amount ?? payment.amount))} on ${formatDate(changes.paid_on ?? payment.paid_on)}`;
+    return { ok: true, text: `Updated: the payment is now ${label}.`, recordId: id, record: { kind: "payment", id, label: `payment ${label}` } };
   },
 };

@@ -23,6 +23,14 @@ export default function AssistantCards({ cards }: { cards: Card[] }) {
 
 function AssistantCard({ card }: { card: Card }) {
   if (card.type === "notice") {
+    if (card.tone === "success") {
+      return (
+        <div className="assistant-success" role="status">
+          <span className="assistant-success-mark" aria-hidden="true">✓</span>
+          {card.text}
+        </div>
+      );
+    }
     const tone = card.tone === "error" ? "alert-error" : card.tone === "warn" ? "alert-warn" : "";
     return (
       <div className={`alert ${tone}`} role={card.tone === "error" ? "alert" : undefined}>

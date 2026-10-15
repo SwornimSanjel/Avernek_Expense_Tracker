@@ -9,6 +9,14 @@ const value = z.union([z.string().max(2000), z.number(), z.boolean(), z.null(), 
 const body = z.object({
   tool: z.string().max(64),
   values: z.record(z.string().max(64), value).refine((values) => Object.keys(values).length <= 60, "Too many fields"),
+  context: z
+    .object({
+      client: z.string().max(120).optional(),
+      lastRecord: z
+        .object({ kind: z.enum(["expense", "payment"]), id: z.string().uuid(), label: z.string().max(200) })
+        .optional(),
+    })
+    .default({}),
 });
 
 /** A submitted form or choice. Needs no model call, so it works even if OpenRouter is down. */

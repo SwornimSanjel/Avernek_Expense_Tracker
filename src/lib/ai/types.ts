@@ -29,7 +29,7 @@ export type Card =
       items: { label: string; value: string; hint?: string }[];
       note?: string;
     }
-  | { type: "notice"; tone: "info" | "warn" | "error"; text: string };
+  | { type: "notice"; tone: "info" | "success" | "warn" | "error"; text: string };
 
 export type FieldOption = { value: string; label: string; hint?: string };
 
@@ -72,16 +72,26 @@ export type ConfirmRequest = {
   values: Record<string, unknown>;
 };
 
-/** What the conversation is about, kept in the browser and sent back. */
+/** A record the assistant saved in this conversation, for "change it to…". */
+export type SavedRecord = { kind: "expense" | "payment"; id: string; label: string };
+
+/**
+ * What the conversation is about. Kept in the panel's memory only (a page
+ * reload starts a fresh chat) and sent back with each message.
+ */
 export type AssistantContext = {
   /** The client the last answer was about, for "how much is remaining?". */
   client?: string;
+  /** The last record saved here. Only an id to look up: permissions and confirmation still apply. */
+  lastRecord?: SavedRecord;
 };
 
 export type ChatTurn = { role: "user" | "assistant"; text: string };
 
 export type AssistantReply = {
   text: string;
+  /** What this answer said, compactly, for the conversation history (defaults to text). */
+  memory?: string;
   cards: Card[];
   form?: FormRequest;
   confirm?: ConfirmRequest;
@@ -94,7 +104,7 @@ export type AssistantReply = {
 
 export const LIMITS = {
   messageChars: 1500,
-  historyTurns: 8,
+  historyTurns: 12,
   historyChars: 1500,
   audioBytes: 5 * 1024 * 1024,
   audioSeconds: 60,

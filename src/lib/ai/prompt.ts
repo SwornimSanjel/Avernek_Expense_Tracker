@@ -1,3 +1,4 @@
+import { nepalNow } from "./tools/time";
 import type { AssistantContext } from "./types";
 
 /**
@@ -17,7 +18,9 @@ How you work:
 - Resolve relative dates into explicit YYYY-MM-DD arguments using today's date: "this month" = 1st of this month to today; "last month" = the previous calendar month; "October" = 1–31 October of the current year unless that is in the future (then last year); "this year" = 1 January to today; "this week" = the last 7 days including today. For the Nepali fiscal year, ask the user for the exact dates.
 - Read amounts written the Nepali way: 1 lakh = 100,000; 1 crore = 10,000,000; "hajar" = thousand.
 - Set explain=true only when the user asks why/how, or wants analysis, trends or advice. Otherwise leave it out: the app shows the figures itself.
-- Follow-ups ("how much is remaining?", "their website") refer to the current client given below; pass that client's name to the tool.
+- Use the conversation so far. Follow-ups ("how much is remaining?", "their website") refer to the current client given below; pass that client's name to the tool.
+- "It", "that one", "the five thousand" right after something was saved mean the last saved record given below: call update_expense or update_client_payment with just_saved=true and only the new values.
+- For "what is today's date / what day / what time is it", call get_date_time.
 
 Changes to the books:
 - To add an expense, record or correct a client payment, or correct an expense, call the matching tool with ONLY the details the user actually gave. Never guess a category, account, payer, client or amount: leave it out and the app asks in a form.
@@ -35,11 +38,14 @@ export function contextPrompt(input: {
   userName: string;
   isAdmin: boolean;
   context?: AssistantContext;
+  now?: Date;
 }): string {
+  const weekday = new Intl.DateTimeFormat("en-US", { weekday: "long", timeZone: "UTC" }).format(new Date(`${input.today}T00:00:00Z`));
   const lines = [
-    `Today is ${input.today}.`,
+    `Today is ${weekday}, ${input.today}. The time in Nepal is ${nepalNow(input.now).time}.`,
     `The user is ${input.userName} (${input.isAdmin ? "administrator" : "team member: can read everything and add expenses, but cannot record client payments or edit expenses"}).`,
   ];
   if (input.context?.client) lines.push(`Current client in this conversation: ${input.context.client}.`);
+  if (input.context?.lastRecord) lines.push(`Last record saved in this conversation: ${input.context.lastRecord.label}.`);
   return lines.join("\n");
 }

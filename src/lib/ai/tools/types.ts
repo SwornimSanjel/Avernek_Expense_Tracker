@@ -1,6 +1,6 @@
 import type { z } from "zod";
 import type { Session } from "@/lib/auth/session";
-import type { AssistantContext, Card, FormRequest } from "../types";
+import type { AssistantContext, Card, FormRequest, SavedRecord } from "../types";
 import type { RequestData } from "../data";
 
 export type ToolContext = {
@@ -8,6 +8,8 @@ export type ToolContext = {
   /** The app's "today" (lib/income todayIso), so answers match the pages. */
   today: string;
   data: RequestData;
+  /** What the conversation is about (client, last saved record), from the panel. Untrusted: ids are looked up, never assumed. */
+  conversation?: AssistantContext;
 };
 
 /** A read tool's answer. `data` is the compact form the model may explain. */
@@ -44,7 +46,9 @@ export type ToolFail = { status: "error" | "denied"; summary: string };
 
 export type ToolOutcome = ToolOk | ToolAsk | ToolReady | ToolFail;
 
-export type ExecuteResult = { ok: true; text: string; recordId?: string } | { ok: false; error: string };
+export type ExecuteResult =
+  | { ok: true; text: string; recordId?: string; record?: SavedRecord }
+  | { ok: false; error: string };
 
 type BaseTool = {
   name: string;

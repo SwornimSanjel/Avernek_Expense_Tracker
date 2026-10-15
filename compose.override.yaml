@@ -1,0 +1,84 @@
+# Local development: `docker compose up --build -d` in this folder.
+#
+# Compose merges this file into compose.yaml automatically when no -f is given.
+# The pipeline, the server and deploy-control.sh always pass -f compose.yaml,
+# and only compose.yaml is installed in /srv/deployments, so production never
+# reads this file.
+#
+# It adds what the pipeline does around compose.yaml: builds the image, applies
+# db/schema.sql and any new migrations (recorded in schema_migrations, exactly
+# as the pipeline records them), and creates or updates the administrator from
+# ADMIN_EMAIL / ADMIN_PASSWORD.
+#
+# .env needs, besides the usual values:  APP_IMAGE=avernek-expense-tracker:local
+
+x-logging: &logging
+  driver: local
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  web:
+    build:
+      context: .
+      target: runner
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  # On the server the pipeline installs this script into bin/; here it is
+  # used straight from the repository.
+  fx-cron:
+    volumes: !override
+      - ./docker/fx-cron.sh:/usr/local/bin/fx-cron.sh:ro
+
+  # Runs once per `up`, then exits. Safe to repeat: schema.sql is idempotent
+  # and each migration is applied only once.
+  migrate:
+    image: postgres:16-alpine
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGHOST: db
+      PGUSER: ${POSTGRES_USER:?POSTGRES_USER must be set in .env}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+      PGDATABASE: ${POSTGRES_DB:?POSTGRES_DB must be set in .env}
+      PGOPTIONS: "-c client_min_messages=warning"
+    volumes:
+      - ./db:/db:ro
+    networks:
+      - backend
+    command:
+      - sh
+      - -ec
+      - |
+        psql -v ON_ERROR_STOP=1 -X -q -f /db/schema.sql
+        psql -v ON_ERROR_STOP=1 -X -q -c "create table if not exists public.schema_migrations (filename text primary key, applied_at timestamptz not null default now());"
+        for file in /db/migrations/*.sql; do
+          name=$$(basename "$$file")
+          if [ -n "$$(psql -X -tA -c "select 1 from public.schema_migrations where filename = '$$name'")" ]; then continue; fi
+          echo "applying $$name"
+          { cat "$$file"; printf "\ninsert into public.schema_migrations (filename) values ('%s');\n" "$$name"; } \
+            | psql -v ON_ERROR_STOP=1 -X -q --single-transaction
+        done
+        echo "database is up to date"
+    logging: *logging
+
+  # The administrator from .env, as the pipeline seeds it after each deploy.
+  admin:
+    image: ${APP_IMAGE:?APP_IMAGE must be set in .env}
+    restart: "no"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+    networks:
+      - backend
+    command: ["node", "scripts/seed-admin.mjs"]
+    logging: *logging

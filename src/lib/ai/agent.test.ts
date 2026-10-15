@@ -63,7 +63,12 @@ const addTool: WriteTool = {
           form: { tool: "add_thing", title: "Details", values: {}, fields: [], submitLabel: "Review" },
         }
   ),
-  execute: vi.fn(async () => ({ ok: true as const, text: "Saved NPR 5.", recordId: "rec-1" })),
+  execute: vi.fn(async () => ({
+    ok: true as const,
+    text: "Saved NPR 5.",
+    recordId: "rec-1",
+    record: { kind: "expense" as const, id: "rec-1", label: "expense NPR 5" },
+  })),
 };
 
 function deps(responses: ChatResult[], drafts = new Map<string, Draft>()) {
@@ -162,7 +167,44 @@ describe("runChat", () => {
     const reply = await runChat(input("add 5"), ctx(false), d);
     expect(addTool.run).not.toHaveBeenCalled();
     expect(reply.confirm).toBeUndefined();
-    expect(reply.text).toMatch(/Only an administrator/);
+    // Shown once, as a card, and remembered for the next turn.
+    expect(reply.cards).toEqual([expect.objectContaining({ type: "notice", text: expect.stringMatching(/Only an administrator/) })]);
+    expect(reply.text).toBe("");
+    expect(reply.memory).toMatch(/Only an administrator/);
+  });
+
+  it("drops arguments a tool does not declare, such as an invented record id", async () => {
+    vi.mocked(addTool.run).mockClear();
+    const { deps: d } = deps([answer([call("add_thing", { amount: 5, expense_id: "1b4e28ba-2fa1-11d2-883f-0016d3cca427" })])]);
+    await runChat(input("add 5"), ctx(), d);
+    expect(vi.mocked(addTool.run).mock.calls[0][0]).toEqual({ amount: 5 });
+  });
+
+  it("gives tools the conversation's context", async () => {
+    vi.mocked(totalTool.run).mockClear();
+    const { deps: d } = deps([answer([call("get_total", {})])]);
+    const context = { client: "Kalika Technical", lastRecord: { kind: "expense" as const, id: "rec-1", label: "expense NPR 5" } };
+    await runChat({ message: "and now?", history: [], context }, ctx(), d);
+    expect(vi.mocked(totalTool.run).mock.calls[0][1].conversation).toEqual(context);
+  });
+
+  it("puts the client and the last saved record in the model's context", async () => {
+    const { deps: d, chat } = deps([answer([], "ok")]);
+    await runChat(
+      { message: "change it", history: [], context: { client: "Kalika Technical", lastRecord: { kind: "expense", id: "rec-1", label: "expense NPR 5,000 on 15 Oct 2026" } } },
+      ctx(),
+      d
+    );
+    const system = chat.mock.calls[0][0].messages[1].content as string;
+    expect(system).toContain("Today is Thursday, 2026-10-15.");
+    expect(system).toContain("Current client in this conversation: Kalika Technical.");
+    expect(system).toContain("Last record saved in this conversation: expense NPR 5,000 on 15 Oct 2026.");
+  });
+
+  it("remembers what it asked for and what awaits confirmation", async () => {
+    const { deps: d } = deps([answer([call("add_thing", {})]), answer([call("add_thing", { amount: 5 })])]);
+    expect((await runChat(input("add a thing"), ctx(), d)).memory).toMatch(/Need the amount/);
+    expect((await runChat(input("add 5"), ctx(), d)).memory).toMatch(/^Waiting for the user to confirm: Confirm \(Amount: NPR 5\)/);
   });
 
   it("turns a change into a draft to confirm, never a write", async () => {
@@ -210,7 +252,13 @@ describe("runConfirm", () => {
     const first = await runConfirm({ draftId, decision: "confirm" }, ctx(), d);
     const second = await runConfirm({ draftId, decision: "confirm" }, ctx(), d);
     expect(addTool.execute).toHaveBeenCalledTimes(1);
-    expect(first).toMatchObject({ text: "Saved NPR 5.", refresh: true });
+    expect(first).toMatchObject({
+      text: "",
+      memory: "Saved NPR 5.",
+      refresh: true,
+      cards: [{ type: "notice", tone: "success", text: "Saved NPR 5." }],
+      context: { lastRecord: { kind: "expense", id: "rec-1", label: "expense NPR 5" } },
+    });
     expect(second.text).toBe("This was already saved.");
     expect(drafts.get(draftId)?.status).toBe("done");
   });
@@ -228,7 +276,7 @@ describe("runConfirm", () => {
     const { deps: d, draftId, drafts } = await prepared();
     const reply = await runConfirm({ draftId, decision: "confirm" }, ctx(false), d);
     expect(addTool.execute).not.toHaveBeenCalled();
-    expect(reply.text).toMatch(/Nothing was saved/);
+    expect(reply.memory).toMatch(/Nothing was saved/);
     expect(drafts.get(draftId)?.status).toBe("failed");
   });
 
@@ -236,7 +284,8 @@ describe("runConfirm", () => {
     vi.mocked(addTool.execute).mockResolvedValueOnce({ ok: false, error: "Only NPR 10 is still owed." });
     const { deps: d, draftId } = await prepared();
     const reply = await runConfirm({ draftId, decision: "confirm" }, ctx(), d);
-    expect(reply.text).toBe("Nothing was saved: Only NPR 10 is still owed.");
+    expect(reply.cards).toEqual([{ type: "notice", tone: "error", text: "Nothing was saved: Only NPR 10 is still owed." }]);
+    expect(reply.memory).toBe("Nothing was saved: Only NPR 10 is still owed.");
     expect(reply.refresh).toBeUndefined();
   });
 

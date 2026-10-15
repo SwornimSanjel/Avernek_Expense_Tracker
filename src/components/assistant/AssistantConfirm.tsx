@@ -34,18 +34,20 @@ export default function AssistantConfirm({
           ))}
         </div>
       ) : null}
-      <div className="assistant-actions mt-3">
+      <div className="assistant-confirm-actions mt-3">
         <button type="button" className="btn btn-primary" disabled={disabled} onClick={() => onDecide("confirm")}>
-          {confirm.confirmLabel}
+          ✓ {confirm.confirmLabel}
         </button>
-        <button type="button" className="btn" disabled={disabled} onClick={() => onDecide("edit")}>
-          Edit
-        </button>
-        <button type="button" className="btn" disabled={disabled} onClick={() => onDecide("cancel")}>
-          Cancel
-        </button>
+        <div className="assistant-actions">
+          <button type="button" className="btn" disabled={disabled} onClick={() => onDecide("edit")}>
+            Change something
+          </button>
+          <button type="button" className="btn" disabled={disabled} onClick={() => onDecide("cancel")}>
+            Cancel
+          </button>
+        </div>
       </div>
-      <div className="assistant-note">Nothing is saved until you press {confirm.confirmLabel}.</div>
+      <div className="assistant-note">Is this right? Nothing is saved until you press {confirm.confirmLabel}.</div>
     </section>
   );
 }

@@ -102,23 +102,33 @@ async function runTool(
   return outcome;
 }
 
+/** One line per confirmation row, for the conversation history. */
+function rowsLine(rows: { label: string; value: string }[]): string {
+  return rows.map((row) => `${row.label}: ${row.value}`).join("; ");
+}
+
 /** Turns tool outcomes into one reply: cards, a form, or a confirmation. */
 async function assemble(ran: Ran[], ctx: ToolContext, deps: AgentDeps): Promise<AssistantReply> {
   const reply: AssistantReply = { text: "", cards: [], steps: [] };
   const texts: string[] = [];
+  // What the model will see of this answer next turn: summaries, what was
+  // asked for and what is waiting for confirmation.
+  const memory: string[] = [];
   for (const { tool, outcome } of ran) {
     if (tool && !reply.steps!.includes(tool.label)) reply.steps!.push(tool.label);
     switch (outcome.status) {
       case "ok":
         reply.cards.push(...outcome.cards);
         texts.push(outcome.summary);
-        if (outcome.context) reply.context = outcome.context;
+        memory.push(outcome.summary);
+        if (outcome.context) reply.context = { ...reply.context, ...outcome.context };
         break;
       case "needs_input":
       case "needs_choice":
         if (!reply.form && !reply.confirm) {
           reply.form = outcome.form;
           texts.push(outcome.summary);
+          memory.push(`${outcome.summary} (asked for: ${outcome.form.fields.map((field) => field.label).join(", ")})`);
         }
         break;
       case "ready":
@@ -137,14 +147,17 @@ async function assemble(ran: Ran[], ctx: ToolContext, deps: AgentDeps): Promise<
             values: outcome.draft.args,
           };
           texts.push(outcome.summary);
+          memory.push(`Waiting for the user to confirm: ${outcome.draft.title} (${rowsLine(outcome.draft.rows)})`);
         }
         break;
       default:
-        texts.push(outcome.summary);
+        // Shown once, as a card; kept in the history so the model knows.
         reply.cards.push({ type: "notice", tone: outcome.status === "denied" ? "warn" : "error", text: outcome.summary });
+        memory.push(outcome.summary);
     }
   }
   reply.text = texts.join("\n");
+  reply.memory = memory.join("\n");
   return reply;
 }
 
@@ -165,7 +178,16 @@ export async function runChat(
   const tools = deps.tools ?? TOOLS;
   const byName = new Map(tools.map((tool) => [tool.name, tool]));
   const definitions = toolDefinitions(tools);
+  // Only the arguments a tool declares are passed on: anything else the model
+  // invents (a record id, say) is dropped before the tool sees it.
+  const declared = new Map(
+    definitions.map((definition) => [
+      definition.function.name,
+      new Set(Object.keys((definition.function.parameters.properties as Record<string, unknown> | undefined) ?? {})),
+    ])
+  );
   const messages = buildMessages(input, ctx);
+  ctx = { ...ctx, conversation: input.context };
 
   const first = await deps.chat({ messages, tools: definitions, toolChoice: "auto", maxTokens: 500 });
   await deps.audit({
@@ -188,7 +210,9 @@ export async function runChat(
   let write = false;
   for (const call of calls) {
     const tool = byName.get(call.function.name);
-    const args = parseArgs(call.function.arguments);
+    const parsedArgs = parseArgs(call.function.arguments);
+    const allowed = declared.get(call.function.name);
+    const args = parsedArgs && allowed ? Object.fromEntries(Object.entries(parsedArgs).filter(([key]) => allowed.has(key))) : parsedArgs;
     if (!tool) {
       ran.push({ call, args: {}, outcome: { status: "error", summary: "I can't do that here." } });
       continue;
@@ -241,7 +265,10 @@ export async function runChat(
         costUsd: second.usage.costUsd,
         latencyMs: second.latencyMs,
       });
-      if (second.content?.trim()) reply.text = second.content.trim();
+      if (second.content?.trim()) {
+        reply.text = second.content.trim();
+        reply.memory = `${reply.text}\n${reply.memory ?? ""}`.trim();
+      }
     } catch (error) {
       // The figures are already in the cards: fall back to their summaries.
       console.error("[ai explain]", error instanceof Error ? error.message : error);
@@ -252,12 +279,13 @@ export async function runChat(
 
 /** A submitted form or choice: runs the tool again with everything known so far. */
 export async function runForm(
-  input: { tool: string; values: Record<string, unknown> },
+  input: { tool: string; values: Record<string, unknown>; context?: AssistantContext },
   ctx: ToolContext,
   deps: AgentDeps
 ): Promise<AssistantReply> {
   const tool = (deps.tools ?? TOOLS).find((candidate) => candidate.name === input.tool);
   if (!tool) return { text: "That form is no longer valid. Ask again.", cards: [] };
+  ctx = { ...ctx, conversation: input.context };
   const outcome = await runTool(tool, input.values, ctx, deps, "form");
   return assemble([{ tool, args: input.values, outcome }], ctx, deps);
 }
@@ -294,7 +322,8 @@ export async function runConfirm(
   const fail = async (error: string, status: AuditEntry["status"] = "error"): Promise<AssistantReply> => {
     await deps.finishDraft(draft.id, { ok: false, error });
     await deps.audit({ userId, kind: "confirm", tool: draft.tool, status, detail: { draft: draft.id, error }, latencyMs: Date.now() - started });
-    return { text: `Nothing was saved: ${error}`, cards: [{ type: "notice", tone: "error", text: error }] };
+    const text = `Nothing was saved: ${error}`;
+    return { text: "", memory: text, cards: [{ type: "notice", tone: "error", text }] };
   };
   if (!tool || tool.kind !== "write") return fail("This kind of change is no longer available.");
   // Permissions are checked again with the session confirming, not the one that asked.
@@ -318,6 +347,12 @@ export async function runConfirm(
     detail: { draft: draft.id, record: result.recordId ?? null, args: draft.args },
     latencyMs: Date.now() - started,
   });
-  const card: Card = { type: "notice", tone: "info", text: result.text };
-  return { text: result.text, cards: [card], refresh: true };
+  const card: Card = { type: "notice", tone: "success", text: result.text };
+  return {
+    text: "",
+    memory: result.text,
+    cards: [card],
+    refresh: true,
+    context: result.record ? { lastRecord: result.record } : undefined,
+  };
 }

@@ -21,6 +21,13 @@ const FORMATS: Record<string, AudioFormat> = {
 };
 
 /**
+ * The team speaks English and Nepali. A transcript in Chinese, Japanese or
+ * Korean script means the model misheard (Qwen3-ASR, for one, has no Nepali
+ * and may answer in Chinese): better to ask again than to fill the box with it.
+ */
+const FOREIGN_SCRIPT = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
+
+/**
  * Voice input: audio in, text out. The transcript goes back to the chat box
  * for the person to read and edit; nothing is submitted or saved from here.
  */
@@ -48,16 +55,18 @@ export async function POST(request: Request) {
   try {
     const base64 = Buffer.from(await file.arrayBuffer()).toString("base64");
     const result = await transcribe(config!, { base64, format });
+    const misheard = FOREIGN_SCRIPT.test(result.text);
     await audit({
       userId: ctx.session.sub,
       kind: "transcription",
-      status: result.text ? "ok" : "error",
-      detail: { bytes: file.size, format, seconds: result.seconds, characters: result.text.length },
+      status: result.text && !misheard ? "ok" : "error",
+      detail: { bytes: file.size, format, seconds: result.seconds, characters: result.text.length, misheard },
       model: result.model,
       costUsd: result.costUsd,
       latencyMs: result.latencyMs,
     });
-    if (!result.text) return json({ error: "No speech was recognised. Try again a little closer to the microphone." }, 422);
+    if (!result.text) return json({ error: "I couldn't hear any words. Try again a little closer to the microphone." }, 422);
+    if (misheard) return json({ error: "I didn't catch that clearly. Please say it again, or type it." }, 422);
     return json({ text: result.text });
   } catch (error) {
     await audit({ userId: ctx.session.sub, kind: "transcription", status: "error", detail: { bytes: file.size, format } });

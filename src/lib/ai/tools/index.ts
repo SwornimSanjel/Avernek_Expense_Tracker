@@ -9,6 +9,7 @@ import {
   getRecurringRevenue,
   getTaxPosition,
 } from "./income";
+import { getDateTime } from "./time";
 import type { Tool } from "./types";
 import { createExpense, updateExpenseTool } from "./write-expense";
 import { recordClientPayment, updateClientPayment } from "./write-payment";
@@ -34,6 +35,7 @@ export const TOOLS: Tool[] = [
   getTaxPosition,
   getAccountBalances,
   getFinancialSummary,
+  getDateTime,
   createExpense,
   updateExpenseTool,
   recordClientPayment,

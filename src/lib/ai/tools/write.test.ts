@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { summarizeIncomeAgreement } from "@/lib/income";
-import type { AppUser, Category, IncomeAgreement, IncomePayment, MoneyAccount, Vendor } from "@/lib/types";
+import type { AppUser, Category, Expense, IncomeAgreement, IncomePayment, MoneyAccount, Vendor } from "@/lib/types";
 import type { Client, RequestData } from "../data";
 import type { ToolContext } from "./types";
 
@@ -16,6 +16,12 @@ vi.mock("@/app/(app)/expenses/actions", () => ({
     return { error: null };
   }),
 }));
+// The payment tool looks up the id of the payment it just recorded.
+vi.mock("@/lib/db", () => ({
+  one: vi.fn(async () => ({ id: "p-new", client_name: "Kalika Technical", currency: "NPR" })),
+  query: vi.fn(async () => []),
+  exec: vi.fn(async () => 0),
+}));
 vi.mock("@/app/(app)/income/actions", () => ({
   recordIncomePayment: vi.fn(async (_state: unknown, form: FormData) => {
     saved.forms.push(form);
@@ -27,7 +33,7 @@ vi.mock("@/app/(app)/income/actions", () => ({
   }),
 }));
 
-const { createExpense, equalShares } = await import("./write-expense");
+const { createExpense, equalShares, updateExpenseTool } = await import("./write-expense");
 const { recordClientPayment } = await import("./write-payment");
 
 const TODAY = "2026-10-15";
@@ -127,7 +133,24 @@ const paid30k: IncomePayment = {
   updated_at: "2026-09-25T00:00:00.000Z",
 };
 
-function context(isAdmin = true): ToolContext {
+const savedExpense = {
+  id: "e-saved",
+  amount: "5000.00",
+  currency: "NPR",
+  amount_npr: "5000.00",
+  expense_date: TODAY,
+  category_id: "c-hosting",
+  vendor_id: null,
+  funding_source: "personal",
+  paid_by_user_id: "u-pragyan",
+  money_account_id: null,
+  client: "ntcs",
+  note: "Client visit food expense",
+  billing_month: null,
+  fx_source: "actual",
+} as unknown as Expense;
+
+function context(isAdmin = true, conversation?: ToolContext["conversation"]): ToolContext {
   const agreements = [kalika];
   const payments = [paid30k];
   const clients: Client[] = [{ name: "Kalika Technical", agreements }];
@@ -141,8 +164,15 @@ function context(isAdmin = true): ToolContext {
     agreements: async () => agreements,
     payments: async () => payments,
     summaries: async () => new Map(agreements.map((a) => [a.id, summarizeIncomeAgreement(a, payments, TODAY)])),
+    expenses: async () => [savedExpense],
+    expenseShares: async () => [],
   } as unknown as RequestData;
-  return { session: { sub: "u-pragyan", email: "pragyan@avernek.com", name: "Pragyan", isAdmin, exp: 0 }, today: TODAY, data };
+  return {
+    session: { sub: "u-pragyan", email: "pragyan@avernek.com", name: "Pragyan", isAdmin, exp: 0 },
+    today: TODAY,
+    data,
+    conversation,
+  };
 }
 
 const fields = (outcome: { status: string; form?: { fields: { name: string }[] } }) => outcome.form?.fields.map((f) => f.name);
@@ -221,7 +251,12 @@ describe("create_expense", () => {
     );
     expect(outcome.status).toBe("ready");
     const result = await createExpense.execute((outcome as { draft: { args: Record<string, unknown> } }).draft.args, context());
-    expect(result).toEqual({ ok: true, text: "Expense saved: NPR 1,000.", recordId: "new-expense" });
+    expect(result).toEqual({
+      ok: true,
+      text: "Saved: NPR 1,000 on 15 Oct 2026.",
+      recordId: "new-expense",
+      record: { kind: "expense", id: "new-expense", label: "expense NPR 1,000 on 15 Oct 2026" },
+    });
     const form = saved.forms[0];
     expect(form.get("amount")).toBe("1000");
     expect(form.get("category_id")).toBe("c-hosting");
@@ -280,7 +315,12 @@ describe("record_client_payment", () => {
   it("records through recordIncomePayment with the confirmed values", async () => {
     const outcome = await recordClientPayment.run({ client: "Kalika", amount: 50000, reference: "TXN-42" }, context());
     const result = await recordClientPayment.execute((outcome as { draft: { args: Record<string, unknown> } }).draft.args, context());
-    expect(result).toEqual({ ok: true, text: "Payment recorded for Kalika Technical." });
+    expect(result).toEqual({
+      ok: true,
+      text: "Recorded: NPR 50,000 from Kalika Technical on 15 Oct 2026 (bill amount, excluding VAT).",
+      recordId: "p-new",
+      record: { kind: "payment", id: "p-new", label: "payment NPR 50,000 from Kalika Technical on 15 Oct 2026" },
+    });
     const form = saved.forms[0];
     expect(Object.fromEntries(form.entries())).toMatchObject({
       agreement_id: "ag-kalika",
@@ -292,6 +332,40 @@ describe("record_client_payment", () => {
       money_account_id: "a-bank",
       method: "bank_transfer",
       reference: "TXN-42",
+    });
+  });
+});
+
+describe("update_expense: 'change the five thousand to ten thousand'", () => {
+  const justSaved = { kind: "expense" as const, id: "e-saved", label: "expense NPR 5,000 on 15 Oct 2026" };
+
+  it("changes the expense saved a moment ago", async () => {
+    const outcome = await updateExpenseTool.run({ just_saved: true, new_amount: 10000 }, context(true, { lastRecord: justSaved }));
+    expect(outcome.status).toBe("ready");
+    expect(rows(outcome as never)).toMatchObject({ Amount: "NPR 5,000 → NPR 10,000" });
+    expect((outcome as { draft: { args: Record<string, unknown> } }).draft.args).toEqual({ expense_id: "e-saved", amount: "10000" });
+  });
+
+  it("says so when nothing was saved in this chat, instead of guessing", async () => {
+    const outcome = await updateExpenseTool.run({ just_saved: true, new_amount: 10000 }, context());
+    expect(outcome).toEqual({
+      status: "error",
+      summary: "I haven't saved an expense in this chat yet. Tell me its date, amount or what it was for.",
+    });
+  });
+
+  it("saves through updateExpense, keeping everything else as it was", async () => {
+    const outcome = await updateExpenseTool.run({ just_saved: true, new_amount: 10000 }, context(true, { lastRecord: justSaved }));
+    const result = await updateExpenseTool.execute((outcome as { draft: { args: Record<string, unknown> } }).draft.args, context());
+    expect(result).toMatchObject({ ok: true, text: "Updated: the expense is now NPR 10,000 on 15 Oct 2026." });
+    expect(Object.fromEntries(saved.forms[0].entries())).toMatchObject({
+      expense_id: "e-saved",
+      amount: "10000",
+      category_id: "c-hosting",
+      funding_source: "personal",
+      paid_by_user_id: "u-pragyan",
+      client: "ntcs",
+      note: "Client visit food expense",
     });
   });
 });
