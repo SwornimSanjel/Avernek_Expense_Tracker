@@ -8,7 +8,7 @@
 #
 #   deps     npm ci from the lockfile                      "Install Dependencies"
 #   verify   tsc --noEmit (+ tests, if a test script exists) "Lint / Type Check / Test"
-#   builder  next build (standalone server)                 "Application Build"
+#   builder  next build (standalone server, after verify)   "Application Build"
 #   runner   the runtime image that is deployed             "Docker Image Build"
 #
 # The build needs no secrets. Everything the app reads (DATABASE_URL,
@@ -29,8 +29,10 @@ WORKDIR /app
 RUN apk add --no-cache libc6-compat
 
 COPY package.json package-lock.json ./
+# --prefer-offline: packages already in the npm cache are used without asking
+# the registry again, which is most of an install when the lockfile changes.
 RUN --mount=type=cache,target=/root/.npm \
-    npm ci --no-audit --no-fund
+    npm ci --no-audit --no-fund --prefer-offline
 
 ##############################################################################
 # verify: type check and tests. No ESLint configuration exists in this
@@ -49,9 +51,17 @@ RUN npm run typecheck \
 FROM deps AS builder
 ENV NEXT_TELEMETRY_DISABLED=1 \
     # Switches next.config.ts to `output: "standalone"` (Netlify keeps the default).
-    DOCKER_BUILD=1
+    DOCKER_BUILD=1 \
+    # The verify stage already type-checked; next build skips doing it again.
+    SKIP_BUILD_TYPECHECK=1
+# The build cannot start until verify passed (type check + tests). In Jenkins
+# verify is already built and cached by the stage before, so this is instant.
+COPY --from=verify /app/package.json /tmp/verified.json
 COPY . .
-RUN npm run build
+# Next's compile cache survives between builds, so only what changed is
+# recompiled instead of the whole app every time.
+RUN --mount=type=cache,target=/app/.next/cache,id=avernek-expense-tracker-next-cache \
+    npm run build
 
 ##############################################################################
 # runner: only the standalone server, static assets and the admin seed script

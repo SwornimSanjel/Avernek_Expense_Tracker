@@ -7,6 +7,16 @@ const nextConfig: NextConfig = {
   // The Docker image runs Next's self-contained server bundle. Gated on
   // DOCKER_BUILD so Netlify's Next.js plugin keeps seeing the default output.
   output: process.env.DOCKER_BUILD === "1" ? "standalone" : undefined,
+  // In the Docker build the "verify" stage has already run `tsc --noEmit` and
+  // the tests, and the builder stage cannot start until it passed (see the
+  // Dockerfile), so `next build` does not type-check a second time. There is
+  // no ESLint configuration. Elsewhere (local, Netlify) the check still runs.
+  typescript: { ignoreBuildErrors: process.env.SKIP_BUILD_TYPECHECK === "1" },
+  eslint: { ignoreDuringBuilds: true },
+  // pdf.js (inside unpdf, which reads PDF receipts) is ~1.3 MB. Loading it from
+  // node_modules at run time instead of bundling it saves minifying it on
+  // every build.
+  serverExternalPackages: ["unpdf"],
   experimental: {
     // Forms can carry up to 40 MB of bills / agreement pages
     // (lib/attachments.ts) plus the other fields. The 1 MB default would
