@@ -420,6 +420,8 @@ export interface CompanyBill {
   category_id: string | null;
   /** The expense this bill is counted as; null = not counted yet. */
   expense_id: string | null;
+  /** Already covered by an expense that is not linked one-to-one. */
+  counted_elsewhere?: boolean;
   created_by: string | null;
   created_at: string;
   updated_at: string;

@@ -165,14 +165,25 @@ export function parseReceiptText(raw: string): ReceiptRead {
     null;
 
   // --- who it is billed to ------------------------------------------------------
-  if (knownVendor) {
+  // Only for receipts that were paid: a $0 trial has nothing to record anyway.
+  if (knownVendor && finalTotal !== 0) {
+    const app = anthropic ? "Claude" : "ChatGPT";
     const billTo = text.match(/\bBill to\s+(.+?)\s+(?:Satdobato|Lalitpur|Kathmandu|Bhaktapur|Nepal)\b/)?.[1]?.trim() ?? null;
-    if (billTo && !/avernek technologies p[vt]{2}\.? ltd/i.test(billTo)) {
+    const fix = `Fix it once in ${app} → Settings → Billing (billing name); new receipts will then show the company.`;
+    if (billTo && /\bavernek technologies pvt\.? ltd\b/i.test(billTo)) {
+      // Correct: billed to the company.
+    } else if (billTo && /\bavernek technologies p[a-z]{2}\.? ltd\b/i.test(billTo)) {
       warnings.push(
-        `Billed to “${billTo}”, not the company. Change the billing name to “Avernek Technologies Pvt. Ltd.” (with the PAN) in ${anthropic ? "Claude" : "ChatGPT"} settings so future receipts count as company bills.`
+        `Nearly right: the receipt says “${billTo}” — a typo for “Avernek Technologies Pvt. Ltd.”. ${fix}`
       );
-    } else if (billTo && /\bPtv\b/i.test(billTo)) {
-      warnings.push("The billing name is misspelt “Ptv. Ltd.” — correct it to “Pvt. Ltd.” in the account's billing settings.");
+    } else if (billTo && /@/.test(billTo)) {
+      warnings.push(
+        `The receipt says Bill to “${billTo}” — that is the login email, not the company name “Avernek Technologies Pvt. Ltd.”. ${fix}`
+      );
+    } else if (billTo) {
+      warnings.push(
+        `The receipt says Bill to “${billTo}”, not “Avernek Technologies Pvt. Ltd.”. ${fix}`
+      );
     }
   }
   if (finalTotal === 0) warnings.push("This is a $0 trial invoice: nothing was paid, so there is nothing to record.");

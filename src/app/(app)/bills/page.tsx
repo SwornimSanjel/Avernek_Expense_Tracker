@@ -7,6 +7,8 @@ import { AddCompanyBill, ConfirmDelete, ReimburseBill } from "@/components/VatBi
 import BillsByMonth, { type BillItem } from "@/components/BillsByMonth";
 import FileLinks from "@/components/FileLinks";
 import ReceiptIntake from "@/components/ReceiptIntake";
+import { ReceiptCopyFixer, SettleOldBillsButton } from "@/components/OldBillTools";
+import { findReceiptCopies } from "@/lib/bill-duplicates";
 import { BillExpenseStatus, BillTypePicker, type ExpenseMatch } from "@/components/BillRowControls";
 import Icon from "@/components/Icons";
 import { accountShortName, claimedVat } from "@/lib/funds";
@@ -60,7 +62,7 @@ export default async function BillsPage({
   const session = await requireSession();
   const canManage = isAppOwner(session);
   const filters = await searchParams;
-  const [ledger, files, categories, people, receipts, linked, matchRows] = await Promise.all([
+  const [ledger, files, categories, people, receipts, linked, matchRows, copies] = await Promise.all([
     loadLedger(),
     query<Attachment>(`select ${ATTACHMENT_COLUMNS} from public.attachments where kind in ('company_bill','expense_bill') order by created_at`),
     query<BillCategory>(`select id, name, color, coalesce(counts_as_expense, true) as counts_as_expense from public.categories`),
@@ -88,13 +90,14 @@ export default async function BillsPage({
          from public.company_bills b
          join public.expenses e
            on e.currency = 'NPR'
-          and abs(coalesce(e.amount_npr, e.amount) - b.total_amount) <= 1
-          and abs(e.expense_date - b.bill_date) <= 7
+          and abs(coalesce(e.amount_npr, e.amount) - b.total_amount) <= greatest(2, b.total_amount * 0.01)
+          and abs(e.expense_date - b.bill_date) <= 10
          left join public.vendors v on v.id = e.vendor_id
         where b.expense_id is null
           and not exists (select 1 from public.company_bills other where other.expense_id = e.id)
         order by abs(e.expense_date - b.bill_date)`
     ),
+    findReceiptCopies(),
   ]);
 
   const { accounts, balances, billStatuses } = ledger;
@@ -131,7 +134,7 @@ export default async function BillsPage({
       date: bill.bill_date,
       categoryId: bill.category_id,
       vendor: bill.vendor_name || bill.description,
-      todo: !bill.expense_id && counts,
+      todo: !bill.expense_id && !bill.counted_elsewhere && counts,
       item: {
         id: bill.id,
         date: bill.bill_date,
@@ -158,7 +161,9 @@ export default async function BillsPage({
                   <BillExpenseStatus
                     billId={bill.id}
                     linked={link ? `Counted as an expense on ${formatServiceDate(link.expense_date)}, paid from ${paidFrom(link.funding_source, link.money_account_id, link.payer)}` : null}
+                    elsewhere={Boolean(bill.counted_elsewhere)}
                     counts={counts}
+                    total={Number(bill.total_amount)}
                     matches={matchesByBill.get(bill.id) ?? []}
                     accounts={accountOptions}
                     people={partners}
@@ -368,10 +373,15 @@ export default async function BillsPage({
           <Icon name="info" size={14} /> {billTypeLabel(selected.name)} is not a company expense: these bills are kept for the record only and are not counted in expenses.
         </p>
       )}
-      {type === "todo" && (
-        <p className="receipt-note mb-3">
-          <Icon name="alert" size={14} /> These bills are not counted in Expenses yet. Press “Count as expense” on each — or link the expense if you already typed it in.
-        </p>
+      {canManage && <ReceiptCopyFixer copies={copies} />}
+      {todo > 0 && (
+        <div className="receipt-note mb-3 flex-wrap">
+          <Icon name="alert" size={14} />
+          <span className="flex-1 min-w-[220px]">
+            {todo} {todo === 1 ? "bill is" : "bills are"} not linked to an expense. If you already typed this spending into Expenses (old bills), settle them all at once — nothing is counted twice. For a new one, use “Count as expense” on the bill.
+          </span>
+          {canManage && <SettleOldBillsButton count={todo} />}
+        </div>
       )}
 
       <div className="card overflow-hidden">

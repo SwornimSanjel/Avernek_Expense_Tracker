@@ -2588,3 +2588,9 @@ section + section > .bills-month { border-top: 1px solid var(--line); }
 
 .receipt-paid-all { display: flex; flex: 1 1 320px; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: 13.5px; }
 .receipt-paid-all select { flex: 1 1 200px; min-width: 0; max-width: 320px; }
+
+.copy-fixer { margin-bottom: 14px; padding: 14px 16px; border: 1px solid rgb(251 191 36 / 0.32); border-radius: 14px; background: var(--amber-soft); }
+.copy-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.receipt-mode { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.receipt-mode .funding-choice { min-height: 0; padding: 12px 14px; }
+@media (max-width: 640px) { .receipt-mode { grid-template-columns: 1fr; } }

@@ -28,22 +28,23 @@ describe("parseReceiptText — AI subscription receipts", () => {
   });
 
   it("warns when a receipt is not billed to Avernek", () => {
-    expect(parseReceiptText(claudeAug).warnings[0]).toMatch(/not the company/);
-    expect(parseReceiptText(gptSept).warnings[0]).toMatch(/Billed to “Swornim Sanjel”/);
+    expect(parseReceiptText(claudeAug).warnings[0]).toMatch(/login email, not the company name/);
+    expect(parseReceiptText(gptSept).warnings[0]).toMatch(/Bill to “Swornim Sanjel”, not “Avernek Technologies Pvt\. Ltd\.”/);
   });
 
   it("spots the Ptv. typo on the billing name", () => {
     const read = parseReceiptText(gptOct);
     expect(read).toMatchObject({ knownVendor: "OpenAI (GPT)", date: "2026-10-12", total: 20, number: "2301-1573-8226" });
     expect(read.description).toBe("ChatGPT Plus Subscription · Oct 11 – Nov 11, 2026");
-    expect(read.warnings[0]).toMatch(/Ptv/);
+    expect(read.warnings).toEqual([expect.stringMatching(/^Nearly right: .*Ptv\. Ltd\./)]);
   });
 
   it("flags a $0 trial invoice as nothing to record", () => {
     const read = parseReceiptText(claudeTrial);
     expect(read.total).toBe(0);
     expect(read.date).toBe("2026-08-11");
-    expect(read.warnings.some((warning) => warning.includes("$0 trial"))).toBe(true);
+    // Only the trial note: no billing-name nag for something that cost nothing.
+    expect(read.warnings).toEqual([expect.stringContaining("$0 trial")]);
   });
 
   it("reads a printed tax line and explains it cannot be claimed", () => {

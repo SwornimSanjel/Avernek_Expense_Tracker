@@ -26,6 +26,22 @@ export type ReceiptScan = ReceiptRead & {
   costUsd: number | null;
   /** This bill looks already saved. */
   duplicate: string | null;
+  /**
+   * Expenses already typed in that look like this receipt (same vendor or
+   * amount, a few days apart). Saving against one attaches the receipt to it
+   * instead of counting the money a second time.
+   */
+  matches: ExpenseMatchInfo[];
+};
+
+export type ExpenseMatchInfo = {
+  id: string;
+  date: string;
+  label: string;
+  amount: number;
+  currency: string;
+  amountNpr: number | null;
+  paidFrom: string;
 };
 
 const STAGED = "expense_id is null and agreement_id is null and payment_id is null and company_bill_id is null";
@@ -181,6 +197,63 @@ async function findDuplicate(sha256: string, read: ReceiptRead): Promise<string 
 }
 
 /**
+ * Expenses that are probably this same spending: within 5 days, same amount
+ * (1% slack for a rounded NPR figure) and, for a known vendor such as
+ * Anthropic or OpenAI, the same vendor — two $20 subscriptions from different
+ * companies are not the same payment. Expenses already counted for a bill are
+ * skipped.
+ */
+export async function findMatchingExpenses(read: Pick<ReceiptRead, "date" | "total" | "currency" | "knownVendor">): Promise<ExpenseMatchInfo[]> {
+  if (!read.date || !read.total || read.total <= 0) return [];
+  const currency = read.currency ?? "NPR";
+  const rows = await query<{
+    id: string;
+    expense_date: string;
+    amount: string;
+    currency: string;
+    amount_npr: string | null;
+    label: string;
+    funding_source: string;
+    account: string | null;
+    payer: string | null;
+  }>(
+    `select e.id, e.expense_date, e.amount, e.currency, e.amount_npr,
+            coalesce(nullif(e.note, ''), v.name, 'Expense') as label,
+            e.funding_source, ma.name as account, u.name as payer
+       from public.expenses e
+       left join public.vendors v on v.id = e.vendor_id
+       left join public.money_accounts ma on ma.id = e.money_account_id
+       left join public.users u on u.id = e.paid_by_user_id
+      where abs(e.expense_date - $1::date) <= case when $2 = 'USD' then 7 else 10 end
+        and (
+          -- the same amount in the same currency (1-2% slack for rounding)
+          (e.currency = $2 and abs(e.amount - $3) <= greatest(case when $2 = 'USD' then 1 else 2 end, $3 * 0.02))
+          -- an NPR receipt against an expense typed in NPR
+          or ($2 = 'NPR' and abs(coalesce(e.amount_npr, e.amount) - $3) <= greatest(2, $3 * 0.01))
+          -- a USD receipt that was typed in as the NPR the bank charged
+          or ($2 = 'USD' and e.currency = 'NPR' and e.amount between $3 * 120 and $3 * 175)
+        )
+        and ($4::text is null
+             or v.name = $4
+             or e.note ilike '%' || split_part($4, ' ', 1) || '%'
+             or e.note ilike '%' || replace(split_part($4, '(', 2), ')', '') || '%')
+        and not exists (select 1 from public.company_bills b where b.expense_id = e.id)
+      order by abs(e.expense_date - $1::date), e.created_at desc
+      limit 4`,
+    [read.date, currency, read.total, read.knownVendor]
+  );
+  return rows.map((row) => ({
+    id: row.id,
+    date: row.expense_date,
+    label: row.label,
+    amount: Number(row.amount),
+    currency: row.currency,
+    amountNpr: row.amount_npr != null ? Number(row.amount_npr) : null,
+    paidFrom: row.funding_source === "company_funds" ? row.account ?? "a company account" : `${row.payer ?? "a partner"}'s own money`,
+  }));
+}
+
+/**
  * Read staged uploads. PDFs are read from their text for free; photos are read
  * by AI only when `withAi` is true.
  */
@@ -229,6 +302,7 @@ export async function scanStagedFiles(ids: string[], withAi: boolean, userId: st
       readBy,
       costUsd,
       duplicate: await findDuplicate(file.sha256, read),
+      matches: await findMatchingExpenses(read),
     });
   }
   return scans;

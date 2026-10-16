@@ -8,7 +8,7 @@ import Icon from "./Icons";
 import { billTypeLabel, claimVatByDefault, sortBillCategories, type BillCategory } from "@/lib/bill-types";
 import { attachmentUrl } from "@/lib/attachments";
 import { formatNumber } from "@/lib/format";
-import { todayIso } from "@/lib/income";
+import { formatServiceDate, todayIso } from "@/lib/income";
 import type { ReceiptScan } from "@/lib/receipts.server";
 
 type Account = { id: string; name: string; kind: string; currency: string };
@@ -22,6 +22,7 @@ type Draft = {
   costUsd: number | null;
   warnings: string[];
   duplicate: string | null;
+  matches: ReceiptScan["matches"];
   include: boolean;
   categoryId: string;
   vendorName: string;
@@ -36,8 +37,22 @@ type Draft = {
   paid: string;
   actualNpr: string;
   reading: boolean;
+  /** The person picked "who paid" for this one; a mode switch leaves it alone. */
+  paidTouched: boolean;
   error: string | null;
 };
+
+type Mode = "old" | "new";
+
+/**
+ * The safe default for "who paid". Old bills were typed into Expenses when the
+ * money was spent, so they only get attached — never counted again.
+ */
+function defaultPaid(matches: { id: string }[], currency: "NPR" | "USD", mode: Mode): string {
+  if (matches[0]) return `link:${matches[0].id}`;
+  if (mode === "old") return currency === "NPR" ? "skip" : "";
+  return "";
+}
 
 function accountLabel(account: Account) {
   if (account.kind === "company_bank") return "VAT account";
@@ -47,6 +62,7 @@ function accountLabel(account: Account) {
 
 function toPaid(key: string): PaidWith | null {
   if (key === "skip") return { by: "skip" };
+  if (key.startsWith("link:")) return { by: "link", expenseId: key.slice(5) };
   if (key.startsWith("acct:")) return { by: "account", accountId: key.slice(5) };
   if (key.startsWith("person:")) return { by: "person", userId: key.slice(7) };
   return null;
@@ -79,6 +95,7 @@ export default function ReceiptIntake({
   const [open, setOpen] = useState(false);
   const [stage, setStage] = useState<"upload" | "review">("upload");
   const [drafts, setDrafts] = useState<Draft[]>([]);
+  const [mode, setModeState] = useState<Mode>("old");
   const [busy, setBusy] = useState(false);
   const [count, setCount] = useState(0);
   const [message, setMessage] = useState<string | null>(null);
@@ -101,6 +118,7 @@ export default function ReceiptIntake({
       costUsd: scan.costUsd,
       warnings: scan.warnings,
       duplicate: scan.duplicate,
+      matches: scan.matches ?? [],
       include: previous?.include ?? !(scan.total === 0 || scan.duplicate),
       categoryId: previous?.categoryId || category?.id || "",
       vendorName: scan.vendor ?? previous?.vendorName ?? "",
@@ -112,7 +130,9 @@ export default function ReceiptIntake({
       claimVat: vat > 0 && claimVatByDefault(category?.name),
       tax: currency === "USD" ? scan.tax : null,
       number: scan.number ?? previous?.number ?? null,
-      paid: previous?.paid ?? "",
+      // Already typed into Expenses? Attach to it by default: nothing is counted twice.
+      paid: previous?.paidTouched ? previous.paid : defaultPaid(scan.matches ?? [], currency, mode),
+      paidTouched: previous?.paidTouched ?? false,
       actualNpr: previous?.actualNpr ?? "",
       reading: false,
       error: null,
@@ -161,8 +181,17 @@ export default function ReceiptIntake({
     setDrafts((list) =>
       list.map((draft) => {
         if (key === "skip" && draft.currency === "USD") return draft;
-        return { ...draft, paid: key };
+        // A receipt matched to an expense already typed in keeps that match.
+        if (draft.paid.startsWith("link:")) return draft;
+        return { ...draft, paid: key, paidTouched: true };
       })
+    );
+  }
+
+  function setMode(next: Mode) {
+    setModeState(next);
+    setDrafts((list) =>
+      list.map((draft) => (draft.paidTouched ? draft : { ...draft, paid: defaultPaid(draft.matches, draft.currency, next) }))
     );
   }
 
@@ -176,8 +205,11 @@ export default function ReceiptIntake({
     if (!/^\d{4}-\d{2}-\d{2}$/.test(draft.date)) return "Enter the date.";
     if (!draft.vendorName.trim() && !draft.description.trim()) return "Say what it was for.";
     if (draft.currency === "NPR" && !counts) return null;
-    if (!toPaid(draft.paid)) return "Choose who paid.";
-    if (draft.currency === "USD" && draft.paid === "skip") return "Choose who paid.";
+    if (!toPaid(draft.paid) || (draft.currency === "USD" && draft.paid === "skip")) {
+      return mode === "old"
+        ? "No matching expense was found within a week. Pick it under “Who paid”, or switch to “New spending” if it was never added."
+        : "Choose who paid.";
+    }
     const account = draft.paid.startsWith("acct:") ? accounts.find((item) => `acct:${item.id}` === draft.paid) : null;
     if (draft.currency === "USD" && account?.currency === "NPR" && !(Number(draft.actualNpr) > 0)) {
       return "Enter the NPR the bank charged (from the bank statement).";
@@ -241,6 +273,15 @@ export default function ReceiptIntake({
   const paidOptions = (draft: Draft | null) => (
     <>
       <option value="">Who paid?</option>
+      {draft && draft.matches.length > 0 && (
+        <optgroup label="Already in Expenses — attach the receipt, count nothing again">
+          {draft.matches.map((match) => (
+            <option key={match.id} value={`link:${match.id}`}>
+              {formatServiceDate(match.date)} · {match.label.slice(0, 48)} · {match.currency} {formatNumber(match.amount)}
+            </option>
+          ))}
+        </optgroup>
+      )}
       <optgroup label="Company money">
         {accounts.map((account) => (
           <option key={account.id} value={`acct:${account.id}`}>
@@ -256,9 +297,35 @@ export default function ReceiptIntake({
           </option>
         ))}
       </optgroup>
-      {(!draft || draft.currency === "NPR") && <option value="skip">Already in Expenses — don&apos;t add again</option>}
+      {(!draft || draft.currency === "NPR") && <option value="skip">Already in Expenses another way — keep the bill only</option>}
     </>
   );
+
+  /** What saving with this choice does to the money, in one sentence. */
+  function effectOf(draft: Draft): { text: string; tone: string } | null {
+    if (!draft.paid) return null;
+    const npr = draft.currency === "NPR" ? Number(draft.total || 0) : Number(draft.actualNpr || 0);
+    if (draft.paid.startsWith("link:")) {
+      const match = draft.matches.find((item) => `link:${item.id}` === draft.paid);
+      return {
+        text: `Nothing is counted again: the receipt is attached to the expense you already typed${match ? ` (${match.paidFrom})` : ""}.`,
+        tone: "text-green",
+      };
+    }
+    if (draft.paid === "skip") return { text: "Saved as a bill only. No expense is added and no balance changes.", tone: "muted" };
+    if (draft.paid.startsWith("acct:")) {
+      const account = accounts.find((item) => `acct:${item.id}` === draft.paid);
+      return {
+        text: `Adds a new expense and takes ${npr ? `NPR ${formatNumber(npr)}` : "the NPR amount"} off the ${account ? accountLabel(account) : "account"} balance. Choose this only if that money left the account and is not in Expenses yet.`,
+        tone: "text-amber",
+      };
+    }
+    const person = people.find((item) => `person:${item.id}` === draft.paid);
+    return {
+      text: `Adds a new expense paid with ${person?.name ?? "a partner"}'s own money. No company account balance changes.`,
+      tone: "muted",
+    };
+  }
 
   return (
     <>
@@ -308,13 +375,41 @@ export default function ReceiptIntake({
 
             {stage === "review" && (
               <>
+                <div className="receipt-mode" role="radiogroup" aria-label="Are these already in Expenses?">
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={mode === "old"}
+                    className={`funding-choice ${mode === "old" ? "funding-choice-active" : ""}`}
+                    onClick={() => setMode("old")}
+                  >
+                    <strong>Old bills — already in Expenses</strong>
+                    <span>Just keep the receipts. Each is attached to the expense you typed; no money is counted again.</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={mode === "new"}
+                    className={`funding-choice ${mode === "new" ? "funding-choice-active" : ""}`}
+                    onClick={() => setMode("new")}
+                  >
+                    <strong>New spending — not in Expenses yet</strong>
+                    <span>Adds each one to Expenses and takes it off the account that paid.</span>
+                  </button>
+                </div>
                 <div className="receipt-toolbar">
-                  <label className="receipt-paid-all">
-                    <span className="muted">Who paid all of these?</span>
-                    <select className="input !h-9" defaultValue="" onChange={(event) => event.target.value && setPaidForAll(event.target.value)}>
-                      {paidOptions(null)}
-                    </select>
-                  </label>
+                  {mode === "new" ? (
+                    <label className="receipt-paid-all">
+                      <span className="muted">Who paid all of these?</span>
+                      <select className="input !h-9" defaultValue="" onChange={(event) => event.target.value && setPaidForAll(event.target.value)}>
+                        {paidOptions(null)}
+                      </select>
+                    </label>
+                  ) : (
+                    <span className="text-[13px] muted">
+                      {drafts.filter((draft) => draft.paid.startsWith("link:")).length} of {drafts.length} matched to an expense you typed.
+                    </span>
+                  )}
                   {aiEnabled && unreadPhotos.length > 0 && (
                     <button type="button" className="btn btn-sm" disabled={pending} onClick={() => readWithAi(unreadPhotos)}>
                       <Icon name="sparkles" size={14} /> Read {unreadPhotos.length} {unreadPhotos.length === 1 ? "photo" : "photos"} with AI
@@ -447,11 +542,12 @@ export default function ReceiptIntake({
                                 <div className="grid sm:grid-cols-2 gap-2.5">
                                   <label className="block">
                                     <span className="field-label">Who paid</span>
-                                    <select className="input mt-1" value={draft.paid} onChange={(event) => update(draft.fileId, { paid: event.target.value })}>
+                                    <select className="input mt-1" value={draft.paid} onChange={(event) => update(draft.fileId, { paid: event.target.value, paidTouched: true })}>
                                       {paidOptions(draft)}
                                     </select>
+                                    {effectOf(draft) && <p className={`text-[12.5px] mt-1.5 leading-snug ${effectOf(draft)!.tone}`}>{effectOf(draft)!.text}</p>}
                                   </label>
-                                  {draft.currency === "USD" && (
+                                  {draft.currency === "USD" && !draft.paid.startsWith("link:") && (
                                     <label className="block">
                                       <span className="field-label">NPR the bank charged {account?.currency === "NPR" ? "" : "(optional)"}</span>
                                       <input type="number" min="0" step="0.01" className="input tnum mt-1" value={draft.actualNpr} onChange={(event) => update(draft.fileId, { actualNpr: event.target.value })} placeholder="From the bank statement" />
