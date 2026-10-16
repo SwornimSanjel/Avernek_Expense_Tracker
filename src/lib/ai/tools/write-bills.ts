@@ -15,9 +15,10 @@ import type { ToolAsk, ToolContext, ToolReady, WriteTool } from "./types";
  * the total (VAT included) and the date are required; a VAT bill's VAT is
  * worked out at 13% unless the bill's printed VAT is given; a PAN bill has none.
  *
- * Every bill is shown on one confirmation. A bill that is missing something is
- * listed there but not saved, and "Change something" fixes or drops any bill:
- * the whole list travels with the form, so nothing is retyped.
+ * Every bill is shown on one confirmation. A bill with no date is dated today,
+ * as on the form, and the confirmation says so. A bill missing anything else
+ * is listed there but not saved, and "Change something" fixes or drops any
+ * bill: the whole list travels with the form, so nothing is retyped.
  */
 
 export const MAX_BILLS = 20;
@@ -29,7 +30,7 @@ const billSchema = z.object({
   total: z.number().positive().optional().describe("Bill total in NPR, VAT included"),
   bill_date: isoDate
     .optional()
-    .describe("YYYY-MM-DD in AD. In Nepal dates are written DD/MM/YYYY. Omit when only a Nepali (BS) date or no date was given"),
+    .describe("YYYY-MM-DD in AD. In Nepal dates are written DD/MM/YYYY. Omit when only a Nepali (BS) date or no date was given: the bill is then dated today"),
   vat_bill: z
     .boolean()
     .optional()
@@ -55,6 +56,8 @@ type Bill = {
   vat_amount: number | null;
   paid_by: string | null;
   note: string | null;
+  /** No date was given, so the app dated it today. */
+  dated_today: boolean;
 };
 
 type Checked = { bill: Bill; vat: number; errors: Record<string, string> };
@@ -83,6 +86,7 @@ function toBill(raw: unknown): Bill {
     vat_amount: vatAmount,
     paid_by: text(v.paid_by, 120),
     note: text(v.note, 300),
+    dated_today: v.dated_today === true,
   };
 }
 
@@ -328,6 +332,8 @@ export const addCompanyBillsTool: WriteTool = {
       if (Object.keys(errors).length) return billForm(bills, index, errors);
     }
 
+    // As on the Add VAT bill form, a bill with no date is dated today.
+    bills = bills.map((bill) => (bill.bill_date ? bill : { ...bill, bill_date: ctx.today, dated_today: true }));
     const items = bills.map((bill) => check(bill, ctx.today));
     const ready = items.filter((item) => !Object.keys(item.errors).length);
     if (!ready.length) {
@@ -345,7 +351,12 @@ export const addCompanyBillsTool: WriteTool = {
         ? [`Bill ${label(item.bill, position)} needs ${missing(item.errors)}, so it will not be saved. Use Change something to fix it.`]
         : []
     );
-    const warnings = [...incomplete, ...duplicates(items, await existingBills(ctx)), ...vatWarnings(items)];
+    const datedToday = items.flatMap((item, position) =>
+      item.bill.dated_today
+        ? [`Bill ${label(item.bill, position)} had no date, so it is dated today, ${formatDate(ctx.today)}. Use Change something if it is from another day.`]
+        : []
+    );
+    const warnings = [...incomplete, ...datedToday, ...duplicates(items, await existingBills(ctx)), ...vatWarnings(items)];
     const total = ready.reduce((sum, item) => sum + item.bill.total!, 0);
     const vat = ready.reduce((sum, item) => sum + item.vat, 0);
     const count = `${ready.length} ${ready.length === 1 ? "bill" : "bills"}`;
@@ -361,7 +372,7 @@ export const addCompanyBillsTool: WriteTool = {
             label: label(item.bill, position),
             value: Object.keys(item.errors).length
               ? `Not saved: needs ${missing(item.errors)}`
-              : `${money(item.bill.total!)} · ${vatText(item)} · ${formatDate(item.bill.bill_date)}`,
+              : `${money(item.bill.total!)} · ${vatText(item)} · ${formatDate(item.bill.bill_date)}${item.bill.dated_today ? " (today)" : ""}`,
           })),
           { label: "Total", value: `${count} · ${money(total)} · VAT ${formatNumber(vat)}` },
         ],

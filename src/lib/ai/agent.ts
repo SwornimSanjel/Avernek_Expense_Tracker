@@ -190,7 +190,8 @@ export async function runChat(
   ctx = { ...ctx, conversation: input.context };
 
   // A pasted list (bills) becomes one long tool call: give it room and time.
-  const long = input.message.length > 1500;
+  // Ordinary questions are far shorter than 400 characters.
+  const long = input.message.length > 400;
   const first = await deps.chat({
     messages,
     tools: definitions,

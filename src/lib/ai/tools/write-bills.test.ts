@@ -87,22 +87,32 @@ describe("add_company_bills", () => {
     ]);
   });
 
-  it("lists a bill with no date but does not save it", async () => {
+  it("dates a bill with no date today, as the form does, and says so", async () => {
     const undated = { description: "Team coffee", vendor: "Himalayan SIP", bill_no: "1698", total: 2049.97, vat_amount: 235.83 };
     const outcome = await tool.run({ bills: [lunch, undated] }, context());
     if (outcome.status !== "ready") throw new Error("expected a draft");
-    expect(rows(outcome)["2 · Himalayan SIP #1698"]).toBe("Not saved: needs the date");
-    expect(outcome.draft.confirmLabel).toBe("Save 1 bill");
-    expect(outcome.draft.warnings?.[0]).toContain("needs the date, so it will not be saved");
+    expect(rows(outcome)["2 · Himalayan SIP #1698"]).toBe("NPR 2,049.97 · VAT 235.83 · 16 Oct 2026 (today)");
+    expect(outcome.draft.confirmLabel).toBe("Save 2 bills");
+    expect(outcome.draft.warnings).toEqual([
+      "Bill 2 · Himalayan SIP #1698 had no date, so it is dated today, 16 Oct 2026. Use Change something if it is from another day.",
+    ]);
     await tool.execute(outcome.draft.args, context());
-    expect(saved.batches[0]).toHaveLength(1);
+    expect(saved.batches[0]).toHaveLength(2);
+    expect((saved.batches[0][1] as { bill_date: string }).bill_date).toBe(TODAY);
+  });
+
+  it("lists a bill missing its total but does not save it", async () => {
+    const outcome = await tool.run({ bills: [lunch, { description: "Team coffee", bill_date: "2026-10-05" }] }, context());
+    if (outcome.status !== "ready") throw new Error("expected a draft");
+    expect(rows(outcome)["2 · Team coffee"]).toBe("Not saved: needs the total");
+    expect(outcome.draft.confirmLabel).toBe("Save 1 bill");
   });
 
   it("asks in a form when the only bill is missing something, and keeps the rest", async () => {
-    const outcome = await tool.run({ bills: [{ description: "Team coffee", total: 2049.97 }] }, context());
+    const outcome = await tool.run({ bills: [{ description: "Team coffee", bill_date: "2026-10-05" }] }, context());
     expect(outcome.status).toBe("needs_input");
     if (outcome.status !== "needs_input") return;
-    expect(outcome.form.fields.find((field) => field.name === "f_bill_date")?.error).toBe("Enter the bill date (in AD).");
+    expect(outcome.form.fields.find((field) => field.name === "f_total")?.error).toBe("Enter the bill total.");
     const next = await tool.run(
       { ...outcome.form.values, f_description: "Team coffee", f_total: "2049.97", f_bill_date: "2026-10-05", f_vat: "yes" },
       context()
