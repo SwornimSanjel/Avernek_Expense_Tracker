@@ -13,6 +13,7 @@ import { accountShortName, type BillStatus, type MoneyAccountBalance } from "@/l
 import { vatInsideTotal } from "@/lib/tax";
 import type { CompanyBill } from "@/lib/types";
 import Icon from "./Icons";
+import { billTypeLabel, sortBillCategories, type BillCategory } from "@/lib/bill-types";
 import { BillDocuments } from "./DocumentSections";
 import type { Attachment } from "@/lib/attachments";
 
@@ -46,11 +47,17 @@ export function AddCompanyBill({
   bill,
   compact,
   files = [],
+  categories = [],
+  label = "Add VAT bill",
 }: {
+  /** The add button's text. */
+  label?: string;
   bill?: CompanyBill;
   compact?: boolean;
   /** Scans / photos already saved on this bill. */
   files?: Attachment[];
+  /** Bill types; the type picker is shown when given. */
+  categories?: BillCategory[];
 }) {
   const [open, setOpen] = useState(false);
   const [state, action, pending] = useActionState(guardRequest(addCompanyBill), initialState);
@@ -73,7 +80,7 @@ export function AddCompanyBill({
         </button>
       ) : (
         <button type="button" onClick={() => setOpen(true)} className={`btn ${compact ? "!h-9 !px-3 text-sm" : ""}`}>
-          <Icon name="receipt" size={15} /> Add VAT bill
+          <Icon name="receipt" size={15} /> {label}
         </button>
       )}
       {open && (
@@ -86,6 +93,20 @@ export function AddCompanyBill({
               onClose={() => setOpen(false)}
             />
             <div className="grid sm:grid-cols-2 gap-3">
+              {categories.length > 0 && (
+                <label className="block sm:col-span-2">
+                  <span className="field-label">Type</span>
+                  <select name="category_id" defaultValue={bill?.category_id ?? ""} className="input mt-1">
+                    <option value="">Choose a type</option>
+                    {sortBillCategories(categories).map((category) => (
+                      <option key={category.id} value={category.id}>
+                        {billTypeLabel(category.name)}
+                        {category.counts_as_expense ? "" : " — not a company expense"}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
               <label className="block sm:col-span-2">
                 <span className="field-label">What is the bill for?</span>
                 <input name="description" required defaultValue={bill?.description ?? ""} placeholder="e.g. Lawyer service charge" className="input mt-1" />

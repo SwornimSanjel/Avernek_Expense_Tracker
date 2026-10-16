@@ -327,6 +327,8 @@ async function addCompanyBillUnguarded(
     formData.get("reimburse") === "on",
     vat > 0 && formData.get("claim_vat") === "on",
   ];
+  // The type picker only exists on the Bills page; elsewhere the type is kept.
+  const categoryField = formData.has("category_id") ? value(formData, "category_id") || null : undefined;
 
   if (id) {
     const reimbursed = await one<{ total: string }>(
@@ -342,27 +344,36 @@ async function addCompanyBillUnguarded(
         `update public.company_bills
             set description = $1, vendor_name = $2, bill_number = $3, bill_date = $4,
                 total_amount = $5, vat_amount = $6, paid_by = $7, note = $8, reimburse = $9, claim_vat = $10,
+                category_id = case when $12::boolean then $13::uuid else category_id end,
                 updated_at = now()
           where id = $11`,
-        [...params, id]
+        [...params, id, categoryField !== undefined, categoryField ?? null]
       );
+      // A bill counted as an expense keeps the expense's type in step.
+      if (categoryField !== undefined) {
+        await client.query(
+          `update public.expenses set category_id = $1
+            where id = (select expense_id from public.company_bills where id = $2)`,
+          [categoryField, id]
+        );
+      }
       await insertAttachments(client, { kind: "company_bill", id }, files, session.sub);
     });
   } else {
     await transaction(async (client) => {
       const inserted = await client.query<{ id: string }>(
         `insert into public.company_bills
-           (description, vendor_name, bill_number, bill_date, total_amount, vat_amount, paid_by, note, reimburse, claim_vat, created_by)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+           (description, vendor_name, bill_number, bill_date, total_amount, vat_amount, paid_by, note, reimburse, claim_vat, created_by, category_id)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
          returning id`,
-        [...params, session.sub]
+        [...params, session.sub, categoryField ?? null]
       );
       await insertAttachments(client, { kind: "company_bill", id: inserted.rows[0].id }, files, session.sub);
     });
   }
 
   revalidateFunds();
-  return { error: null, ok: id ? "Bill updated." : "Bill added. Reimburse it when the VAT account has room." };
+  return { error: null, ok: id ? "Bill updated." : "Bill added. Press “Count as expense” on it so it shows in Expenses." };
 }
 
 /**

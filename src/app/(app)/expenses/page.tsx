@@ -253,6 +253,7 @@ export default async function ExpensesPage({
                         </div>
                         <div className="row-meta !whitespace-normal">
                           {dayLabel(e.expense_date)} · {category?.name ?? "Uncategorised"}
+                          {category?.counts_as_expense === false ? " (not a company expense)" : ""}
                           {vendor && e.note ? ` · ${vendor.name}` : ""}
                           {company ? "" : ` · paid by ${shortName(e.paid_by_user_id)}`}
                           {e.client ? ` · ${e.client}` : ""}

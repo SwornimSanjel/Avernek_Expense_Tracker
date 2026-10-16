@@ -7,7 +7,7 @@ import { exec, one } from "@/lib/db";
 
 export type AuditEntry = {
   userId: string | null;
-  kind: "chat" | "tool" | "form" | "confirm" | "transcription";
+  kind: "chat" | "tool" | "form" | "confirm" | "transcription" | "receipt";
   tool?: string | null;
   status: "ok" | "needs_input" | "needs_choice" | "denied" | "error" | "cancelled";
   detail?: Record<string, unknown> | null;

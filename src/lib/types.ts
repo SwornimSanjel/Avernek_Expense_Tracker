@@ -97,6 +97,8 @@ export interface Category {
   name: string;
   color: string;
   monthly_budget: number | null;
+  /** False for spending that is not a company expense (drinks, smoke). */
+  counts_as_expense?: boolean;
 }
 
 export interface Vendor {
@@ -414,6 +416,10 @@ export interface CompanyBill {
   reimburse: boolean;
   /** vat_amount is claimed from IRD as input VAT (food and drinks usually are not). */
   claim_vat: boolean;
+  /** What the bill is for: Food, Stationery, Professional fees… */
+  category_id: string | null;
+  /** The expense this bill is counted as; null = not counted yet. */
+  expense_id: string | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;

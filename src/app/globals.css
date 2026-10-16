@@ -2526,3 +2526,65 @@ section + section > .bills-month { border-top: 1px solid var(--line); }
   .activity-time { display: none; }
   .activity-row { padding: 12px 14px; }
 }
+
+/* ----- Bills: types, status, receipt intake ----- */
+.bill-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.bill-tabs-sub { margin-top: -4px; padding-left: 4px; }
+.bill-tabs .chip { display: inline-flex; align-items: center; gap: 7px; }
+.chip-warn { border-color: rgb(251 191 36 / 0.35); color: var(--amber); }
+.bill-type-dot { width: 9px; height: 9px; flex: none; border-radius: 999px; }
+.bill-type {
+  display: inline-flex; align-items: center; gap: 7px; height: 28px; padding: 0 10px;
+  border: 1px solid var(--line); border-radius: 999px; background: var(--surface-2);
+  font-size: 13px; font-weight: 560; white-space: nowrap;
+}
+.bill-type-edit { position: relative; cursor: pointer; padding-right: 8px; }
+.bill-type-edit select {
+  appearance: none; border: 0; background: transparent; color: var(--ink);
+  font: inherit; padding-right: 2px; cursor: pointer; outline: none;
+}
+.bill-type-edit:hover { border-color: var(--line-strong); }
+.bill-status {
+  display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px;
+  border: 1px solid var(--line); border-radius: 999px; color: var(--muted);
+  font-size: 13px; font-weight: 560; white-space: nowrap;
+}
+.bill-status-ok { border-color: rgb(52 211 153 / 0.25); background: var(--green-soft); color: var(--green); }
+.bill-status-warn { border-color: rgb(251 191 36 / 0.3); background: var(--amber-soft); color: var(--amber); }
+.bill-status-action { cursor: pointer; transition: filter 140ms ease, transform 140ms ease; }
+.bill-status-action:hover { filter: brightness(1.12); transform: translateY(-1px); }
+.bill-status-undo { margin-left: 4px; color: var(--muted); font-size: 12.5px; text-decoration: underline; text-underline-offset: 2px; }
+.bill-status-undo:hover { color: var(--ink); }
+.bill-match {
+  display: flex; width: 100%; align-items: center; gap: 10px; padding: 10px 12px;
+  border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2);
+  font-size: 14px; text-align: left; transition: border-color 140ms ease;
+}
+.bill-match:hover { border-color: var(--accent-line, var(--line-strong)); }
+.receipt-hint, .receipt-note {
+  display: flex; align-items: flex-start; gap: 9px; padding: 11px 13px;
+  border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2);
+  color: var(--muted); font-size: 13.5px; line-height: 1.5;
+}
+.receipt-hint svg, .receipt-note svg { flex: none; margin-top: 3px; color: var(--accent); }
+.receipt-hint strong { color: var(--ink); font-weight: 620; }
+.receipt-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+.receipt-card {
+  display: flex; gap: 14px; padding: 14px; border: 1px solid var(--line);
+  border-radius: 14px; background: var(--surface);
+}
+.receipt-card-off { opacity: 0.6; }
+.receipt-thumb {
+  display: grid; width: 72px; height: 92px; flex: none; place-items: center; overflow: hidden;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); color: var(--muted);
+}
+.receipt-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.receipt-warnings { display: grid; gap: 4px; padding: 9px 12px; border-radius: 10px; background: var(--amber-soft); color: var(--amber); font-size: 13px; line-height: 1.45; }
+.receipt-warnings li::before { content: "•"; margin-right: 6px; }
+@media (max-width: 640px) {
+  .receipt-card { flex-direction: column; }
+  .receipt-thumb { width: 100%; height: 120px; }
+}
+
+.receipt-paid-all { display: flex; flex: 1 1 320px; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: 13.5px; }
+.receipt-paid-all select { flex: 1 1 200px; min-width: 0; max-width: 320px; }

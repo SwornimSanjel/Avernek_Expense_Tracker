@@ -184,6 +184,46 @@ export async function chat(
   };
 }
 
+/**
+ * Read one image (a photo of a bill) and answer with a JSON object. The image
+ * goes to the primary model with the same zero-retention policy as chat.
+ */
+export async function readImage(
+  config: AiConfig,
+  input: { instructions: string; dataUrl: string; maxTokens?: number },
+  fetchImpl: Fetch = fetch
+): Promise<{ content: string | null; usage: Usage; model: string; latencyMs: number }> {
+  const { json, latencyMs } = await post(
+    config,
+    "/chat/completions",
+    {
+      model: config.primaryModel,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: input.instructions },
+            { type: "image_url", image_url: { url: input.dataUrl } },
+          ],
+        },
+      ],
+      response_format: { type: "json_object" },
+      temperature: 0,
+      max_tokens: input.maxTokens ?? 400,
+      provider: DATA_POLICY,
+    },
+    45_000,
+    fetchImpl
+  );
+  const choice = (json.choices as { message?: Record<string, unknown> }[] | undefined)?.[0];
+  return {
+    content: typeof choice?.message?.content === "string" ? choice.message.content : null,
+    usage: usageOf(json),
+    model: typeof json.model === "string" ? json.model : config.primaryModel,
+    latencyMs,
+  };
+}
+
 /** Audio formats OpenRouter's transcription endpoint accepts. */
 export const AUDIO_FORMATS = ["webm", "ogg", "m4a", "mp3", "wav", "flac", "aac"] as const;
 export type AudioFormat = (typeof AUDIO_FORMATS)[number];
