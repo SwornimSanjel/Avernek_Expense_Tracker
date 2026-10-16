@@ -137,7 +137,7 @@ export function BillExpenseStatus({
   if (!counts) {
     return <span className="bill-status">Not a company expense</span>;
   }
-  if (!canManage) return <span className="bill-status bill-status-warn">Not in expenses yet</span>;
+  if (!canManage) return <span className="bill-status bill-status-warn">Not linked to an expense</span>;
 
   function run(choice: Parameters<typeof countBillAsExpense>[1]) {
     setError(null);
@@ -155,7 +155,7 @@ export function BillExpenseStatus({
   return (
     <>
       <button type="button" className="bill-status bill-status-warn bill-status-action" onClick={() => setOpen(true)}>
-        <Icon name="alert" size={13} /> Count as expense
+        <Icon name="alert" size={13} /> Link to its expense
       </button>
       {open && (
         <div className="modal-backdrop">

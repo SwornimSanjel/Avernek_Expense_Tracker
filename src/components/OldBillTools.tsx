@@ -102,9 +102,96 @@ export function SettleOldBillsButton({ count }: { count: number }) {
           });
         }}
       >
-        <Icon name="check" size={14} /> {pending ? "Settling…" : `These are old bills — all already in Expenses`}
+        <Icon name="check" size={14} /> {pending ? "Linking…" : "All already in Expenses — link them"}
       </button>
       {result && <span className="text-[13px] text-green">{result}</span>}
     </span>
+  );
+}
+
+export type MergeOption = { id: string; date: string; label: string; amountText: string; paidFrom: string };
+
+/**
+ * On an expense the receipt upload created: "I had already typed this in".
+ * Pick the typed expense; the receipt moves onto it and this copy is removed,
+ * so its money comes back to the account it was wrongly taken from.
+ */
+export function MergeReceiptButton({
+  copyId,
+  copyText,
+  paidFrom,
+  options,
+}: {
+  copyId: string;
+  copyText: string;
+  paidFrom: string;
+  options: MergeOption[];
+}) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [pending, start] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+
+  function merge(keep: MergeOption) {
+    if (
+      !window.confirm(
+        `Keep “${keep.label}” (${keep.amountText}, ${formatServiceDate(keep.date)}) and attach this receipt to it?\n\nThe copy made from the receipt (${copyText}) is removed, so ${paidFrom} gets that money back. Nothing else changes.`
+      )
+    )
+      return;
+    setError(null);
+    start(async () => {
+      const result = await mergeReceiptCopy(copyId, keep.id);
+      if (result.error) return setError(result.error);
+      setOpen(false);
+      router.refresh();
+    });
+  }
+
+  return (
+    <>
+      <button type="button" className="bill-status bill-status-warn bill-status-action" onClick={() => setOpen(true)} title="This expense was made from the receipt">
+        <Icon name="swap" size={13} /> Typed it already? Merge
+      </button>
+      {open && (
+        <div className="modal-backdrop">
+          <div className="modal-panel md:max-w-lg p-5 md:p-6 space-y-4">
+            <div className="modal-header">
+              <div>
+                <h2 className="text-lg font-bold">Which expense did you type for this?</h2>
+                <p className="text-[13.5px] muted mt-1">
+                  This expense ({copyText}, from {paidFrom}) was made from the receipt. If you had already typed it, pick that one: the receipt moves onto it and this copy is removed.
+                </p>
+              </div>
+              <button type="button" onClick={() => setOpen(false)} className="icon-btn" aria-label="Close">
+                <Icon name="close" size={16} />
+              </button>
+            </div>
+            {options.length === 0 ? (
+              <p className="text-[13.5px] muted">
+                No expense of the same type or amount within 20 days. If you typed it with a different date, find it on the Expenses page and delete this copy there instead.
+              </p>
+            ) : (
+              <div className="space-y-2 max-h-[50vh] overflow-y-auto">
+                {options.map((option) => (
+                  <button key={option.id} type="button" disabled={pending} onClick={() => merge(option)} className="bill-match">
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate font-medium">{option.label}</span>
+                      <span className="block text-[12.5px] muted">
+                        {formatServiceDate(option.date)} · {option.paidFrom}
+                      </span>
+                    </span>
+                    <strong className="tnum whitespace-nowrap">{option.amountText}</strong>
+                    <span className="text-[13px] text-accent">Merge</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            <p className="text-[12.5px] muted">Not typed before? Close this — the expense stays as it is.</p>
+            {error && <p className="text-sm text-red">{error}</p>}
+          </div>
+        </div>
+      )}
+    </>
   );
 }

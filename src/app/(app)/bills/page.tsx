@@ -7,7 +7,7 @@ import { AddCompanyBill, ConfirmDelete, ReimburseBill } from "@/components/VatBi
 import BillsByMonth, { type BillItem } from "@/components/BillsByMonth";
 import FileLinks from "@/components/FileLinks";
 import ReceiptIntake from "@/components/ReceiptIntake";
-import { ReceiptCopyFixer, SettleOldBillsButton } from "@/components/OldBillTools";
+import { MergeReceiptButton, ReceiptCopyFixer, SettleOldBillsButton, type MergeOption } from "@/components/OldBillTools";
 import { findReceiptCopies } from "@/lib/bill-duplicates";
 import { BillExpenseStatus, BillTypePicker, type ExpenseMatch } from "@/components/BillRowControls";
 import Icon from "@/components/Icons";
@@ -35,6 +35,8 @@ type ExpenseReceipt = {
   funding_source: string;
   money_account_id: string | null;
   payer: string | null;
+  /** Created by a receipt upload (not typed by hand): may repeat a typed expense. */
+  from_upload: boolean;
 };
 
 type Row = {
@@ -62,14 +64,18 @@ export default async function BillsPage({
   const session = await requireSession();
   const canManage = isAppOwner(session);
   const filters = await searchParams;
-  const [ledger, files, categories, people, receipts, linked, matchRows, copies] = await Promise.all([
+  const [ledger, files, categories, people, receipts, linked, matchRows, copies, mergeRows] = await Promise.all([
     loadLedger(),
     query<Attachment>(`select ${ATTACHMENT_COLUMNS} from public.attachments where kind in ('company_bill','expense_bill') order by created_at`),
     query<BillCategory>(`select id, name, color, coalesce(counts_as_expense, true) as counts_as_expense from public.categories`),
     query<{ id: string; name: string; is_partner: boolean }>(`select ${USER_COLUMNS} from public.users order by name`),
     query<ExpenseReceipt>(
       `select e.id, e.expense_date, e.amount, e.currency, e.amount_npr, e.note, e.category_id, v.name as vendor,
-              e.funding_source, e.money_account_id, u.name as payer
+              e.funding_source, e.money_account_id, u.name as payer,
+              (coalesce(e.note, '') like '% · receipt %'
+               and exists (select 1 from public.attachments a
+                            where a.expense_id = e.id
+                              and abs(extract(epoch from e.created_at - a.created_at)) < 3600)) as from_upload
          from public.expenses e
          left join public.vendors v on v.id = e.vendor_id
          left join public.users u on u.id = e.paid_by_user_id
@@ -98,6 +104,34 @@ export default async function BillsPage({
         order by abs(e.expense_date - b.bill_date)`
     ),
     findReceiptCopies(),
+    // For each expense made by a receipt upload: the hand-typed expenses near
+    // it that it might repeat, so the receipt can be merged into the right one.
+    query<{ copy_id: string; id: string; expense_date: string; label: string; currency: string; amount: string; amount_npr: string | null; funding_source: string; money_account_id: string | null; payer: string | null }>(
+      `select copy.id as copy_id, e.id, e.expense_date,
+              coalesce(nullif(e.note, ''), v.name, c.name, 'Expense') as label,
+              e.currency, e.amount, e.amount_npr, e.funding_source, e.money_account_id, u.name as payer
+         from public.expenses copy
+         join public.expenses e
+           on e.id <> copy.id
+          and abs(e.expense_date - copy.expense_date) <= 20
+          and (e.category_id is not distinct from copy.category_id
+               or e.vendor_id = copy.vendor_id
+               or abs(coalesce(e.amount_npr, e.amount) - coalesce(copy.amount_npr, copy.amount))
+                  <= greatest(5, coalesce(copy.amount_npr, copy.amount) * 0.05))
+          and not exists (select 1 from public.company_bills b where b.expense_id = e.id)
+         left join public.vendors v on v.id = e.vendor_id
+         left join public.categories c on c.id = e.category_id
+         left join public.users u on u.id = e.paid_by_user_id
+        where coalesce(copy.note, '') like '% · receipt %'
+          and exists (select 1 from public.attachments a where a.expense_id = copy.id
+                       and abs(extract(epoch from copy.created_at - a.created_at)) < 3600)
+          and not exists (select 1 from public.attachments a where a.expense_id = e.id
+                           and abs(extract(epoch from e.created_at - a.created_at)) < 3600
+                           and coalesce(e.note, '') like '% · receipt %')
+        order by copy.id,
+                 abs(coalesce(e.amount_npr, e.amount) - coalesce(copy.amount_npr, copy.amount)),
+                 abs(e.expense_date - copy.expense_date)`
+    ),
   ]);
 
   const { accounts, balances, billStatuses } = ledger;
@@ -111,6 +145,25 @@ export default async function BillsPage({
     if (file.expense_id) filesByExpense.set(file.expense_id, [...(filesByExpense.get(file.expense_id) ?? []), file]);
   }
   const linkedByBill = new Map(linked.map((row) => [row.bill_id, row]));
+  const mergeOptions = new Map<string, MergeOption[]>();
+  for (const row of mergeRows) {
+    const list = mergeOptions.get(row.copy_id) ?? [];
+    if (list.length >= 8) continue;
+    list.push({
+      id: row.id,
+      date: row.expense_date,
+      label: row.label,
+      amountText:
+        row.currency === "NPR"
+          ? `NPR ${formatNumber(Number(row.amount))}`
+          : `${row.currency} ${formatNumber(Number(row.amount))}${row.amount_npr ? ` · NPR ${formatNumber(Number(row.amount_npr))}` : ""}`,
+      paidFrom:
+        row.funding_source === "company_funds"
+          ? accountShortName(accountById.get(row.money_account_id ?? ""))
+          : `${row.payer ?? "A partner"}'s own money`,
+    });
+    mergeOptions.set(row.copy_id, list);
+  }
   const matchesByBill = new Map<string, ExpenseMatch[]>();
   for (const row of matchRows) {
     const list = matchesByBill.get(row.bill_id) ?? [];
@@ -266,6 +319,14 @@ export default async function BillsPage({
                     <Icon name="check" size={13} /> In expenses
                   </Link>
                   {foreign && <span className="bill-status">Foreign receipt · no Nepali VAT</span>}
+                  {canManage && receipt.from_upload && (
+                    <MergeReceiptButton
+                      copyId={receipt.id}
+                      copyText={`${foreign ? `${receipt.currency} ${formatNumber(Number(receipt.amount))} · ` : ""}NPR ${formatNumber(npr)}`}
+                      paidFrom={paidFrom(receipt.funding_source, receipt.money_account_id, receipt.payer)}
+                      options={mergeOptions.get(receipt.id) ?? []}
+                    />
+                  )}
                 </div>
                 <FileLinks files={filesByExpense.get(receipt.id) ?? []} label="Receipt" />
               </div>
@@ -347,7 +408,7 @@ export default async function BillsPage({
         )}
         {todo > 0 && (
           <Link href={href({ type: "todo" })} className={`chip chip-warn ${type === "todo" ? "chip-on" : ""}`}>
-            <Icon name="alert" size={13} /> Not in expenses <span className="chip-count">{todo}</span>
+            <Icon name="alert" size={13} /> Not linked <span className="chip-count">{todo}</span>
           </Link>
         )}
       </nav>
@@ -378,7 +439,7 @@ export default async function BillsPage({
         <div className="receipt-note mb-3 flex-wrap">
           <Icon name="alert" size={14} />
           <span className="flex-1 min-w-[220px]">
-            {todo} {todo === 1 ? "bill is" : "bills are"} not linked to an expense. If you already typed this spending into Expenses (old bills), settle them all at once — nothing is counted twice. For a new one, use “Count as expense” on the bill.
+            {todo} {todo === 1 ? "bill is" : "bills are"} not linked to an expense yet. Already typed into Expenses? Link them all at once — no money changes. A bill never typed in: press “Link to its expense” on it and choose “add it now”.
           </span>
           {canManage && <SettleOldBillsButton count={todo} />}
         </div>

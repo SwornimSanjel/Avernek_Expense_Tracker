@@ -373,7 +373,7 @@ async function addCompanyBillUnguarded(
   }
 
   revalidateFunds();
-  return { error: null, ok: id ? "Bill updated." : "Bill added. Press “Count as expense” on it so it shows in Expenses." };
+  return { error: null, ok: id ? "Bill updated." : "Bill added. Press “Link to its expense” on it to link the expense you typed (or add it)." };
 }
 
 /**
