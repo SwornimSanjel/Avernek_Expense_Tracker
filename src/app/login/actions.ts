@@ -73,6 +73,11 @@ export async function signIn(
     await one(`update public.users set last_login_at = now() where id = $1 returning id`, [
       user.id,
     ]);
+    await one(
+      `insert into public.activity_log (actor_id, actor_name, table_name, operation, record_id, summary)
+       values ($1, $2, 'users', 'sign_in', $1, 'Signed in') returning id`,
+      [user.id, user.name]
+    );
   } catch (error) {
     console.error("[login] could not record last_login_at:", error);
   }

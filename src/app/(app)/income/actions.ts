@@ -159,6 +159,9 @@ function revalidateIncome() {
   revalidatePath("/income/[id]", "page");
   revalidatePath("/clients");
   revalidatePath("/funds");
+  revalidatePath("/other-income");
+  revalidatePath("/vat");
+  revalidatePath("/statement");
   revalidatePath("/");
 }
 

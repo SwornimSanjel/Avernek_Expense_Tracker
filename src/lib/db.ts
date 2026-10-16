@@ -94,12 +94,62 @@ export function getPool(): Pool {
   return globalForPool.__avernekPool;
 }
 
+// -----------------------------------------------------------------------------
+// Activity log actor
+//
+// Every write tells Postgres who is acting (set_config, transaction-local), and
+// the activity_log trigger stamps each changed row with that person. Reads skip
+// this entirely. Outside a request (scripts, cron, tests) there is no cookie,
+// so the write is logged as "System".
+// -----------------------------------------------------------------------------
+
+type Actor = { id: string; name: string };
+
+const WRITE_RE = /^\s*(insert|update|delete|with)\b/i;
+
+async function currentActor(): Promise<Actor | null> {
+  try {
+    const [{ cookies }, { SESSION_COOKIE, verifySession }] = await Promise.all([
+      import("next/headers"),
+      import("./auth/session"),
+    ]);
+    const store = await cookies();
+    const session = await verifySession(store.get(SESSION_COOKIE)?.value);
+    return session ? { id: session.sub, name: session.name } : null;
+  } catch {
+    return null;
+  }
+}
+
+const ACTOR_SQL = "select set_config('app.actor_id', $1, true), set_config('app.actor_name', $2, true)";
+
+/** Run one write inside a tiny transaction that carries the actor. */
+async function writeAsActor<T extends QueryResultRow>(text: string, params: unknown[]) {
+  const actor = await currentActor();
+  if (!actor) return getPool().query<T>(text, params);
+  const client = await getPool().connect();
+  try {
+    await client.query("begin");
+    await client.query(ACTOR_SQL, [actor.id, actor.name]);
+    const result = await client.query<T>(text, params);
+    await client.query("commit");
+    return result;
+  } catch (error) {
+    await client.query("rollback").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 /** Run a query and return every row. Always use $1/$2 params, never interpolation. */
 export async function query<T extends QueryResultRow>(
   text: string,
   params: unknown[] = []
 ): Promise<T[]> {
-  const result = await getPool().query<T>(text, params);
+  const result = WRITE_RE.test(text)
+    ? await writeAsActor<T>(text, params)
+    : await getPool().query<T>(text, params);
   return result.rows;
 }
 
@@ -117,7 +167,9 @@ export async function exec(
   text: string,
   params: unknown[] = []
 ): Promise<number> {
-  const result = await getPool().query(text, params);
+  const result = WRITE_RE.test(text)
+    ? await writeAsActor(text, params)
+    : await getPool().query(text, params);
   return result.rowCount ?? 0;
 }
 
@@ -191,9 +243,11 @@ export async function updateRow(
 export async function transaction<T>(
   fn: (client: import("pg").PoolClient) => Promise<T>
 ): Promise<T> {
+  const actor = await currentActor();
   const client = await getPool().connect();
   try {
     await client.query("begin");
+    if (actor) await client.query(ACTOR_SQL, [actor.id, actor.name]);
     const result = await fn(client);
     await client.query("commit");
     return result;

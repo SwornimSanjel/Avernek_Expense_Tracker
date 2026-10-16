@@ -2,12 +2,10 @@ import Link from "next/link";
 import { query } from "@/lib/db";
 import { requireSession } from "@/lib/auth/server";
 import { isAppOwner } from "@/lib/authz";
-import { Avatar, Callout, Delta, EmptyState, Kpi, Money, PageHeader, SectionHeader } from "@/components/ui";
+import { Avatar, Delta, EmptyState, Kpi, Money, PageHeader, SectionHeader } from "@/components/ui";
 import Icon from "@/components/Icons";
 import AddIncomeAgreement from "@/components/AddIncomeAgreement";
 import AddOtherIncome from "@/components/AddOtherIncome";
-import BulkSelect, { SelectBox, SelectToggle } from "@/components/BulkSelect";
-import { deleteOtherIncomes } from "./actions";
 import RecordIncomePayment from "@/components/RecordIncomePayment";
 import IncomeAgreementControls from "@/components/IncomeAgreementControls";
 import ServiceBadges from "@/components/ServiceBadges";
@@ -81,14 +79,13 @@ export default async function IncomePage({
         order by created_at`
     ),
   ]);
-  const openLoans = ledger.loans.filter((loan) => !loan.repaid_on);
   const agreementFilesById = new Map<string, Attachment[]>();
   for (const file of agreementFileRows) {
     const list = agreementFilesById.get(file.agreement_id!) ?? [];
     list.push(file);
     agreementFilesById.set(file.agreement_id!, list);
   }
-  const { payments, accounts: moneyAccounts, balances, otherIncome, tax } = ledger;
+  const { payments, accounts: moneyAccounts, otherIncome } = ledger;
 
   const summaries = new Map<string, IncomeAgreementSummary>(
     agreements.map((agreement) => [agreement.id, summarizeIncomeAgreement(agreement, payments, today)])
@@ -165,50 +162,15 @@ export default async function IncomePage({
         <Kpi label="Monthly recurring" icon="subscription" tone="blue" value={<Money value={recurring} />} foot={`${activeCount} active client${activeCount === 1 ? "" : "s"}`} />
       </div>
 
-      {/* accounts strip */}
-      <div className="grid md:grid-cols-2 gap-3 mt-4">
-        {balances.map((item) => (
-          <Link key={item.account.id} href="/funds" className="card card-interactive px-5 py-4 flex items-center gap-4">
-            <div className="row-icon" style={{ "--tone": item.account.kind === "company_bank" ? "var(--green)" : "var(--blue)", "--tone-soft": item.account.kind === "company_bank" ? "var(--green-soft)" : "var(--blue-soft)" } as React.CSSProperties}>
-              <Icon name={item.account.kind === "company_bank" ? "bank" : "wallet"} size={18} />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="text-[14.5px] font-semibold">{accountLabel(item.account)}</div>
-              <div className="text-[13px] muted">
-                Free to use <strong className="tnum text-[var(--ink-2)]">NPR {formatNumber(item.free)}</strong>
-                {item.vatReserved > 0 ? <> · VAT kept aside <span className="text-amber tnum">{formatNumber(item.vatReserved)}</span></> : null}
-              </div>
-            </div>
-            <div className="text-right">
-              <div className="text-[12.5px] muted">Balance</div>
-              <div className="text-[19px] font-semibold tnum">{formatNumber(item.balance)}</div>
-            </div>
-          </Link>
-        ))}
-      </div>
-
-      {openLoans.length > 0 && (
-        <Callout
-          className="mt-3"
-          tone="blue"
-          icon="arrowUpRight"
-          title={<>Loans out: NPR {formatNumber(openLoans.reduce((sum, loan) => sum + Number(loan.amount), 0))} not paid back yet</>}
-          action={<Link href="/loans" className="btn btn-sm">Open Loans</Link>}
-        >
-          Not income: lent company money, already taken out of the balances above.
-        </Callout>
-      )}
-
-      {(tax.vatOwed > 0 || tax.tdsCredit > 0) && (
-        <Callout
-          className="mt-3"
-          tone="amber"
-          icon="receipt"
-          title={<>VAT to pay IRD: NPR {formatNumber(tax.vatOwed)}{tax.tdsCredit > 0 ? ` · TDS credit NPR ${formatNumber(tax.tdsCredit)}` : ""}</>}
-          action={<Link href="/vat" className="btn btn-sm">Open VAT</Link>}
-        >
-          Keep this in the VAT account — it is collected for the government, not Avernek&apos;s money.
-        </Callout>
+      {otherIncome.length > 0 && (
+        <Link href="/other-income" className="income-other-link mt-4">
+          <Icon name="sparkles" size={16} />
+          <span>
+            Plus <strong className="tnum">NPR {formatNumber(otherIncome.reduce((sum, row) => sum + Number(row.amount), 0))}</strong> from{" "}
+            {otherIncome.length} job{otherIncome.length === 1 ? "" : "s"} without a client
+          </span>
+          <span className="ml-auto muted">Other income →</span>
+        </Link>
       )}
 
       {/* clients */}
@@ -301,73 +263,6 @@ export default async function IncomePage({
         </div>
       </section>
 
-      {/* other income */}
-      <section className="section">
-        <SectionHeader
-          title={`Income without a client · ${otherIncome.length}`}
-          subtitle="One-off jobs and extra work with no agreement. Counted as income; amounts exclude VAT."
-          action={canManage ? <AddOtherIncome accounts={moneyAccounts} compact /> : undefined}
-        />
-        <BulkSelect
-          ids={otherIncome.map((row) => row.id)}
-          noun={{ one: "income record", many: "income records" }}
-          onDelete={canManage ? deleteOtherIncomes : undefined}
-        >
-          {otherIncome.length > 1 && (
-            <div className="flex justify-end mb-2">
-              <SelectToggle />
-            </div>
-          )}
-          <div className="card overflow-hidden">
-            {otherIncome.length === 0 ? (
-              <EmptyState title="Nothing yet" description="Use “Income without client” for extra work or a website done without an agreement." icon="sparkles" />
-            ) : (
-              <div className="table-wrap">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>Date</th>
-                      <th>What</th>
-                      <th>Account</th>
-                      <th className="num">Amount</th>
-                      <th className="num">Reached bank</th>
-                      {canManage && <th />}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {otherIncome.map((row) => {
-                      const account = accountById.get(row.money_account_id);
-                      return (
-                        <tr key={row.id}>
-                          <td className="whitespace-nowrap">
-                            <span className="inline-flex items-center">
-                              <SelectBox id={row.id} label={row.description} />
-                              {formatServiceDate(row.received_on)}
-                            </span>
-                          </td>
-                          <td>
-                            <div className="font-medium">{row.description}</div>
-                            <div className="text-[12.5px] muted">
-                              {OTHER_INCOME_LABELS[row.category]}
-                              {row.source_name ? ` · from ${row.source_name}` : ""}
-                              {Number(row.vat_amount) > 0 ? ` · VAT ${formatNumber(Number(row.vat_amount))}` : ""}
-                              {Number(row.tds_amount) > 0 ? ` · TDS ${formatNumber(Number(row.tds_amount))}` : ""}
-                            </div>
-                          </td>
-                          <td>{account ? accountLabel(account) : "—"}</td>
-                          <td className="num font-semibold text-green">{formatNumber(Number(row.amount))}</td>
-                          <td className="num">{formatNumber(bankAmount(row))}</td>
-                          {canManage && <td className="w-12"><AddOtherIncome accounts={moneyAccounts} record={row} /></td>}
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        </BulkSelect>
-      </section>
     </>
   );
 }

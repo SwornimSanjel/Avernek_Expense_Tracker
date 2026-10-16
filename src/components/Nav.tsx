@@ -25,6 +25,7 @@ const groups: { label: string | null; items: Item[] }[] = [
     items: [
       { href: "/expenses", label: "Expenses", short: "Spend", icon: "expense" },
       { href: "/income", label: "Income", short: "Income", icon: "income" },
+      { href: "/other-income", label: "Other income", short: "Other", icon: "sparkles" },
       { href: "/funds", label: "Company money", short: "Accounts", icon: "wallet" },
       { href: "/loans", label: "Loans", short: "Loans", icon: "arrowUpRight" },
       { href: "/subscriptions", label: "Subscriptions", short: "Subs", icon: "subscription" },
@@ -46,12 +47,15 @@ const groups: { label: string | null; items: Item[] }[] = [
   },
 ];
 
-const allItems = [...groups.flatMap((group) => group.items), { href: "/settings", label: "Settings", short: "Settings", icon: "settings" as IconName }];
+const activityItem: Item = { href: "/activity", label: "Activity log", short: "Activity", icon: "clock" };
+const settingsItem: Item = { href: "/settings", label: "Settings", short: "Settings", icon: "settings" };
 
 export default function Nav({ name, isAdmin }: { name: string; isAdmin: boolean }) {
   const path = usePathname();
   const active = (href: string) => (href === "/" ? path === "/" : path.startsWith(href));
   const shown = displayName(name);
+  // The activity log is for administrators only.
+  const allItems = [...groups.flatMap((group) => group.items), ...(isAdmin ? [activityItem] : []), settingsItem];
   const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
@@ -116,7 +120,8 @@ export default function Nav({ name, isAdmin }: { name: string; isAdmin: boolean 
         </nav>
 
         <div className="sb-foot">
-          <NavLink item={allItems[allItems.length - 1]} active={active("/settings")} />
+          {isAdmin && <NavLink item={activityItem} active={active("/activity")} />}
+          <NavLink item={settingsItem} active={active("/settings")} />
           <div className="sb-user">
             <div className="avatar avatar-round !w-8 !h-8 !text-[12px]">{initialsOf(name)}</div>
             <div className="sb-user-text min-w-0 flex-1">

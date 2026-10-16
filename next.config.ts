@@ -13,6 +13,24 @@ const nextConfig: NextConfig = {
     // reject a single phone photo of a receipt.
     serverActions: { bodySizeLimit: "45mb" },
   },
+  // Baseline browser protections for a finance app: no framing (clickjacking),
+  // no MIME sniffing, no full URLs leaked to other sites, and only the device
+  // features the app really uses (microphone for voice input, camera for
+  // receipt photos).
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: [
+          { key: "X-Frame-Options", value: "SAMEORIGIN" },
+          { key: "Content-Security-Policy", value: "frame-ancestors 'self'" },
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+          { key: "Permissions-Policy", value: "camera=(self), microphone=(self), geolocation=(), payment=()" },
+        ],
+      },
+    ];
+  },
   images: {
     remotePatterns: [
       // Supabase Storage public bucket for receipt images

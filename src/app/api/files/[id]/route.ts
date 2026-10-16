@@ -31,7 +31,8 @@ export async function GET(
   const download = new URL(request.url).searchParams.get("download") === "1";
   // Browsers other than Safari cannot display HEIC, so it is always a download.
   const inline = !download && !/^image\/hei[cf]$/.test(file.content_type);
-  const asciiName = file.file_name.replace(/[^\x20-\x7e]/g, "_");
+  // Quotes, backslashes and semicolons would break out of the header parameter.
+  const asciiName = file.file_name.replace(/[^\x20-\x7e]|["\\;]/g, "_");
 
   return new Response(new Uint8Array(file.data), {
     headers: {

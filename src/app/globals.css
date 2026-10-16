@@ -2474,3 +2474,55 @@ section + section > .bills-month { border-top: 1px solid var(--line); }
   .assistant-launcher, .assistant-panel, .assistant-welcome, .assistant-user, .assistant-reply, .assistant-thinking,
   .assistant-dots i, .assistant-dot, .assistant-spinner { animation: none; }
 }
+
+/* ----- Income → Other income pointer ----- */
+.income-other-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 14px;
+  transition: border-color 140ms ease, background 140ms ease;
+}
+.income-other-link:hover { border-color: var(--line-strong); background: var(--surface-2); }
+.income-other-link svg { color: var(--accent); flex: none; }
+
+/* ----- Activity log ----- */
+.activity-day {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-2);
+  font-size: 14px;
+  font-weight: 650;
+}
+.activity-day span { color: var(--muted); font-size: 13px; font-weight: 500; }
+.activity-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 18px;
+  font-size: 14px;
+}
+.activity-row + .activity-row { border-top: 1px solid var(--line); }
+.activity-time { width: 64px; flex: none; padding-top: 5px; color: var(--muted); font-size: 13px; }
+.activity-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 6px; padding-top: 4px; }
+.activity-line strong { font-weight: 650; }
+.activity-area { font-weight: 600; }
+.activity-summary { color: var(--ink-2, var(--ink)); }
+.activity-summary::before { content: "·"; margin-right: 6px; color: var(--muted); }
+.activity-link { display: inline-flex; flex-wrap: wrap; gap: 4px 6px; text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 3px; }
+.activity-link:hover { text-decoration-color: var(--accent); }
+.activity-changes { margin-top: 3px; color: var(--muted); font-size: 13px; line-height: 1.45; }
+.activity-amount { flex: none; padding-top: 4px; font-weight: 600; }
+@media (max-width: 720px) {
+  .activity-time { display: none; }
+  .activity-row { padding: 12px 14px; }
+}
