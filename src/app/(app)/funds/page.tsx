@@ -58,7 +58,7 @@ export default async function FundsPage() {
           <div className="grid grid-cols-3 gap-6 text-right">
             <Figure label="Free to use" value={free} tone="var(--green)" />
             <Figure label="VAT for IRD" value={reserved} tone="var(--amber)" />
-            <Figure label="Lent out" value={lent} tone="var(--blue)" />
+            <Figure label="Lent out" value={lent} tone="var(--blue)" href="/loans" />
           </div>
         </div>
         <div className="stack-bar !h-3 mt-5">
@@ -90,7 +90,12 @@ export default async function FundsPage() {
           tone="amber"
           icon="receipt"
           title={<>VAT still to pay: NPR {formatNumber(tax.vatOwed)}{pendingBills > 0 ? ` · bills waiting to be reimbursed: NPR ${formatNumber(pendingBills)}` : ""}</>}
-          action={<Link href="/vat" className="btn btn-sm">VAT & bills</Link>}
+          action={
+            <div className="flex flex-wrap gap-2">
+              <Link href="/vat" className="btn btn-sm">VAT & TDS</Link>
+              {pendingBills > 0 && <Link href="/bills" className="btn btn-sm">Bills</Link>}
+            </div>
+          }
         >
           This VAT already sits inside the VAT account balance — keep it there until it is paid to IRD.
         </Callout>
@@ -108,12 +113,24 @@ export default async function FundsPage() {
   );
 }
 
-function Figure({ label, value, tone }: { label: string; value: number; tone: string }) {
-  return (
-    <div>
-      <div className="text-[13px] muted flex items-center justify-end gap-1.5"><span className="dot" style={{ color: tone }} />{label}</div>
+function Figure({ label, value, tone, href }: { label: string; value: number; tone: string; href?: string }) {
+  const body = (
+    <>
+      <div className="text-[13px] muted flex items-center justify-end gap-1.5">
+        <span className="dot" style={{ color: tone }} />
+        {label}
+        {href && <Icon name="arrow" size={12} />}
+      </div>
       <div className="text-[20px] font-semibold tnum mt-0.5">{formatNumber(value)}</div>
-    </div>
+    </>
+  );
+  // A figure with its own page opens it (Lent out → Loans).
+  return href ? (
+    <Link href={href} className="figure-link" title={`Open ${label}`}>
+      {body}
+    </Link>
+  ) : (
+    <div>{body}</div>
   );
 }
 
@@ -131,7 +148,7 @@ function AccountPanel({ item }: { item: MoneyAccountBalance }) {
   const moneyOut = [
     { label: "Spent", value: item.spent },
     { label: item.reimbursedOut > 0 ? "Moved out & reimbursed" : "Moved out", value: item.transferredOut },
-    { label: "VAT paid to IRD", value: item.vatPaid },
+    { label: "Tax paid to IRD", value: item.taxPaid },
     { label: "Lent out", value: item.lentOut },
   ].filter((row) => row.value > 0.004);
   const inTotal = moneyIn.reduce((sum, row) => sum + row.value, 0);

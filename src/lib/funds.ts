@@ -31,7 +31,10 @@ export type MoneyAccountBalance = {
   transferredIn: number;
   transferredOut: number;
   reimbursedOut: number;
+  /** VAT deposited to IRD from this account. */
   vatPaid: number;
+  /** Every tax deposited from this account: VAT, TDS and income tax. */
+  taxPaid: number;
   /** Lent from this account and not paid back yet. */
   loanedOut: number;
   /** All money ever lent from this account (repaid or not). */
@@ -184,6 +187,7 @@ export function computeMoneyAccountBalances(input: LedgerInput): MoneyAccountBal
       transferredOut,
       reimbursedOut,
       vatPaid,
+      taxPaid,
       loanedOut: round2(loanedOut),
       lentOut: round2(lentOut),
       loanRepaidIn: round2(loanRepaidIn),

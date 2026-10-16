@@ -115,7 +115,7 @@ export class RequestData {
     return this.once("ledger", () => loadLedger());
   }
 
-  /** Bills in Avernek's name (VAT & bills), to spot one being added twice. */
+  /** Bills in Avernek's name (the Bills page), to spot one being added twice. */
   companyBills() {
     return this.once("companyBills", () =>
       query<{ description: string; vendor_name: string | null; bill_number: string | null; bill_date: string; total_amount: string }>(

@@ -9,7 +9,7 @@ import { clean, dateRange, firstIssue, isoDate, rangeText } from "./common";
 import type { ReadTool } from "./types";
 
 /**
- * Bills in Avernek's name (VAT & bills), month by month as the page shows
+ * Bills in Avernek's name (the Bills page), month by month as the page shows
  * them: each month's bills newest first, with the month's total and VAT, and
  * what is still to be paid back from the VAT account.
  */
@@ -33,7 +33,7 @@ export const listCompanyBills: ReadTool = {
   kind: "read",
   permission: "member",
   description:
-    "List bills issued in Avernek's name (VAT & bills: VAT/PAN bills from cafes, shops, lawyers), grouped by month, newest first, with each month's total and VAT, and what is still to pay back for bills being paid back. Optional period, text and unpaid filters. Use for 'show our VAT bills', 'bills in August', 'bills from Himalayan SIP', 'which bills are still to be reimbursed'.",
+    "List bills issued in Avernek's name (the Bills page: VAT/PAN bills from cafes, shops, lawyers), grouped by month, newest first, with each month's total and VAT, and what is still to pay back for bills being paid back. Optional period, text and unpaid filters. Use for 'show our VAT bills', 'bills in August', 'bills from Himalayan SIP', 'which bills are still to be reimbursed'.",
   schema: listBillsSchema,
   async run(raw, ctx) {
     const parsed = listBillsSchema.safeParse(clean(raw));

@@ -135,6 +135,8 @@ const CAPITAL_TYPES: CapitalInflowType[] = [
 function revalidateFunds() {
   revalidatePath("/funds");
   revalidatePath("/vat");
+  revalidatePath("/bills");
+  revalidatePath("/loans");
   revalidatePath("/income");
   revalidatePath("/");
 }

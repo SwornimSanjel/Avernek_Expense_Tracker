@@ -246,7 +246,7 @@ export default async function Dashboard() {
               subtitle="Avernek Technologies · Global IME"
               balance={vat.balance}
               moneyIn={vat.revenue + vat.vatIn - vat.tdsWithheld + vat.capitalIn + vat.transferredIn + vat.loanRepaidIn}
-              moneyOut={vat.spent + vat.transferredOut + vat.vatPaid + vat.lentOut}
+              moneyOut={vat.spent + vat.transferredOut + vat.taxPaid + vat.lentOut}
               split={{ free: vat.free, reserved: vat.vatReserved }}
               note={vat.capitalIn > 0 ? `Includes NPR ${formatNumber(vat.capitalIn)} capital added (not revenue)` : undefined}
             />
@@ -260,7 +260,7 @@ export default async function Dashboard() {
               subtitle="Held by Swornim · Global IME · company money"
               balance={nonVat.balance}
               moneyIn={nonVat.revenue + nonVat.vatIn - nonVat.tdsWithheld + nonVat.capitalIn + nonVat.transferredIn + nonVat.loanRepaidIn}
-              moneyOut={nonVat.spent + nonVat.transferredOut + nonVat.vatPaid + nonVat.lentOut}
+              moneyOut={nonVat.spent + nonVat.transferredOut + nonVat.taxPaid + nonVat.lentOut}
               split={{ free: nonVat.free, reserved: nonVat.vatReserved }}
               note={nonVat.loanedOut > 0 ? `NPR ${formatNumber(nonVat.loanedOut)} lent out, not back yet` : undefined}
             />

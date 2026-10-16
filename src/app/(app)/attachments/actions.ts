@@ -32,6 +32,7 @@ function revalidateFor(kind: AttachmentKind) {
   }
   if (kind === "company_bill") {
     revalidatePath("/vat");
+    revalidatePath("/bills");
     return;
   }
   revalidatePath("/income");

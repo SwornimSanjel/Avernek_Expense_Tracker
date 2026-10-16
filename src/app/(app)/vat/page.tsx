@@ -3,13 +3,9 @@ import { requireSession } from "@/lib/auth/server";
 import { isAppOwner } from "@/lib/authz";
 import { EmptyState, PageHeader } from "@/components/ui";
 import PanelTabs from "@/components/PanelTabs";
-import {
-  AddCompanyBill,
-  ConfirmDelete,
-  PayTax,
-  ReimburseBill,
-  type TaxPeriodOption,
-} from "@/components/VatBillsActions";
+import { ConfirmDelete, PayTax, type TaxPeriodOption } from "@/components/VatBillsActions";
+import FileLinks from "@/components/FileLinks";
+import Link from "next/link";
 import TaxOverview from "@/components/TaxOverview";
 import { daysUntil, firstTaxMonth, tdsPeriods, upcomingDeadlines, vatPeriods, type PeriodStatus } from "@/lib/tax-calendar";
 import { bsMonthLabel, fiscalYearOf, formatBs } from "@/lib/nepali-date";
@@ -17,12 +13,11 @@ import { accountShortName, claimedVat } from "@/lib/funds";
 import { loadLedger } from "@/lib/ledger";
 import { bankAmount } from "@/lib/tax";
 import { OTHER_INCOME_LABELS, formatServiceDate, todayIso } from "@/lib/income";
-import BillsByMonth from "@/components/BillsByMonth";
-import { deleteCompanyBill, deleteCompanyBills, deleteMoneyTransfer, deleteTaxPayment, deleteTaxPayments } from "../funds/actions";
+import { deleteTaxPayment, deleteTaxPayments } from "../funds/actions";
 import BulkSelect, { SelectBox, SelectToggle } from "@/components/BulkSelect";
 import type { Category, IncomeAgreement } from "@/lib/types";
 import Icon from "@/components/Icons";
-import { ATTACHMENT_COLUMNS, attachmentUrl, type Attachment } from "@/lib/attachments";
+import { ATTACHMENT_COLUMNS, type Attachment } from "@/lib/attachments";
 import { formatNumber } from "@/lib/format";
 import { monthLabel } from "@/lib/dates";
 
@@ -42,24 +37,10 @@ type VatRow = {
   bills: Attachment[];
 };
 
-function FileLinks({ files, label }: { files: Attachment[]; label: string }) {
-  if (!files.length) return null;
-  return (
-    <span className="flex flex-wrap gap-1 mt-1.5">
-      {files.map((file, index) => (
-        <a key={file.id} href={attachmentUrl(file.id)} target="_blank" rel="noopener" className="pill accent" title={file.file_name}>
-          <Icon name="receipt" size={12} />
-          {files.length > 1 ? `${label} ${index + 1}` : label}
-        </a>
-      ))}
-    </span>
-  );
-}
-
 /**
- * Everything VAT in one place: who paid us VAT and on how much, the bills in
- * Avernek's name that carry VAT we can claim, reimbursing those bills, and what
- * was deposited to IRD.
+ * VAT and TDS in one place: what was collected and claimed, what is owed and
+ * when, month by Nepali month, TDS, and what was paid to IRD. The bills behind
+ * the claimed VAT live on the Bills page.
  */
 export default async function VatPage() {
   const session = await requireSession();
@@ -79,7 +60,7 @@ export default async function VatPage() {
     const owner = file.payment_id ?? file.company_bill_id!;
     filesByOwner.set(owner, [...(filesByOwner.get(owner) ?? []), file]);
   }
-  const { accounts, payments, otherIncome, taxPayments, balances, tax, billStatuses } = ledger;
+  const { accounts, payments, otherIncome, taxPayments, balances, tax } = ledger;
   const clientById = new Map(agreements.map((agreement) => [agreement.id, agreement.client_name]));
   const accountById = new Map(accounts.map((account) => [account.id, account]));
 
@@ -149,8 +130,6 @@ export default async function VatPage() {
   const fiscalYear = fiscalYearOf(today);
   const salariesThisYear = salaries.filter((row) => fiscalYearOf(row.date).start === fiscalYear.start).reduce((sum, row) => sum + row.amount, 0);
   const tdsDeposited = taxPayments.filter((row) => row.tax_type === "tds").reduce((sum, row) => sum + Number(row.amount), 0);
-  const pendingTotal = billStatuses.reduce((sum, item) => sum + item.pending, 0);
-  const vatRoom = Math.max(0, balances.find((item) => item.account.kind === "company_bank")?.free ?? 0);
 
   const collectedPanel =
     collected.length === 0 ? (
@@ -204,104 +183,6 @@ export default async function VatPage() {
         </table>
       </div>
     );
-
-  const billsPanel = (
-    <>
-      <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5 border-b bg-[var(--surface-2)]">
-        <p className="text-[13.5px] muted max-w-2xl">
-          {pendingTotal > 0
-            ? <>NPR {formatNumber(pendingTotal)} still to reimburse · NPR {formatNumber(vatRoom)} can be used from the VAT account right now.</>
-            : "Bills issued to Avernek: cafes, shops, lawyers… Their VAT lowers what we owe IRD."}
-        </p>
-        {canManage && <AddCompanyBill compact />}
-      </div>
-      {billStatuses.length === 0 && (
-        <EmptyState title="No bills yet" description="Press “Add VAT bill”, then “Reimburse” on it when the VAT account has room." icon="receipt" />
-      )}
-      {billStatuses.length > 0 && (
-        <BillsByMonth
-          today={todayIso()}
-          onDelete={canManage ? deleteCompanyBills : undefined}
-          items={billStatuses.map((item) => ({
-            id: item.bill.id,
-            date: item.bill.bill_date,
-            total: Number(item.bill.total_amount),
-            vat: Number(item.bill.vat_amount),
-            claimed: claimedVat(item.bill),
-            pending: item.pending,
-            content: (
-              <div className="px-5 py-4">
-                <div className="flex flex-wrap items-start gap-4">
-                  <div className="row-icon" style={{ "--tone": "var(--amber)", "--tone-soft": "var(--amber-soft)" } as React.CSSProperties}>
-                    <Icon name="file" size={17} />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    {/* The shop is the title; what it was for sits underneath. */}
-                    <div className="text-[15px] font-semibold">{item.bill.vendor_name || item.bill.description}</div>
-                    <div className="text-[13px] muted mt-0.5">
-                      {formatServiceDate(item.bill.bill_date)}
-                      {item.bill.vendor_name ? ` · ${item.bill.description}` : ""}
-                      {item.bill.bill_number ? ` · bill ${item.bill.bill_number}` : ""}
-                      {item.bill.paid_by ? ` · paid by ${item.bill.paid_by}` : ""}
-                    </div>
-                    <FileLinks files={filesByOwner.get(item.bill.id) ?? []} label="Bill" />
-                  </div>
-                  <dl className={`grid ${item.paysBack ? "grid-cols-5" : "grid-cols-3"} gap-5 text-right`}>
-                    <BillFigure label="Bill" value={formatNumber(Number(item.bill.total_amount))} />
-                    <BillFigure label="VAT in it" value={formatNumber(Number(item.bill.vat_amount))} tone="text-amber" />
-                    {/* What comes off the VAT owed to IRD: 0 when the VAT cannot be claimed. */}
-                    <BillFigure label="VAT claimed" value={formatNumber(claimedVat(item.bill))} tone={claimedVat(item.bill) > 0 ? "text-green" : "muted"} />
-                    {/* Only a bill being paid back from the VAT account has these. */}
-                    {item.paysBack && (
-                      <>
-                        <BillFigure label="Paid back" value={formatNumber(item.reimbursed)} tone="text-green" />
-                        <BillFigure label="Pending" value={item.pending > 0 ? formatNumber(item.pending) : "Done"} tone={item.pending > 0 ? "text-amber" : "text-green"} />
-                      </>
-                    )}
-                  </dl>
-                  {canManage && (
-                    <div className="flex items-center gap-1.5">
-                      {item.pending > 0 && <ReimburseBill bills={billStatuses} balances={balances} billId={item.bill.id} />}
-                      <AddCompanyBill bill={item.bill} files={filesByOwner.get(item.bill.id) ?? []} />
-                      <ConfirmDelete
-                        id={item.bill.id}
-                        action={deleteCompanyBill}
-                        message={
-                          item.reimbursements.length
-                            ? `Delete this bill? The NPR ${formatNumber(item.reimbursed)} already paid back stays in the accounts as a money movement, so no balance changes.`
-                            : "Delete this bill?"
-                        }
-                      />
-                    </div>
-                  )}
-                </div>
-                {item.reimbursements.length > 0 && (
-                  <div className="mt-3 ml-[52px] space-y-1.5">
-                    {item.reimbursements.map((transfer) => (
-                      <div key={transfer.id} className="flex items-center gap-3 text-[13px] card-soft px-3 py-2">
-                        <Icon name="swap" size={14} className="text-blue" />
-                        <span className="flex-1 min-w-0 truncate muted">
-                          Reimbursed {formatServiceDate(transfer.transfer_date)} · {accountShortName(accountById.get(transfer.from_account_id))} → {accountShortName(accountById.get(transfer.to_account_id))}
-                        </span>
-                        <strong className="tnum">{formatNumber(Number(transfer.from_amount))}</strong>
-                        {canManage && (
-                          <ConfirmDelete
-                            id={transfer.id}
-                            action={deleteMoneyTransfer}
-                            message={`Delete this payment back? This CHANGES BALANCES: NPR ${formatNumber(Number(transfer.from_amount))} goes back into ${accountShortName(accountById.get(transfer.from_account_id))} and out of ${accountShortName(accountById.get(transfer.to_account_id))}. Only do this if the money never actually moved.`}
-                          />
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ),
-          }))}
-        />
-      )}
-    </>
-  );
 
   const taxName = (row: (typeof taxPayments)[number]) =>
     row.tax_type === "tds" ? "TDS deposited" : row.tax_type === "income_tax" ? "Income tax paid" : Number(row.amount) === 0 ? "VAT nil return filed" : "VAT paid";
@@ -394,16 +275,15 @@ export default async function VatPage() {
   return (
     <>
       <PageHeader
-        title="VAT & bills"
-        subtitle="What Avernek owes IRD, how it is worked out, and company bills that need reimbursing."
+        title="VAT & TDS"
+        subtitle="What Avernek owes IRD, when it is due, and how it is worked out."
         action={
-          canManage ? (
-            <>
-              <AddCompanyBill />
-              <ReimburseBill bills={billStatuses} balances={balances} />
-              <PayTax kind="vat" balances={balances} periods={vatOptions} />
-            </>
-          ) : undefined
+          <>
+            <Link href="/bills" className="btn !h-9 text-sm">
+              <Icon name="file" size={15} /> Bills
+            </Link>
+            {canManage && <PayTax kind="vat" balances={balances} periods={vatOptions} />}
+          </>
         }
       />
 
@@ -452,10 +332,9 @@ export default async function VatPage() {
 
       <div className="section">
         <PanelTabs
-          initial={pendingTotal > 0 ? "bills" : "collected"}
+          initial="collected"
           tabs={[
             { key: "collected", label: "VAT we collected", count: collected.length, content: collectedPanel },
-            { key: "bills", label: "Bills in Avernek's name", count: billStatuses.length, content: billsPanel },
             { key: "tds", label: "TDS", content: tdsPanel },
             { key: "paid", label: "Paid to IRD", count: taxPayments.length, content: paidPanel },
           ]}
@@ -481,13 +360,4 @@ function StatusPill({ status }: { status: PeriodStatus | "none" }) {
   if (status === "open") return <span className="pill">This month</span>;
   if (status === "late") return <span className="pill danger">Late</span>;
   return <span className="pill warn">Due</span>;
-}
-
-function BillFigure({ label, value, tone }: { label: string; value: string; tone?: string }) {
-  return (
-    <div>
-      <dt className="text-[12.5px] muted">{label}</dt>
-      <dd className={`mt-0.5 text-[15px] font-semibold tnum ${tone ?? ""}`}>{value}</dd>
-    </div>
-  );
 }

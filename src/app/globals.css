@@ -1973,6 +1973,36 @@ section + section > .bills-month { border-top: 1px solid var(--line); }
 .settings-nav a { display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 12px; border-radius: 9px; color: var(--muted); font-size: 14px; font-weight: 520; transition: background 130ms ease, color 130ms ease; }
 .settings-nav a:hover { background: var(--hover); color: var(--ink); }
 
+/* ----- Loans page ----- */
+.figure-link { display: block; margin: -6px -8px; padding: 6px 8px; border-radius: 10px; transition: background 140ms ease; }
+.figure-link:hover { background: var(--hover); }
+.loan-figures { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
+.loan-figure {
+  --tone: var(--accent-ink);
+  --tone-soft: var(--accent-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+.loan-figure.tone-blue { --tone: var(--blue); --tone-soft: var(--blue-soft); }
+.loan-figure.tone-green { --tone: var(--green); --tone-soft: var(--green-soft); }
+.loan-figure-icon { display: inline-grid; width: 34px; height: 34px; place-items: center; margin-bottom: 6px; border-radius: 10px; background: var(--tone-soft); color: var(--tone); }
+.loan-figure-label { color: var(--muted); font-size: 13.5px; font-weight: 560; }
+.loan-figure-value { font-size: 26px; font-variant-numeric: tabular-nums; font-weight: 700; letter-spacing: -0.02em; }
+.loan-figure-value small { color: var(--muted-2); font-size: 14px; font-weight: 600; }
+.loan-figure.tone-blue .loan-figure-value { color: var(--blue); }
+.loan-figure-sub { color: var(--muted-2); font-size: 12.5px; }
+.loan-person { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px 6px 6px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--muted); font-size: 13.5px; }
+.loan-person strong { color: var(--ink); }
+.loan-explain { display: flex; gap: 12px; margin-top: 22px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface-2); color: var(--muted); font-size: 13.5px; line-height: 1.55; }
+.loan-explain svg { flex: none; margin-top: 2px; color: var(--accent-ink); }
+.loan-explain strong { color: var(--ink); }
+
 /* ----- VAT at a glance (components/TaxOverview) ----- */
 .tax-overview { display: flex; flex-direction: column; gap: 14px; }
 .tax-boxes { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); }

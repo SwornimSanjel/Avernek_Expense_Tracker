@@ -10,7 +10,7 @@ import { clean, isoDate } from "./common";
 import type { ToolAsk, ToolContext, ToolReady, WriteTool } from "./types";
 
 /**
- * Bills in Avernek's name (VAT & bills), added in a batch: "add these bills"
+ * Bills in Avernek's name (the Bills page), added in a batch: "add these bills"
  * with a pasted list. The rules are the Add VAT bill form's: what it was for,
  * the total (VAT included) and the date are required; a VAT bill's VAT is
  * worked out at 13% unless the bill's printed VAT is given; a PAN bill has none.
@@ -143,7 +143,7 @@ function vatText(item: Checked): string {
   return `VAT ${formatNumber(item.vat)}${worked} ${item.claimed > 0 ? "claimed" : "not claimed"}`;
 }
 
-/** Bills that look like ones already in VAT & bills, or repeated in the list. */
+/** Bills that look like ones already added, or repeated in the list. */
 function duplicates(items: Checked[], existing: ExistingBill[]): string[] {
   const warnings: string[] = [];
   const sameNumber = (a: { vendor: string | null; no: string | null }, b: { vendor: string | null; no: string | null }) =>
@@ -348,7 +348,7 @@ export const addCompanyBillsTool: WriteTool = {
   kind: "write",
   permission: "admin",
   description:
-    "Prepare bills issued in Avernek's name (VAT/tax invoices or PAN bills from shops, cafes, lawyers) for VAT & bills. Put EVERY bill the user listed in one call, in their order. Pass only details the user gave; the app asks for anything missing and always shows a confirmation before saving. Never claim they are saved.",
+    "Prepare bills issued in Avernek's name (VAT/tax invoices or PAN bills from shops, cafes, lawyers) for the Bills page. Put EVERY bill the user listed in one call, in their order. Pass only details the user gave; the app asks for anything missing and always shows a confirmation before saving. Never claim they are saved.",
   schema,
   async run(raw, ctx) {
     const v = clean(raw);
@@ -409,7 +409,7 @@ export const addCompanyBillsTool: WriteTool = {
       status: "ready",
       summary: `Ready to add ${count}: ${money(total)} with VAT ${formatNumber(vat)}, of which ${formatNumber(claimed)} claimed. Check them and confirm.`,
       draft: {
-        title: `Add ${count} to VAT & bills`,
+        title: `Add ${count} to Bills`,
         confirmLabel: `Save ${count}`,
         rows: [
           ...items.map((item, position) => ({
@@ -434,6 +434,6 @@ export const addCompanyBillsTool: WriteTool = {
     const result = await addCompanyBills(ready.map(toInput));
     if (result.error) return { ok: false, error: result.error };
     const count = `${ready.length} ${ready.length === 1 ? "bill" : "bills"}`;
-    return { ok: true, text: `Added ${count} to VAT & bills. Add each bill's photo from VAT & bills → Edit.` };
+    return { ok: true, text: `Added ${count} to Bills. Add each bill's photo from Bills → Edit.` };
   },
 };

@@ -26,8 +26,15 @@ const groups: { label: string | null; items: Item[] }[] = [
       { href: "/expenses", label: "Expenses", short: "Spend", icon: "expense" },
       { href: "/income", label: "Income", short: "Income", icon: "income" },
       { href: "/funds", label: "Company money", short: "Accounts", icon: "wallet" },
-      { href: "/vat", label: "VAT & bills", short: "VAT", icon: "receipt" },
+      { href: "/loans", label: "Loans", short: "Loans", icon: "arrowUpRight" },
       { href: "/subscriptions", label: "Subscriptions", short: "Subs", icon: "subscription" },
+    ],
+  },
+  {
+    label: "Tax",
+    items: [
+      { href: "/vat", label: "VAT & TDS", short: "VAT", icon: "receipt" },
+      { href: "/bills", label: "Bills", short: "Bills", icon: "file" },
     ],
   },
   {

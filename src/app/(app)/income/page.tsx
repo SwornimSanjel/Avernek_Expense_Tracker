@@ -29,9 +29,7 @@ import { bankAmount } from "@/lib/tax";
 import { formatNumber, percentChange } from "@/lib/format";
 import type { IncomeAgreement, ServiceKey } from "@/lib/types";
 import { ATTACHMENT_COLUMNS, type Attachment } from "@/lib/attachments";
-import { LendMoney, MarkLoanRepaid } from "@/components/LoanActions";
 import { accountLabel } from "@/lib/statement";
-import { USER_COLUMNS, partnersOf } from "@/lib/people";
 import { monthName, shiftMonth } from "@/lib/dates";
 
 export const dynamic = "force-dynamic";
@@ -65,7 +63,7 @@ export default async function IncomePage({
   const thisMonth = today.slice(0, 7);
   const lastMonth = shiftMonth(thisMonth, -1);
 
-  const [agreements, ledger, agreementFileRows, people, vatBillRows] = await Promise.all([
+  const [agreements, ledger, agreementFileRows, vatBillRows] = await Promise.all([
     query<IncomeAgreement>(
       `select * from public.income_agreements
        order by case status when 'active' then 0 when 'pending' then 1 when 'paused' then 2 else 3 end,
@@ -77,7 +75,6 @@ export default async function IncomePage({
         where kind = 'client_agreement'
         order by created_at`
     ),
-    query<{ id: string; name: string; is_partner: boolean }>(`select ${USER_COLUMNS} from public.users order by name`),
     query<Attachment>(
       `select ${ATTACHMENT_COLUMNS} from public.attachments
         where kind = 'vat_bill'
@@ -92,7 +89,6 @@ export default async function IncomePage({
     agreementFilesById.set(file.agreement_id!, list);
   }
   const { payments, accounts: moneyAccounts, balances, otherIncome, tax } = ledger;
-  const partnerNames = partnersOf(people).map((person) => person.name);
 
   const summaries = new Map<string, IncomeAgreementSummary>(
     agreements.map((agreement) => [agreement.id, summarizeIncomeAgreement(agreement, payments, today)])
@@ -192,39 +188,15 @@ export default async function IncomePage({
       </div>
 
       {openLoans.length > 0 && (
-        <div className="card mt-3 overflow-hidden">
-          <div className="card-head">
-            <div>
-              <h3>Loans out · NPR {formatNumber(openLoans.reduce((sum, loan) => sum + Number(loan.amount), 0))} not back yet</h3>
-              <p>Already taken out of the balances above. Mark it paid back when the money returns.</p>
-            </div>
-            {canManage && <LendMoney balances={balances} people={partnerNames} compact />}
-          </div>
-          <div className="row-list">
-            {openLoans.map((loan) => {
-              const account = accountById.get(loan.money_account_id);
-              return (
-                <div key={loan.id} className="row-item">
-                  <Avatar name={loan.borrower_name} size={36} round />
-                  <div className="min-w-0 flex-1">
-                    <div className="row-title">{loan.borrower_name}</div>
-                    <div className="row-meta">
-                      From {account ? accountLabel(account) : "account"} · taken {formatServiceDate(loan.lent_on)}
-                      {loan.note ? ` · ${loan.note}` : ""}
-                    </div>
-                  </div>
-                  <div className="row-amount">{formatNumber(Number(loan.amount))}</div>
-                  {canManage && (
-                    <div className="flex items-center gap-1.5">
-                      <MarkLoanRepaid loan={loan} accounts={moneyAccounts} />
-                      <LendMoney balances={balances} people={partnerNames} loan={loan} />
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
+        <Callout
+          className="mt-3"
+          tone="blue"
+          icon="arrowUpRight"
+          title={<>Loans out: NPR {formatNumber(openLoans.reduce((sum, loan) => sum + Number(loan.amount), 0))} not paid back yet</>}
+          action={<Link href="/loans" className="btn btn-sm">Open Loans</Link>}
+        >
+          Not income: lent company money, already taken out of the balances above.
+        </Callout>
       )}
 
       {(tax.vatOwed > 0 || tax.tdsCredit > 0) && (
@@ -244,7 +216,6 @@ export default async function IncomePage({
         <SectionHeader
           title={`Clients · ${visible.length === agreements.length ? agreements.length : `${visible.length} of ${agreements.length}`}`}
           subtitle="Open a client for its full billing history."
-          action={!openLoans.length && canManage ? <LendMoney balances={balances} people={partnerNames} compact /> : undefined}
         />
         <UrlFilters
           values={filters as Record<string, string | undefined>}
