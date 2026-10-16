@@ -222,11 +222,6 @@ export default async function VatPage() {
         <BillsByMonth
           today={todayIso()}
           onDelete={canManage ? deleteCompanyBills : undefined}
-          locked={Object.fromEntries(
-            billStatuses
-              .filter((item) => item.reimbursements.length > 0)
-              .map((item) => [item.bill.id, "It has been paid back. Delete its reimbursement first."])
-          )}
           items={billStatuses.map((item) => ({
             id: item.bill.id,
             date: item.bill.bill_date,
@@ -268,7 +263,15 @@ export default async function VatPage() {
                     <div className="flex items-center gap-1.5">
                       {item.pending > 0 && <ReimburseBill bills={billStatuses} balances={balances} billId={item.bill.id} />}
                       <AddCompanyBill bill={item.bill} files={filesByOwner.get(item.bill.id) ?? []} />
-                      {item.reimbursements.length === 0 && <ConfirmDelete id={item.bill.id} action={deleteCompanyBill} message="Delete this bill?" />}
+                      <ConfirmDelete
+                        id={item.bill.id}
+                        action={deleteCompanyBill}
+                        message={
+                          item.reimbursements.length
+                            ? `Delete this bill? The NPR ${formatNumber(item.reimbursed)} already paid back stays in the accounts as a money movement, so no balance changes.`
+                            : "Delete this bill?"
+                        }
+                      />
                     </div>
                   )}
                 </div>
@@ -281,7 +284,13 @@ export default async function VatPage() {
                           Reimbursed {formatServiceDate(transfer.transfer_date)} · {accountShortName(accountById.get(transfer.from_account_id))} → {accountShortName(accountById.get(transfer.to_account_id))}
                         </span>
                         <strong className="tnum">{formatNumber(Number(transfer.from_amount))}</strong>
-                        {canManage && <ConfirmDelete id={transfer.id} action={deleteMoneyTransfer} message="Delete this reimbursement? The money goes back to the VAT account." />}
+                        {canManage && (
+                          <ConfirmDelete
+                            id={transfer.id}
+                            action={deleteMoneyTransfer}
+                            message={`Delete this payment back? This CHANGES BALANCES: NPR ${formatNumber(Number(transfer.from_amount))} goes back into ${accountShortName(accountById.get(transfer.from_account_id))} and out of ${accountShortName(accountById.get(transfer.to_account_id))}. Only do this if the money never actually moved.`}
+                          />
+                        )}
                       </div>
                     ))}
                   </div>

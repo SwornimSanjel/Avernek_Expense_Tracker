@@ -414,34 +414,26 @@ export async function addCompanyBills(bills: CompanyBillInput[]): Promise<FundsF
   return guardSave(() => addCompanyBillsUnguarded(bills));
 }
 
+/**
+ * Deleting a bill never touches money. If it was paid back, that payment
+ * happened: it stays in the accounts as a money movement (its link to the
+ * bill is cleared by the foreign key), so no balance changes.
+ */
 export async function deleteCompanyBill(id: string) {
   await owner();
-  const used = await one<{ count: string }>(
-    `select count(*) from public.money_transfers where bill_id = $1`,
-    [id]
-  );
-  if (Number(used?.count ?? 0) > 0) {
-    throw new Error("Delete this bill's reimbursements first.");
-  }
   await exec(`delete from public.company_bills where id = $1`, [id]);
   revalidateFunds();
 }
 
-/** Several bills at once. A bill that has been paid back is kept, as with one. */
+/** Several bills at once; any payments back stay, as with one. */
 export async function deleteCompanyBills(ids: string[]): Promise<BulkResult> {
   await owner();
   const list = bulkIds(ids);
   const deleted = list.length
-    ? await query<{ id: string }>(
-        `delete from public.company_bills b
-          where b.id = any($1::uuid[])
-            and not exists (select 1 from public.money_transfers t where t.bill_id = b.id)
-          returning b.id`,
-        [list]
-      )
+    ? await query<{ id: string }>(`delete from public.company_bills where id = any($1::uuid[]) returning id`, [list])
     : [];
   revalidateFunds();
-  return bulkResult(deleted.length, list.length, { one: "bill", many: "bills" }, "already paid back, delete the reimbursement first");
+  return bulkResult(deleted.length, list.length, { one: "bill", many: "bills" });
 }
 
 export async function reimburseBill(
