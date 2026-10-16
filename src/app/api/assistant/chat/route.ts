@@ -30,7 +30,9 @@ export async function POST(request: Request) {
   const raw = await readJson(request);
   if (raw instanceof Response) return raw;
   const parsed = body.safeParse(raw);
-  if (!parsed.success) return json({ error: "Please write a message (up to 1,500 characters)." }, 400);
+  if (!parsed.success) {
+    return json({ error: `Please write a message (up to ${LIMITS.messageChars.toLocaleString("en-US")} characters).` }, 400);
+  }
 
   try {
     return json(await runChat(parsed.data, guarded.ctx, guarded.deps));

@@ -12,7 +12,8 @@ import {
 import { accountShortName } from "@/lib/funds";
 import { loadLedger } from "@/lib/ledger";
 import { bankAmount } from "@/lib/tax";
-import { OTHER_INCOME_LABELS, formatServiceDate } from "@/lib/income";
+import { OTHER_INCOME_LABELS, formatServiceDate, todayIso } from "@/lib/income";
+import BillsByMonth from "@/components/BillsByMonth";
 import { deleteCompanyBill, deleteMoneyTransfer, deleteTaxPayment } from "../funds/actions";
 import type { IncomeAgreement } from "@/lib/types";
 import Icon from "@/components/Icons";
@@ -180,54 +181,64 @@ export default async function VatPage() {
       {billStatuses.length === 0 && (
         <EmptyState title="No bills yet" description="Press “Add VAT bill”, then “Reimburse” on it when the VAT account has room." icon="receipt" />
       )}
-      <div className="row-list">
-        {billStatuses.map((item) => (
-          <div key={item.bill.id} className="px-5 py-4">
-            <div className="flex flex-wrap items-start gap-4">
-              <div className="row-icon" style={{ "--tone": "var(--amber)", "--tone-soft": "var(--amber-soft)" } as React.CSSProperties}>
-                <Icon name="file" size={17} />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="text-[15px] font-semibold">{item.bill.description}</div>
-                <div className="text-[13px] muted mt-0.5">
-                  {formatServiceDate(item.bill.bill_date)}
-                  {item.bill.vendor_name ? ` · ${item.bill.vendor_name}` : ""}
-                  {item.bill.bill_number ? ` · bill ${item.bill.bill_number}` : ""}
-                  {item.bill.paid_by ? ` · paid by ${item.bill.paid_by}` : ""}
-                </div>
-                <FileLinks files={filesByOwner.get(item.bill.id) ?? []} label="Bill" />
-              </div>
-              <dl className="grid grid-cols-4 gap-5 text-right">
-                <BillFigure label="Bill" value={formatNumber(Number(item.bill.total_amount))} />
-                <BillFigure label="VAT in it" value={formatNumber(Number(item.bill.vat_amount))} tone="text-amber" />
-                <BillFigure label="Paid back" value={formatNumber(item.reimbursed)} tone="text-green" />
-                <BillFigure label="Pending" value={item.pending > 0 ? formatNumber(item.pending) : "Done"} tone={item.pending > 0 ? "text-amber" : "text-green"} />
-              </dl>
-              {canManage && (
-                <div className="flex items-center gap-1.5">
-                  {item.pending > 0 && <ReimburseBill bills={billStatuses} balances={balances} billId={item.bill.id} />}
-                  <AddCompanyBill bill={item.bill} files={filesByOwner.get(item.bill.id) ?? []} />
-                  {item.reimbursements.length === 0 && <ConfirmDelete id={item.bill.id} action={deleteCompanyBill} message="Delete this bill?" />}
-                </div>
-              )}
-            </div>
-            {item.reimbursements.length > 0 && (
-              <div className="mt-3 ml-[52px] space-y-1.5">
-                {item.reimbursements.map((transfer) => (
-                  <div key={transfer.id} className="flex items-center gap-3 text-[13px] card-soft px-3 py-2">
-                    <Icon name="swap" size={14} className="text-blue" />
-                    <span className="flex-1 min-w-0 truncate muted">
-                      Reimbursed {formatServiceDate(transfer.transfer_date)} · {accountShortName(accountById.get(transfer.from_account_id))} → {accountShortName(accountById.get(transfer.to_account_id))}
-                    </span>
-                    <strong className="tnum">{formatNumber(Number(transfer.from_amount))}</strong>
-                    {canManage && <ConfirmDelete id={transfer.id} action={deleteMoneyTransfer} message="Delete this reimbursement? The money goes back to the VAT account." />}
+      {billStatuses.length > 0 && (
+        <BillsByMonth
+          today={todayIso()}
+          items={billStatuses.map((item) => ({
+            id: item.bill.id,
+            date: item.bill.bill_date,
+            total: Number(item.bill.total_amount),
+            vat: Number(item.bill.vat_amount),
+            pending: item.pending,
+            content: (
+              <div className="px-5 py-4">
+                <div className="flex flex-wrap items-start gap-4">
+                  <div className="row-icon" style={{ "--tone": "var(--amber)", "--tone-soft": "var(--amber-soft)" } as React.CSSProperties}>
+                    <Icon name="file" size={17} />
                   </div>
-                ))}
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[15px] font-semibold">{item.bill.description}</div>
+                    <div className="text-[13px] muted mt-0.5">
+                      {formatServiceDate(item.bill.bill_date)}
+                      {item.bill.vendor_name ? ` · ${item.bill.vendor_name}` : ""}
+                      {item.bill.bill_number ? ` · bill ${item.bill.bill_number}` : ""}
+                      {item.bill.paid_by ? ` · paid by ${item.bill.paid_by}` : ""}
+                    </div>
+                    <FileLinks files={filesByOwner.get(item.bill.id) ?? []} label="Bill" />
+                  </div>
+                  <dl className="grid grid-cols-4 gap-5 text-right">
+                    <BillFigure label="Bill" value={formatNumber(Number(item.bill.total_amount))} />
+                    <BillFigure label="VAT in it" value={formatNumber(Number(item.bill.vat_amount))} tone="text-amber" />
+                    <BillFigure label="Paid back" value={formatNumber(item.reimbursed)} tone="text-green" />
+                    <BillFigure label="Pending" value={item.pending > 0 ? formatNumber(item.pending) : "Done"} tone={item.pending > 0 ? "text-amber" : "text-green"} />
+                  </dl>
+                  {canManage && (
+                    <div className="flex items-center gap-1.5">
+                      {item.pending > 0 && <ReimburseBill bills={billStatuses} balances={balances} billId={item.bill.id} />}
+                      <AddCompanyBill bill={item.bill} files={filesByOwner.get(item.bill.id) ?? []} />
+                      {item.reimbursements.length === 0 && <ConfirmDelete id={item.bill.id} action={deleteCompanyBill} message="Delete this bill?" />}
+                    </div>
+                  )}
+                </div>
+                {item.reimbursements.length > 0 && (
+                  <div className="mt-3 ml-[52px] space-y-1.5">
+                    {item.reimbursements.map((transfer) => (
+                      <div key={transfer.id} className="flex items-center gap-3 text-[13px] card-soft px-3 py-2">
+                        <Icon name="swap" size={14} className="text-blue" />
+                        <span className="flex-1 min-w-0 truncate muted">
+                          Reimbursed {formatServiceDate(transfer.transfer_date)} · {accountShortName(accountById.get(transfer.from_account_id))} → {accountShortName(accountById.get(transfer.to_account_id))}
+                        </span>
+                        <strong className="tnum">{formatNumber(Number(transfer.from_amount))}</strong>
+                        {canManage && <ConfirmDelete id={transfer.id} action={deleteMoneyTransfer} message="Delete this reimbursement? The money goes back to the VAT account." />}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-        ))}
-      </div>
+            ),
+          }))}
+        />
+      )}
     </>
   );
 

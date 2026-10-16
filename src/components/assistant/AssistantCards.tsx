@@ -98,7 +98,7 @@ function AssistantCard({ card }: { card: Card }) {
             {card.rows.map((row, index) => (
               <tr key={index}>
                 {card.columns.map((column) => (
-                  <td key={column.key} className={column.align === "right" ? "num" : undefined}>
+                  <td key={column.key} className={column.align === "right" ? "num" : column.key === "date" ? "whitespace-nowrap" : undefined}>
                     {row[column.key] ?? ""}
                   </td>
                 ))}

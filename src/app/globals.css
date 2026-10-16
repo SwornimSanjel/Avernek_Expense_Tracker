@@ -654,6 +654,13 @@ details.no-marker > summary::after { content: none; }
 
 /* ----- statement ---------------------------------------------------------------- */
 .stmt-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 14px 18px; border-bottom: 1px solid var(--line); }
+/* VAT & bills: the period's totals, then one header per month. */
+.bills-summary { display: flex; flex-wrap: wrap; gap: 6px 22px; padding: 12px 20px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 13.5px; }
+.bills-summary strong { color: var(--ink); font-weight: 650; }
+.bills-summary .text-amber { color: var(--amber); }
+.bills-month { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 16px; padding: 10px 20px; border-bottom: 1px solid var(--line); background: var(--surface-2); font-size: 14px; }
+section + section > .bills-month { border-top: 1px solid var(--line); }
+.bills-month-figures { display: flex; gap: 18px; font-size: 13.5px; }
 .stmt-period { display: inline-flex; align-items: center; gap: 4px; }
 .stmt-period-label { min-width: 150px; padding: 0 6px; color: var(--ink); font-size: 15px; font-weight: 620; text-align: center; white-space: nowrap; }
 .stmt-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-bottom: 1px solid var(--line); }
@@ -2139,9 +2146,10 @@ details.no-marker > summary::after { content: none; }
   .assistant-table th, .assistant-table td { padding-inline: 7px; }
 }
 .assistant-table tfoot td { border-top: 1px solid var(--line-strong); border-bottom: 0; font-weight: 650; }
-.assistant-facts { display: grid; gap: 11px 16px; grid-template-columns: auto 1fr; margin: 0; font-size: 14px; }
-.assistant-facts dt { color: var(--muted); }
-.assistant-facts dd { margin: 0; font-variant-numeric: tabular-nums; font-weight: 560; text-align: right; overflow-wrap: anywhere; }
+/* Labels take their own width up to 45% of the card, then wrap; values get the rest. */
+.assistant-facts { display: grid; gap: 11px 16px; grid-template-columns: fit-content(45%) 1fr; margin: 0; font-size: 14px; }
+.assistant-facts dt { color: var(--muted); overflow-wrap: break-word; }
+.assistant-facts dd { min-width: 0; margin: 0; font-variant-numeric: tabular-nums; font-weight: 560; text-align: right; overflow-wrap: break-word; }
 .assistant-facts dd small { display: block; margin-top: 2px; color: var(--muted-2); font-size: 12.5px; font-weight: 450; }
 .assistant-note { margin-top: 12px; color: var(--muted-2); font-size: 12.5px; line-height: 1.5; }
 .assistant-tone-good { color: var(--green); }

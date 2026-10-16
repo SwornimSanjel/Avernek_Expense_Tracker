@@ -189,7 +189,15 @@ export async function runChat(
   const messages = buildMessages(input, ctx);
   ctx = { ...ctx, conversation: input.context };
 
-  const first = await deps.chat({ messages, tools: definitions, toolChoice: "auto", maxTokens: 500 });
+  // A pasted list (bills) becomes one long tool call: give it room and time.
+  const long = input.message.length > 1500;
+  const first = await deps.chat({
+    messages,
+    tools: definitions,
+    toolChoice: "auto",
+    maxTokens: long ? 4000 : 500,
+    ...(long ? { timeoutMs: 90_000 } : {}),
+  });
   await deps.audit({
     userId: ctx.session.sub,
     kind: "chat",

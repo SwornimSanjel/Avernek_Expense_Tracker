@@ -115,6 +115,15 @@ export class RequestData {
     return this.once("ledger", () => loadLedger());
   }
 
+  /** Bills in Avernek's name (VAT & bills), to spot one being added twice. */
+  companyBills() {
+    return this.once("companyBills", () =>
+      query<{ description: string; vendor_name: string | null; bill_number: string | null; bill_date: string; total_amount: string }>(
+        `select description, vendor_name, bill_number, bill_date, total_amount from public.company_bills order by bill_date desc`
+      )
+    );
+  }
+
   usdRate() {
     return this.once("usdRate", () => getCachedUsdSellRate());
   }

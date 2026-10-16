@@ -39,6 +39,8 @@ export type ChatRequest = {
   tools?: ToolDefinition[];
   toolChoice?: "auto" | "none";
   maxTokens?: number;
+  /** Per attempt; a long tool call (a pasted list of bills) needs longer than the default. */
+  timeoutMs?: number;
 };
 
 export type ChatResult = {
@@ -162,7 +164,7 @@ export async function chat(
       max_tokens: request.maxTokens ?? 700,
       provider: DATA_POLICY,
     },
-    30_000,
+    request.timeoutMs ?? 30_000,
     fetchImpl
   );
   const choice = (json.choices as { message?: Record<string, unknown> }[] | undefined)?.[0];

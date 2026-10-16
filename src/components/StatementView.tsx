@@ -4,12 +4,11 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import Icon, { type IconName } from "@/components/Icons";
 import { Money } from "@/components/ui";
-import { MonthPicker, Segmented, Tabs } from "@/components/controls";
-import { dayLabel, monthLabel, monthRange, shiftMonth } from "@/lib/dates";
+import { Segmented, Tabs } from "@/components/controls";
+import PeriodPicker, { describePeriod, initialPeriod, periodRange, type Period } from "@/components/PeriodPicker";
+import { dayLabel, monthLabel, monthRange } from "@/lib/dates";
 import { formatNumber } from "@/lib/format";
 import type { StatementAccount, StatementEvent, StatementKind } from "@/lib/statement";
-
-type PeriodMode = "month" | "last" | "year" | "all" | "custom";
 
 const KIND_META: Record<StatementKind, { icon: IconName; tone: string; soft: string; label: string }> = {
   client: { icon: "income", tone: "var(--green)", soft: "var(--green-soft)", label: "Client payment" },
@@ -43,10 +42,7 @@ export default function StatementView({
   compact?: boolean;
 }) {
   const thisMonth = today.slice(0, 7);
-  const [mode, setMode] = useState<PeriodMode>("month");
-  const [monthKey, setMonthKey] = useState(thisMonth);
-  const [from, setFrom] = useState(monthRange(thisMonth).from);
-  const [to, setTo] = useState(today);
+  const [period, setPeriod] = useState<Period>(() => initialPeriod(today));
   const [account, setAccount] = useState(initialAccount);
   const [direction, setDirection] = useState<"all" | "in" | "out">("all");
   const [search, setSearch] = useState("");
@@ -61,24 +57,8 @@ export default function StatementView({
   const monthsWithData = useMemo(() => new Set(scoped.map((event) => event.date.slice(0, 7))), [scoped]);
   const firstDate = scoped.length ? scoped[scoped.length - 1].date : today;
 
-  const range = useMemo(() => {
-    if (mode === "month") return monthRange(monthKey);
-    if (mode === "last") return monthRange(shiftMonth(thisMonth, -1));
-    if (mode === "year") return { from: `${today.slice(0, 4)}-01-01`, to: `${today.slice(0, 4)}-12-31` };
-    if (mode === "all") return { from: firstDate < today ? firstDate : today, to: today > firstDate ? today : firstDate };
-    return { from: from || firstDate, to: to || today };
-  }, [mode, monthKey, thisMonth, today, firstDate, from, to]);
-
-  const periodLabel =
-    mode === "month"
-      ? monthLabel(monthKey)
-      : mode === "last"
-        ? monthLabel(shiftMonth(thisMonth, -1))
-        : mode === "year"
-          ? `Year ${today.slice(0, 4)}`
-          : mode === "all"
-            ? "All time"
-            : `${range.from} → ${range.to}`;
+  const range = useMemo(() => periodRange(period, today, firstDate), [period, today, firstDate]);
+  const periodLabel = describePeriod(period, today, range);
 
   const isFounder = account === "founder";
   const isAll = account === "all";
@@ -249,86 +229,16 @@ export default function StatementView({
     <div className="card overflow-hidden rise">
       {/* toolbar */}
       <div className="stmt-toolbar">
-        <div className="stmt-period">
-          <button
-            type="button"
-            className="icon-btn !w-9 !h-9"
-            aria-label="Previous month"
-            onClick={() => {
-              const base = mode === "month" ? monthKey : mode === "last" ? shiftMonth(thisMonth, -1) : thisMonth;
-              setMode("month");
-              setMonthKey(shiftMonth(base, -1));
-              setLimit(PAGE);
-            }}
-          >
-            <Icon name="chevronLeft" size={16} />
-          </button>
-          <MonthPicker
-            value={mode === "last" ? shiftMonth(thisMonth, -1) : monthKey}
-            maxKey={thisMonth}
-            marked={monthsWithData}
-            onChange={(key) => {
-              setMode("month");
-              setMonthKey(key);
-              setLimit(PAGE);
-            }}
-          >
-            {periodLabel}
-          </MonthPicker>
-          <button
-            type="button"
-            className="icon-btn !w-9 !h-9"
-            aria-label="Next month"
-            disabled={mode === "month" && monthKey >= thisMonth}
-            onClick={() => {
-              const base = mode === "month" ? monthKey : mode === "last" ? shiftMonth(thisMonth, -1) : shiftMonth(thisMonth, -1);
-              setMode("month");
-              setMonthKey(shiftMonth(base, 1) > thisMonth ? thisMonth : shiftMonth(base, 1));
-              setLimit(PAGE);
-            }}
-          >
-            <Icon name="chevronRight" size={16} />
-          </button>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-1.5">
-          {([
-            ["month", "This month"],
-            ["last", "Last month"],
-            ["year", "This year"],
-            ["all", "All time"],
-            ["custom", "Custom"],
-          ] as [PeriodMode, string][]).map(([value, label]) => {
-            const on = value === "month" ? mode === "month" && monthKey === thisMonth : mode === value;
-            return (
-              <button
-                key={value}
-                type="button"
-                className={`chip !h-8 ${on ? "chip-on" : ""}`}
-                onClick={() => {
-                  setMode(value);
-                  if (value === "month") setMonthKey(thisMonth);
-                  setLimit(PAGE);
-                }}
-              >
-                {label}
-              </button>
-            );
-          })}
-        </div>
-
-        {mode === "custom" && (
-          <div className="flex flex-wrap items-center gap-2">
-            <label className="date-field">
-              From
-              <input type="date" value={from} max={to || today} onChange={(event) => setFrom(event.target.value)} />
-            </label>
-            <label className="date-field">
-              To
-              <input type="date" value={to} min={from} onChange={(event) => setTo(event.target.value)} />
-            </label>
-          </div>
-        )}
+        <PeriodPicker
+          period={period}
+          today={today}
+          label={periodLabel}
+          marked={monthsWithData}
+          onChange={(next) => {
+            setPeriod(next);
+            setLimit(PAGE);
+          }}
+        />
 
         <div className="ml-auto flex flex-wrap items-center gap-2">
           <Segmented value={account} onChange={(value) => { setAccount(value); setLimit(PAGE); }} options={accountOptions} size="sm" />
@@ -507,8 +417,7 @@ export default function StatementView({
                   key={row.key}
                   className="cursor-pointer"
                   onClick={() => {
-                    setMode("month");
-                    setMonthKey(row.key);
+                    setPeriod((current) => ({ ...current, mode: "month", monthKey: row.key }));
                     setAccount("all");
                     setView("tx");
                   }}

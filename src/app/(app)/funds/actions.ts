@@ -260,6 +260,29 @@ function money2(raw: FormDataEntryValue | null) {
   return Number.isFinite(amount) ? Math.round(amount * 100) / 100 : NaN;
 }
 
+/** A new bill in Avernek's name, as the assistant sends a batch of them. */
+export type CompanyBillInput = {
+  description: string;
+  vendor_name: string | null;
+  bill_number: string | null;
+  bill_date: string;
+  total_amount: number;
+  vat_amount: number;
+  paid_by: string | null;
+  note: string | null;
+};
+
+/** The bill form's rules, shared by the form and the assistant's batch. */
+function companyBillError(bill: { description: string; total: number; vat: number; billDate: string }): string | null {
+  if (!bill.description) return "Say what the bill is for, e.g. Lawyer service charge.";
+  if (!Number.isFinite(bill.total) || bill.total <= 0) return "Enter the bill total.";
+  if (!Number.isFinite(bill.vat) || bill.vat < 0 || bill.vat > bill.total) {
+    return "VAT must be between zero and the bill total.";
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(bill.billDate)) return "Enter the bill date.";
+  return null;
+}
+
 async function addCompanyBillUnguarded(
   _previous: FundsFormState,
   formData: FormData
@@ -271,12 +294,8 @@ async function addCompanyBillUnguarded(
   const vat = money2(formData.get("vat_amount"));
   const billDate = value(formData, "bill_date");
 
-  if (!description) return { error: "Say what the bill is for, e.g. Lawyer service charge.", ok: null };
-  if (!Number.isFinite(total) || total <= 0) return { error: "Enter the bill total.", ok: null };
-  if (!Number.isFinite(vat) || vat < 0 || vat > total) {
-    return { error: "VAT must be between zero and the bill total.", ok: null };
-  }
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(billDate)) return { error: "Enter the bill date.", ok: null };
+  const invalid = companyBillError({ description, total, vat, billDate });
+  if (invalid) return { error: invalid, ok: null };
 
   // A scan or photo of the bill is optional, and can be added to old bills too.
   let files: Awaited<ReturnType<typeof readUploads>>;
@@ -332,6 +351,55 @@ async function addCompanyBillUnguarded(
 
   revalidateFunds();
   return { error: null, ok: id ? "Bill updated." : "Bill added. Reimburse it when the VAT account has room." };
+}
+
+/**
+ * Several new bills at once (the assistant's "add these bills"). Every bill is
+ * checked with the form's rules before anything is written, then all of them
+ * are saved in one transaction: either the whole list is added or none of it.
+ */
+async function addCompanyBillsUnguarded(bills: CompanyBillInput[]): Promise<FundsFormState> {
+  const session = await owner();
+  if (!Array.isArray(bills) || bills.length === 0) return { error: "There are no bills to add.", ok: null };
+  if (bills.length > 20) return { error: "Add at most 20 bills at a time.", ok: null };
+
+  const rows = bills.map((bill) => ({
+    description: String(bill.description ?? "").trim(),
+    vendor_name: String(bill.vendor_name ?? "").trim() || null,
+    bill_number: String(bill.bill_number ?? "").trim() || null,
+    bill_date: String(bill.bill_date ?? "").trim(),
+    total_amount: Math.round(Number(bill.total_amount) * 100) / 100,
+    vat_amount: Math.round(Number(bill.vat_amount ?? 0) * 100) / 100,
+    paid_by: String(bill.paid_by ?? "").trim() || null,
+    note: String(bill.note ?? "").trim() || null,
+  }));
+  for (const [index, row] of rows.entries()) {
+    const invalid = companyBillError({
+      description: row.description,
+      total: row.total_amount,
+      vat: row.vat_amount,
+      billDate: row.bill_date,
+    });
+    if (invalid) return { error: `Bill ${index + 1}: ${invalid}`, ok: null };
+  }
+
+  await transaction(async (client) => {
+    for (const row of rows) {
+      await client.query(
+        `insert into public.company_bills
+           (description, vendor_name, bill_number, bill_date, total_amount, vat_amount, paid_by, note, created_by)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+        [row.description, row.vendor_name, row.bill_number, row.bill_date, row.total_amount, row.vat_amount, row.paid_by, row.note, session.sub]
+      );
+    }
+  });
+
+  revalidateFunds();
+  return { error: null, ok: `${rows.length} ${rows.length === 1 ? "bill" : "bills"} added.` };
+}
+
+export async function addCompanyBills(bills: CompanyBillInput[]): Promise<FundsFormState> {
+  return guardSave(() => addCompanyBillsUnguarded(bills));
 }
 
 export async function deleteCompanyBill(id: string) {

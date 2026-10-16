@@ -103,7 +103,8 @@ export type AssistantReply = {
 };
 
 export const LIMITS = {
-  messageChars: 1500,
+  /** Long enough for a pasted list of bills. */
+  messageChars: 8000,
   historyTurns: 12,
   historyChars: 1500,
   audioBytes: 5 * 1024 * 1024,

@@ -5,7 +5,16 @@ import { guard, json, readJson } from "@/lib/ai/http";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const value = z.union([z.string().max(2000), z.number(), z.boolean(), z.null(), z.array(z.string().max(200)).max(20)]);
+const scalar = z.union([z.string().max(300), z.number(), z.boolean(), z.null()]);
+const value = z.union([
+  z.string().max(2000),
+  z.number(),
+  z.boolean(),
+  z.null(),
+  z.array(z.string().max(200)).max(20),
+  // A list the form carries along unchanged, e.g. the bills being added.
+  z.array(z.record(z.string().max(64), scalar)).max(20),
+]);
 const body = z.object({
   tool: z.string().max(64),
   values: z.record(z.string().max(64), value).refine((values) => Object.keys(values).length <= 60, "Too many fields"),

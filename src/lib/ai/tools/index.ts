@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { ToolDefinition } from "../openrouter";
+import { listCompanyBills } from "./bills";
 import { getClientOverview, getClientPayments, getReceivables, getUpcomingPayments, listClients } from "./clients";
 import { compareExpenses, getExpenseSummary, getSubscriptions, listExpenses } from "./expenses";
 import {
@@ -11,6 +12,7 @@ import {
 } from "./income";
 import { getDateTime } from "./time";
 import type { Tool } from "./types";
+import { addCompanyBillsTool } from "./write-bills";
 import { createExpense, updateExpenseTool } from "./write-expense";
 import { recordClientPayment, updateClientPayment } from "./write-payment";
 
@@ -35,11 +37,13 @@ export const TOOLS: Tool[] = [
   getTaxPosition,
   getAccountBalances,
   getFinancialSummary,
+  listCompanyBills,
   getDateTime,
   createExpense,
   updateExpenseTool,
   recordClientPayment,
   updateClientPayment,
+  addCompanyBillsTool,
 ];
 
 export const TOOLS_BY_NAME = new Map(TOOLS.map((tool) => [tool.name, tool]));
