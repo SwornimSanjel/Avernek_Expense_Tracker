@@ -6,6 +6,8 @@ import { Avatar, Callout, Delta, EmptyState, Kpi, Money, PageHeader, SectionHead
 import Icon from "@/components/Icons";
 import AddIncomeAgreement from "@/components/AddIncomeAgreement";
 import AddOtherIncome from "@/components/AddOtherIncome";
+import BulkSelect, { SelectBox, SelectToggle } from "@/components/BulkSelect";
+import { deleteOtherIncomes } from "./actions";
 import RecordIncomePayment from "@/components/RecordIncomePayment";
 import IncomeAgreementControls from "@/components/IncomeAgreementControls";
 import ServiceBadges from "@/components/ServiceBadges";
@@ -335,49 +337,65 @@ export default async function IncomePage({
           subtitle="One-off jobs and extra work with no agreement. Counted as income; amounts exclude VAT."
           action={canManage ? <AddOtherIncome accounts={moneyAccounts} compact /> : undefined}
         />
-        <div className="card overflow-hidden">
-          {otherIncome.length === 0 ? (
-            <EmptyState title="Nothing yet" description="Use “Income without client” for extra work or a website done without an agreement." icon="sparkles" />
-          ) : (
-            <div className="table-wrap">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Date</th>
-                    <th>What</th>
-                    <th>Account</th>
-                    <th className="num">Amount</th>
-                    <th className="num">Reached bank</th>
-                    {canManage && <th />}
-                  </tr>
-                </thead>
-                <tbody>
-                  {otherIncome.map((row) => {
-                    const account = accountById.get(row.money_account_id);
-                    return (
-                      <tr key={row.id}>
-                        <td className="whitespace-nowrap">{formatServiceDate(row.received_on)}</td>
-                        <td>
-                          <div className="font-medium">{row.description}</div>
-                          <div className="text-[12.5px] muted">
-                            {OTHER_INCOME_LABELS[row.category]}
-                            {row.source_name ? ` · from ${row.source_name}` : ""}
-                            {Number(row.vat_amount) > 0 ? ` · VAT ${formatNumber(Number(row.vat_amount))}` : ""}
-                            {Number(row.tds_amount) > 0 ? ` · TDS ${formatNumber(Number(row.tds_amount))}` : ""}
-                          </div>
-                        </td>
-                        <td>{account ? accountLabel(account) : "—"}</td>
-                        <td className="num font-semibold text-green">{formatNumber(Number(row.amount))}</td>
-                        <td className="num">{formatNumber(bankAmount(row))}</td>
-                        {canManage && <td className="w-12"><AddOtherIncome accounts={moneyAccounts} record={row} /></td>}
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+        <BulkSelect
+          ids={otherIncome.map((row) => row.id)}
+          noun={{ one: "income record", many: "income records" }}
+          onDelete={canManage ? deleteOtherIncomes : undefined}
+        >
+          {otherIncome.length > 1 && (
+            <div className="flex justify-end mb-2">
+              <SelectToggle />
             </div>
           )}
-        </div>
+          <div className="card overflow-hidden">
+            {otherIncome.length === 0 ? (
+              <EmptyState title="Nothing yet" description="Use “Income without client” for extra work or a website done without an agreement." icon="sparkles" />
+            ) : (
+              <div className="table-wrap">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>What</th>
+                      <th>Account</th>
+                      <th className="num">Amount</th>
+                      <th className="num">Reached bank</th>
+                      {canManage && <th />}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {otherIncome.map((row) => {
+                      const account = accountById.get(row.money_account_id);
+                      return (
+                        <tr key={row.id}>
+                          <td className="whitespace-nowrap">
+                            <span className="inline-flex items-center">
+                              <SelectBox id={row.id} label={row.description} />
+                              {formatServiceDate(row.received_on)}
+                            </span>
+                          </td>
+                          <td>
+                            <div className="font-medium">{row.description}</div>
+                            <div className="text-[12.5px] muted">
+                              {OTHER_INCOME_LABELS[row.category]}
+                              {row.source_name ? ` · from ${row.source_name}` : ""}
+                              {Number(row.vat_amount) > 0 ? ` · VAT ${formatNumber(Number(row.vat_amount))}` : ""}
+                              {Number(row.tds_amount) > 0 ? ` · TDS ${formatNumber(Number(row.tds_amount))}` : ""}
+                            </div>
+                          </td>
+                          <td>{account ? accountLabel(account) : "—"}</td>
+                          <td className="num font-semibold text-green">{formatNumber(Number(row.amount))}</td>
+                          <td className="num">{formatNumber(bankAmount(row))}</td>
+                          {canManage && <td className="w-12"><AddOtherIncome accounts={moneyAccounts} record={row} /></td>}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </BulkSelect>
       </section>
     </>
   );

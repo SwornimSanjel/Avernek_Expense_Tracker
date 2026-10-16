@@ -11,6 +11,8 @@ import RecordIncomePayment from "@/components/RecordIncomePayment";
 import IncomeAgreementControls from "@/components/IncomeAgreementControls";
 import EditIncomePayment from "@/components/EditIncomePayment";
 import DeleteIncomePayment from "@/components/DeleteIncomePayment";
+import BulkSelect, { SelectBox, SelectToggle } from "@/components/BulkSelect";
+import { deleteIncomePayments } from "../actions";
 import MarkServiceLive from "@/components/MarkServiceLive";
 import AgreementUploadPanel from "@/components/AgreementUploadPanel";
 import ClientVatBillsPanel from "@/components/ClientVatBillsPanel";
@@ -387,112 +389,122 @@ export default async function ClientBillingPage({
 
       {/* --------------------------------------------------- payment history */}
       <section>
-        <div className="billing-panel">
-          <div className="billing-panel-head">
-            <div>
-              <h2>Payment history</h2>
-              <p>
-                {payments.length} payment{payments.length === 1 ? "" : "s"} · every balance on this
-                page is calculated from these records
-              </p>
+        <BulkSelect
+          ids={payments.map((payment) => payment.id)}
+          noun={{ one: "payment", many: "payments" }}
+          onDelete={canManage ? deleteIncomePayments : undefined}
+        >
+          <div className="billing-panel">
+            <div className="billing-panel-head">
+              <div>
+                <h2>Payment history</h2>
+                <p>
+                  {payments.length} payment{payments.length === 1 ? "" : "s"} · every balance on this
+                  page is calculated from these records
+                </p>
+              </div>
+              {payments.length > 1 && <SelectToggle />}
             </div>
-          </div>
-          <div className="payment-table">
-            <div className="payment-table-head">
-              <span>Payment received</span>
-              <span>For</span>
-              <span>Bill amount</span>
-              <span>Account</span>
-              <span>Note</span>
-              {canManage && <span />}
-            </div>
-            {payments.length === 0 && (
-              <p className="px-5 py-5 text-sm muted">
-                No payment recorded yet. Use “Add payment” — a client can sit at Rs. 0 paid for as
-                long as needed.
-              </p>
-            )}
-            {payments.map((payment) => {
-              const period = payment.billing_period_start
-                ? allPeriods.find(
-                    (candidate) =>
-                      candidate.periodStart === payment.billing_period_start &&
-                      candidate.stream === (payment.billing_stream ?? "combined")
-                  )
-                : null;
-              const account = payment.money_account_id
-                ? accountById.get(payment.money_account_id)
-                : null;
-              return (
-                <div key={payment.id} className="payment-table-row">
-                  <span data-label="Payment received">{formatServiceDate(payment.paid_on)}</span>
-                  <span data-label="For">
-                    {payment.payment_for === "setup"
-                      ? "Setup · month 1"
-                      : payment.payment_for === "website"
-                        ? "Website"
-                        : period
-                          ? `Monthly · ${periodLabel(period)}`
-                          : "Monthly"}
-                  </span>
-                  <span className="tnum" data-label="Amount">
-                    <strong>{formatIncomeMoney(Number(payment.amount), currency)}</strong>
-                    {(Number(payment.vat_amount) > 0 || Number(payment.tds_amount) > 0) && (
-                      <small className="block muted text-[12px] mt-0.5">
-                        {Number(payment.vat_amount) > 0 ? `+VAT ${formatIncomeMoney(Number(payment.vat_amount), currency)} ` : ""}
-                        {Number(payment.tds_amount) > 0 ? `−TDS ${formatIncomeMoney(Number(payment.tds_amount), currency)} ` : ""}
-                        = bank {formatIncomeMoney(bankAmount(payment), currency)}
-                      </small>
-                    )}
-                  </span>
-                  <span data-label="Account">
-                    {account ? accountKindLabel(account) : payment.account_name ?? "—"}
-                  </span>
-                  <span className="min-w-0" data-label="Note">
-                    <span className="block truncate">
-                      {[
-                        payment.method ? PAYMENT_METHOD_LABELS[payment.method] : null,
-                        payment.reference,
-                        payment.note,
-                      ]
-                        .filter(Boolean)
-                        .join(" · ") || "—"}
+            <div className="payment-table">
+              <div className="payment-table-head">
+                <span>Payment received</span>
+                <span>For</span>
+                <span>Bill amount</span>
+                <span>Account</span>
+                <span>Note</span>
+                {canManage && <span />}
+              </div>
+              {payments.length === 0 && (
+                <p className="px-5 py-5 text-sm muted">
+                  No payment recorded yet. Use “Add payment” — a client can sit at Rs. 0 paid for as
+                  long as needed.
+                </p>
+              )}
+              {payments.map((payment) => {
+                const period = payment.billing_period_start
+                  ? allPeriods.find(
+                      (candidate) =>
+                        candidate.periodStart === payment.billing_period_start &&
+                        candidate.stream === (payment.billing_stream ?? "combined")
+                    )
+                  : null;
+                const account = payment.money_account_id
+                  ? accountById.get(payment.money_account_id)
+                  : null;
+                return (
+                  <div key={payment.id} className="payment-table-row">
+                    <span data-label="Payment received" className="inline-flex items-center">
+                      <SelectBox id={payment.id} label={`the payment on ${formatServiceDate(payment.paid_on)}`} />
+                      {formatServiceDate(payment.paid_on)}
                     </span>
-                    {(vatBillsByPayment.get(payment.id) ?? []).length > 0 && (
-                      <span className="flex flex-wrap gap-1 mt-1">
-                        {(vatBillsByPayment.get(payment.id) ?? []).map((bill, index, list) => (
-                          <a
-                            key={bill.id}
-                            href={attachmentUrl(bill.id)}
-                            target="_blank"
-                            rel="noopener"
-                            className="pill bill-pill"
-                            title={bill.file_name}
-                          >
-                            <Icon name="receipt" size={11} />
-                            {list.length > 1 ? `VAT bill ${index + 1}` : "VAT bill"}
-                          </a>
-                        ))}
+                    <span data-label="For">
+                      {payment.payment_for === "setup"
+                        ? "Setup · month 1"
+                        : payment.payment_for === "website"
+                          ? "Website"
+                          : period
+                            ? `Monthly · ${periodLabel(period)}`
+                            : "Monthly"}
+                    </span>
+                    <span className="tnum" data-label="Amount">
+                      <strong>{formatIncomeMoney(Number(payment.amount), currency)}</strong>
+                      {(Number(payment.vat_amount) > 0 || Number(payment.tds_amount) > 0) && (
+                        <small className="block muted text-[12px] mt-0.5">
+                          {Number(payment.vat_amount) > 0 ? `+VAT ${formatIncomeMoney(Number(payment.vat_amount), currency)} ` : ""}
+                          {Number(payment.tds_amount) > 0 ? `−TDS ${formatIncomeMoney(Number(payment.tds_amount), currency)} ` : ""}
+                          = bank {formatIncomeMoney(bankAmount(payment), currency)}
+                        </small>
+                      )}
+                    </span>
+                    <span data-label="Account">
+                      {account ? accountKindLabel(account) : payment.account_name ?? "—"}
+                    </span>
+                    <span className="min-w-0" data-label="Note">
+                      <span className="block truncate">
+                        {[
+                          payment.method ? PAYMENT_METHOD_LABELS[payment.method] : null,
+                          payment.reference,
+                          payment.note,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ") || "—"}
+                      </span>
+                      {(vatBillsByPayment.get(payment.id) ?? []).length > 0 && (
+                        <span className="flex flex-wrap gap-1 mt-1">
+                          {(vatBillsByPayment.get(payment.id) ?? []).map((bill, index, list) => (
+                            <a
+                              key={bill.id}
+                              href={attachmentUrl(bill.id)}
+                              target="_blank"
+                              rel="noopener"
+                              className="pill bill-pill"
+                              title={bill.file_name}
+                            >
+                              <Icon name="receipt" size={11} />
+                              {list.length > 1 ? `VAT bill ${index + 1}` : "VAT bill"}
+                            </a>
+                          ))}
+                        </span>
+                      )}
+                    </span>
+                    {canManage && (
+                      <span className="flex items-center justify-end gap-1">
+                        <EditIncomePayment
+                          payment={payment}
+                          currency={currency}
+                          moneyAccounts={moneyAccounts}
+                          periods={allPeriods}
+                          vatBills={vatBillsByPayment.get(payment.id) ?? []}
+                        />
+                        <DeleteIncomePayment id={payment.id} />
                       </span>
                     )}
-                  </span>
-                  {canManage && (
-                    <span className="flex items-center justify-end gap-1">
-                      <EditIncomePayment
-                        payment={payment}
-                        currency={currency}
-                        moneyAccounts={moneyAccounts}
-                        periods={allPeriods}
-                        vatBills={vatBillsByPayment.get(payment.id) ?? []}
-                      />
-                      <DeleteIncomePayment id={payment.id} />
-                    </span>
-                  )}
-                </div>
-              );
-            })}
+                  </div>
+                );
+              })}
+            </div>
           </div>
-        </div>
+        </BulkSelect>
       </section>
 
       {/* ------------------------------------------------------- linked costs */}

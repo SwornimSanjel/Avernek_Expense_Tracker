@@ -82,7 +82,7 @@ export function AddCompanyBill({
             {bill && <input type="hidden" name="bill_id" value={bill.id} />}
             <ModalHeader
               title={bill ? "Edit bill" : "Bill in Avernek's name"}
-              subtitle="A bill issued to the company that was paid from somewhere else first. It waits here until the VAT account pays it back."
+              subtitle="A bill issued to Avernek. Its VAT lowers what Avernek owes IRD."
               onClose={() => setOpen(false)}
             />
             <div className="grid sm:grid-cols-2 gap-3">
@@ -146,6 +146,13 @@ export function AddCompanyBill({
             <label className="block">
               <span className="field-label">Who paid it first? (optional)</span>
               <input name="paid_by" defaultValue={bill?.paid_by ?? ""} placeholder="e.g. Swornim · non-VAT account" className="input mt-1" />
+            </label>
+            <label className="checkbox-row">
+              <input type="checkbox" name="reimburse" defaultChecked={bill?.reimburse ?? false} />
+              <span>
+                <strong>Pay it back from the VAT account</strong>
+                <small>Tick only if whoever paid should get this money back. Then press Reimburse when the VAT account has room.</small>
+              </span>
             </label>
             <label className="block">
               <span className="field-label">Note (optional)</span>

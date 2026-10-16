@@ -410,6 +410,8 @@ export interface CompanyBill {
   vat_amount: number;
   paid_by: string | null;
   note: string | null;
+  /** The VAT account is to pay it back to whoever paid it. */
+  reimburse: boolean;
   created_by: string | null;
   created_at: string;
   updated_at: string;

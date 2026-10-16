@@ -4,6 +4,8 @@ import { Avatar, EmptyState, FxBadge, Kpi, Money, PageHeader } from "@/component
 import AddExpense from "@/components/AddExpense";
 import ExpenseFilters from "@/components/ExpenseFilters";
 import ExpenseRowActions from "@/components/ExpenseRowActions";
+import BulkSelect, { SelectBox, SelectGroup, SelectToggle } from "@/components/BulkSelect";
+import { deleteExpenses } from "./actions";
 import Icon from "@/components/Icons";
 import { formatNumber, usd } from "@/lib/format";
 import type { AppUser, Category, Expense, MoneyAccount, Vendor } from "@/lib/types";
@@ -192,91 +194,106 @@ export default async function ExpensesPage({
         </div>
       )}
 
-      <div className="card overflow-hidden">
-        {rows.length === 0 && (
-          <EmptyState title={`No expenses in ${range.label}`} description="Try another month, or clear the filters." icon="expense" />
+      <BulkSelect
+        ids={months.flatMap((month) => month.rows.map((e) => e.id))}
+        noun={{ one: "expense", many: "expenses" }}
+        onDelete={canManage ? deleteExpenses : undefined}
+      >
+        {rows.length > 1 && (
+          <div className="flex justify-end mb-2">
+            <SelectToggle />
+          </div>
         )}
-        {months.map((month) => (
-          <div key={month.key}>
-            <div className="group-head">
-              <span>{monthLabel(month.key)} <span className="muted font-normal">· {month.rows.length} item{month.rows.length === 1 ? "" : "s"}</span></span>
-              <span className="tnum">NPR {formatNumber(month.total)}</span>
-            </div>
-            <div className="row-list">
-              {month.rows.map((e) => {
-                const category = categoryById.get(e.category_id ?? "");
-                const vendor = vendorById.get(e.vendor_id ?? "");
-                const account = accountById.get(e.money_account_id ?? "");
-                const company = e.funding_source === "company_funds";
-                const title = e.note && vendor ? e.note : vendor?.name || e.note || category?.name || "Expense";
-                const shareNpr = selectedPerson && basis === "share" ? assignedShareNpr(e, selectedPerson, users) : null;
-                const shareOriginal = selectedPerson && basis === "share" ? assignedShareOriginal(e, selectedPerson, users) : null;
-                const future = e.expense_date > today;
-                return (
-                  <div key={e.id} className="row-item !items-start">
-                    <div className="row-icon mt-0.5" style={{ "--tone": category?.color && category.color !== "#1e3a5f" ? category.color : "var(--accent-ink)", "--tone-soft": "var(--surface-2)" } as React.CSSProperties}>
-                      <Icon name={company ? "expense" : "user"} size={17} />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="row-title !whitespace-normal">{title}</span>
-                        {company ? (
-                          <span className="pill info">{account ? accountLabel(account).replace(" account", "") : "Company"}</span>
-                        ) : (
-                          <span className="pill" style={{ color: "var(--pink)" }}>Founder</span>
-                        )}
-                        {future && <span className="pill warn">Future date</span>}
-                        {e.currency === "USD" && <FxBadge source={e.fx_source} status={e.conversion_status} />}
-                        {e.is_reimbursed && <span className="pill ok">Reimbursed</span>}
-                        {e.attachments?.map((bill, index) => (
-                          <a key={bill.id} href={attachmentUrl(bill.id)} target="_blank" rel="noopener" className="pill accent" title={bill.file_name}>
-                            <Icon name="receipt" size={12} />
-                            {e.attachments!.length > 1 ? `Bill ${index + 1}` : "Bill"}
-                          </a>
-                        ))}
+        <div className="card overflow-hidden">
+          {rows.length === 0 && (
+            <EmptyState title={`No expenses in ${range.label}`} description="Try another month, or clear the filters." icon="expense" />
+          )}
+          {months.map((month) => (
+            <div key={month.key}>
+              <div className="group-head">
+                <span>
+                  <SelectGroup ids={month.rows.map((e) => e.id)} label={monthLabel(month.key)} />
+                  {monthLabel(month.key)} <span className="muted font-normal">· {month.rows.length} item{month.rows.length === 1 ? "" : "s"}</span>
+                </span>
+                <span className="tnum">NPR {formatNumber(month.total)}</span>
+              </div>
+              <div className="row-list">
+                {month.rows.map((e) => {
+                  const category = categoryById.get(e.category_id ?? "");
+                  const vendor = vendorById.get(e.vendor_id ?? "");
+                  const account = accountById.get(e.money_account_id ?? "");
+                  const company = e.funding_source === "company_funds";
+                  const title = e.note && vendor ? e.note : vendor?.name || e.note || category?.name || "Expense";
+                  const shareNpr = selectedPerson && basis === "share" ? assignedShareNpr(e, selectedPerson, users) : null;
+                  const shareOriginal = selectedPerson && basis === "share" ? assignedShareOriginal(e, selectedPerson, users) : null;
+                  const future = e.expense_date > today;
+                  return (
+                    <div key={e.id} className="row-item !items-start">
+                      <SelectBox id={e.id} label={title} />
+                      <div className="row-icon mt-0.5" style={{ "--tone": category?.color && category.color !== "#1e3a5f" ? category.color : "var(--accent-ink)", "--tone-soft": "var(--surface-2)" } as React.CSSProperties}>
+                        <Icon name={company ? "expense" : "user"} size={17} />
                       </div>
-                      <div className="row-meta !whitespace-normal">
-                        {dayLabel(e.expense_date)} · {category?.name ?? "Uncategorised"}
-                        {vendor && e.note ? ` · ${vendor.name}` : ""}
-                        {company ? "" : ` · paid by ${shortName(e.paid_by_user_id)}`}
-                        {e.client ? ` · ${e.client}` : ""}
-                        {e.billing_month && e.billing_month.slice(0, 7) !== e.expense_date.slice(0, 7) ? ` · for ${monthLabel(e.billing_month.slice(0, 7), "short")}` : ""}
-                      </div>
-                      {!!e.expense_shares?.length && !company && (
-                        <div className="flex flex-wrap gap-1.5 mt-1.5">
-                          {e.expense_shares.map((share) => (
-                            <span key={share.user_id} className="pill !text-[12px]">
-                              {shortName(share.user_id)} {e.currency === "USD" ? usd(Number(share.amount)) : formatNumber(Number(share.amount))}
-                            </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="row-title !whitespace-normal">{title}</span>
+                          {company ? (
+                            <span className="pill info">{account ? accountLabel(account).replace(" account", "") : "Company"}</span>
+                          ) : (
+                            <span className="pill" style={{ color: "var(--pink)" }}>Founder</span>
+                          )}
+                          {future && <span className="pill warn">Future date</span>}
+                          {e.currency === "USD" && <FxBadge source={e.fx_source} status={e.conversion_status} />}
+                          {e.is_reimbursed && <span className="pill ok">Reimbursed</span>}
+                          {e.attachments?.map((bill, index) => (
+                            <a key={bill.id} href={attachmentUrl(bill.id)} target="_blank" rel="noopener" className="pill accent" title={bill.file_name}>
+                              <Icon name="receipt" size={12} />
+                              {e.attachments!.length > 1 ? `Bill ${index + 1}` : "Bill"}
+                            </a>
                           ))}
                         </div>
+                        <div className="row-meta !whitespace-normal">
+                          {dayLabel(e.expense_date)} · {category?.name ?? "Uncategorised"}
+                          {vendor && e.note ? ` · ${vendor.name}` : ""}
+                          {company ? "" : ` · paid by ${shortName(e.paid_by_user_id)}`}
+                          {e.client ? ` · ${e.client}` : ""}
+                          {e.billing_month && e.billing_month.slice(0, 7) !== e.expense_date.slice(0, 7) ? ` · for ${monthLabel(e.billing_month.slice(0, 7), "short")}` : ""}
+                        </div>
+                        {!!e.expense_shares?.length && !company && (
+                          <div className="flex flex-wrap gap-1.5 mt-1.5">
+                            {e.expense_shares.map((share) => (
+                              <span key={share.user_id} className="pill !text-[12px]">
+                                {shortName(share.user_id)} {e.currency === "USD" ? usd(Number(share.amount)) : formatNumber(Number(share.amount))}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <div className="text-right shrink-0">
+                        <div className="row-amount">{shareNpr != null ? formatNumber(shareNpr) : e.amount_npr != null ? formatNumber(Number(e.amount_npr)) : "—"}</div>
+                        {shareNpr != null ? (
+                          <div className="row-sub">
+                            {e.currency === "USD" ? usd(shareOriginal ?? 0) : "share"} of {formatNumber(Number(e.amount_npr ?? 0))}
+                          </div>
+                        ) : e.currency === "USD" ? (
+                          <div className="row-sub">{usd(Number(e.amount))}</div>
+                        ) : null}
+                      </div>
+                      {canManage && (
+                        <ExpenseRowActions
+                          expense={e}
+                          isReimbursed={e.is_reimbursed}
+                          pending={e.conversion_status === "pending"}
+                          {...formProps}
+                        />
                       )}
                     </div>
-                    <div className="text-right shrink-0">
-                      <div className="row-amount">{shareNpr != null ? formatNumber(shareNpr) : e.amount_npr != null ? formatNumber(Number(e.amount_npr)) : "—"}</div>
-                      {shareNpr != null ? (
-                        <div className="row-sub">
-                          {e.currency === "USD" ? usd(shareOriginal ?? 0) : "share"} of {formatNumber(Number(e.amount_npr ?? 0))}
-                        </div>
-                      ) : e.currency === "USD" ? (
-                        <div className="row-sub">{usd(Number(e.amount))}</div>
-                      ) : null}
-                    </div>
-                    {canManage && (
-                      <ExpenseRowActions
-                        expense={e}
-                        isReimbursed={e.is_reimbursed}
-                        pending={e.conversion_status === "pending"}
-                        {...formProps}
-                      />
-                    )}
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
             </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      </BulkSelect>
     </>
   );
 }

@@ -23,7 +23,7 @@ const listBillsSchema = z.object({
   from: isoDate.optional().describe("First bill date included"),
   to: isoDate.optional().describe("Last bill date included"),
   search: z.string().max(80).optional().describe("Words to find in the vendor, what it was for, bill no. or note"),
-  only_unpaid: z.boolean().optional().describe("true for bills not yet paid back from the VAT account"),
+  only_unpaid: z.boolean().optional().describe("true for bills marked to be paid back that are not fully paid back yet"),
 });
 
 export const listCompanyBills: ReadTool = {
@@ -32,7 +32,7 @@ export const listCompanyBills: ReadTool = {
   kind: "read",
   permission: "member",
   description:
-    "List bills issued in Avernek's name (VAT & bills: VAT/PAN bills from cafes, shops, lawyers), grouped by month, newest first, with each month's total and VAT and what is still to reimburse. Optional period, text and unpaid filters. Use for 'show our VAT bills', 'bills in August', 'bills from Himalayan SIP', 'which bills are not reimbursed'.",
+    "List bills issued in Avernek's name (VAT & bills: VAT/PAN bills from cafes, shops, lawyers), grouped by month, newest first, with each month's total and VAT, and what is still to pay back for bills being paid back. Optional period, text and unpaid filters. Use for 'show our VAT bills', 'bills in August', 'bills from Himalayan SIP', 'which bills are still to be reimbursed'.",
   schema: listBillsSchema,
   async run(raw, ctx) {
     const parsed = listBillsSchema.safeParse(clean(raw));
@@ -72,7 +72,7 @@ export const listCompanyBills: ReadTool = {
           { label: "Bills", value: String(items.length), hint: `${plural(months.length, "month")}` },
           { label: "Total", value: money(totalOf(items)), hint: "VAT included" },
           { label: "VAT inside", value: money(vatOf(items)), tone: "warn" },
-          { label: "Still to reimburse", value: money(pending), tone: pending > 0 ? "warn" : "good" },
+          ...(pending > 0 ? [{ label: "Still to reimburse", value: money(pending), tone: "warn" as const }] : []),
         ],
       },
     ];
@@ -91,10 +91,10 @@ export const listCompanyBills: ReadTool = {
           { key: "total", label: "Total", align: "right" },
           { key: "vat", label: "VAT", align: "right" },
         ],
-        rows: visible.map(({ bill, pending: left }) => ({
+        rows: visible.map(({ bill, pending: left, reimbursed }) => ({
           date: dayMonth.format(new Date(`${bill.bill_date}T00:00:00Z`)),
           // The bill number stays whole: it is what tells two bills from one shop apart.
-          bill: `${truncate(bill.vendor_name ?? bill.description, 30)}${bill.bill_number ? ` #${bill.bill_number}` : ""}${left > 0 ? "" : " · paid back"}`,
+          bill: `${truncate(bill.vendor_name ?? bill.description, 30)}${bill.bill_number ? ` #${bill.bill_number}` : ""}${left > 0 ? " · to pay back" : reimbursed > 0 ? " · paid back" : ""}`,
           total: formatNumber(Number(bill.total_amount)),
           vat: Number(bill.vat_amount) > 0 ? formatNumber(Number(bill.vat_amount)) : "—",
         })),
@@ -108,7 +108,7 @@ export const listCompanyBills: ReadTool = {
 
     return {
       status: "ok",
-      summary: `${plural(items.length, "bill")} ${when}: ${money(totalOf(items))} with VAT ${formatNumber(vatOf(items))}; ${money(pending)} still to reimburse.`,
+      summary: `${plural(items.length, "bill")} ${when}: ${money(totalOf(items))} with VAT ${formatNumber(vatOf(items))}${pending > 0 ? `; ${money(pending)} still to reimburse` : ""}.`,
       cards,
       data: {
         count: items.length,

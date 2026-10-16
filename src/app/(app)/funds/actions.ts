@@ -1,7 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { exec, one, transaction } from "@/lib/db";
+import { exec, one, query, transaction } from "@/lib/db";
+import { bulkIds, bulkResult, type BulkResult } from "@/lib/bulk";
 import { assertRoomFor, insertAttachments, readUploads } from "@/lib/attachments.server";
 import { loadLedger } from "@/lib/ledger";
 import { requireSession } from "@/lib/auth/server";
@@ -270,6 +271,8 @@ export type CompanyBillInput = {
   vat_amount: number;
   paid_by: string | null;
   note: string | null;
+  /** The VAT account is to pay it back to whoever paid it. */
+  reimburse: boolean;
 };
 
 /** The bill form's rules, shared by the form and the assistant's batch. */
@@ -315,6 +318,7 @@ async function addCompanyBillUnguarded(
     vat,
     value(formData, "paid_by") || null,
     value(formData, "note") || null,
+    formData.get("reimburse") === "on",
   ];
 
   if (id) {
@@ -330,8 +334,8 @@ async function addCompanyBillUnguarded(
       await client.query(
         `update public.company_bills
             set description = $1, vendor_name = $2, bill_number = $3, bill_date = $4,
-                total_amount = $5, vat_amount = $6, paid_by = $7, note = $8, updated_at = now()
-          where id = $9`,
+                total_amount = $5, vat_amount = $6, paid_by = $7, note = $8, reimburse = $9, updated_at = now()
+          where id = $10`,
         [...params, id]
       );
       await insertAttachments(client, { kind: "company_bill", id }, files, session.sub);
@@ -340,8 +344,8 @@ async function addCompanyBillUnguarded(
     await transaction(async (client) => {
       const inserted = await client.query<{ id: string }>(
         `insert into public.company_bills
-           (description, vendor_name, bill_number, bill_date, total_amount, vat_amount, paid_by, note, created_by)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+           (description, vendor_name, bill_number, bill_date, total_amount, vat_amount, paid_by, note, reimburse, created_by)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
          returning id`,
         [...params, session.sub]
       );
@@ -372,6 +376,7 @@ async function addCompanyBillsUnguarded(bills: CompanyBillInput[]): Promise<Fund
     vat_amount: Math.round(Number(bill.vat_amount ?? 0) * 100) / 100,
     paid_by: String(bill.paid_by ?? "").trim() || null,
     note: String(bill.note ?? "").trim() || null,
+    reimburse: bill.reimburse === true,
   }));
   for (const [index, row] of rows.entries()) {
     const invalid = companyBillError({
@@ -387,9 +392,9 @@ async function addCompanyBillsUnguarded(bills: CompanyBillInput[]): Promise<Fund
     for (const row of rows) {
       await client.query(
         `insert into public.company_bills
-           (description, vendor_name, bill_number, bill_date, total_amount, vat_amount, paid_by, note, created_by)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-        [row.description, row.vendor_name, row.bill_number, row.bill_date, row.total_amount, row.vat_amount, row.paid_by, row.note, session.sub]
+           (description, vendor_name, bill_number, bill_date, total_amount, vat_amount, paid_by, note, reimburse, created_by)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+        [row.description, row.vendor_name, row.bill_number, row.bill_date, row.total_amount, row.vat_amount, row.paid_by, row.note, row.reimburse, session.sub]
       );
     }
   });
@@ -413,6 +418,23 @@ export async function deleteCompanyBill(id: string) {
   }
   await exec(`delete from public.company_bills where id = $1`, [id]);
   revalidateFunds();
+}
+
+/** Several bills at once. A bill that has been paid back is kept, as with one. */
+export async function deleteCompanyBills(ids: string[]): Promise<BulkResult> {
+  await owner();
+  const list = bulkIds(ids);
+  const deleted = list.length
+    ? await query<{ id: string }>(
+        `delete from public.company_bills b
+          where b.id = any($1::uuid[])
+            and not exists (select 1 from public.money_transfers t where t.bill_id = b.id)
+          returning b.id`,
+        [list]
+      )
+    : [];
+  revalidateFunds();
+  return bulkResult(deleted.length, list.length, { one: "bill", many: "bills" }, "already paid back, delete the reimbursement first");
 }
 
 export async function reimburseBill(
@@ -506,6 +528,16 @@ export async function deleteTaxPayment(id: string) {
   await owner();
   await exec(`delete from public.tax_payments where id = $1`, [id]);
   revalidateFunds();
+}
+
+export async function deleteTaxPayments(ids: string[]): Promise<BulkResult> {
+  await owner();
+  const list = bulkIds(ids);
+  const deleted = list.length
+    ? await query<{ id: string }>(`delete from public.tax_payments where id = any($1::uuid[]) returning id`, [list])
+    : [];
+  revalidateFunds();
+  return bulkResult(deleted.length, list.length, { one: "VAT payment", many: "VAT payments" });
 }
 
 // -----------------------------------------------------------------------------

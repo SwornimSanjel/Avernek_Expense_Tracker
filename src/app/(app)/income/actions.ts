@@ -1,7 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { exec, one, transaction } from "@/lib/db";
+import { exec, one, query, transaction } from "@/lib/db";
+import { bulkIds, bulkResult, type BulkResult } from "@/lib/bulk";
 import { requireSession } from "@/lib/auth/server";
 import { assertAppOwner } from "@/lib/authz";
 import {
@@ -1163,6 +1164,17 @@ export async function deleteIncomePayment(id: string) {
   revalidateIncome();
 }
 
+/** Several client payments at once; each client's balance is recalculated from what remains. */
+export async function deleteIncomePayments(ids: string[]): Promise<BulkResult> {
+  await requireIncomeAdmin();
+  const list = bulkIds(ids);
+  const deleted = list.length
+    ? await query<{ id: string }>(`delete from public.income_payments where id = any($1::uuid[]) returning id`, [list])
+    : [];
+  revalidateIncome();
+  return bulkResult(deleted.length, list.length, { one: "payment", many: "payments" });
+}
+
 // -----------------------------------------------------------------------------
 // Income without a client agreement
 //
@@ -1268,6 +1280,16 @@ export async function deleteOtherIncome(id: string) {
   await requireIncomeAdmin();
   await exec(`delete from public.other_income where id = $1`, [id]);
   revalidateIncome();
+}
+
+export async function deleteOtherIncomes(ids: string[]): Promise<BulkResult> {
+  await requireIncomeAdmin();
+  const list = bulkIds(ids);
+  const deleted = list.length
+    ? await query<{ id: string }>(`delete from public.other_income where id = any($1::uuid[]) returning id`, [list])
+    : [];
+  revalidateIncome();
+  return bulkResult(deleted.length, list.length, { one: "income record", many: "income records" });
 }
 
 /**

@@ -14,7 +14,8 @@ import { loadLedger } from "@/lib/ledger";
 import { bankAmount } from "@/lib/tax";
 import { OTHER_INCOME_LABELS, formatServiceDate, todayIso } from "@/lib/income";
 import BillsByMonth from "@/components/BillsByMonth";
-import { deleteCompanyBill, deleteMoneyTransfer, deleteTaxPayment } from "../funds/actions";
+import { deleteCompanyBill, deleteCompanyBills, deleteMoneyTransfer, deleteTaxPayment, deleteTaxPayments } from "../funds/actions";
+import BulkSelect, { SelectBox, SelectToggle } from "@/components/BulkSelect";
 import type { IncomeAgreement } from "@/lib/types";
 import Icon from "@/components/Icons";
 import { ATTACHMENT_COLUMNS, attachmentUrl, type Attachment } from "@/lib/attachments";
@@ -141,7 +142,11 @@ export default async function VatPage() {
               const sum = (pick: (row: VatRow) => number) => rows.reduce((total, row) => total + pick(row), 0);
               return [
                 <tr key={`h-${key}`} className="!bg-[var(--surface-2)]">
-                  <td colSpan={2} className="font-semibold">{monthLabel(key)}</td>
+                  {/* The month's total, not another receipt: say so, as the bills tab does. */}
+                  <td colSpan={2}>
+                    <span className="font-semibold">{monthLabel(key)}</span>
+                    <span className="muted"> · {rows.length} {rows.length === 1 ? "receipt" : "receipts"} · month total</span>
+                  </td>
                   <td className="num font-semibold">{formatNumber(sum((row) => row.charge))}</td>
                   <td className="num font-semibold text-amber">{formatNumber(sum((row) => row.vat))}</td>
                   <td className="num font-semibold">{formatNumber(sum((row) => row.tds))}</td>
@@ -174,7 +179,7 @@ export default async function VatPage() {
         <p className="text-[13.5px] muted max-w-2xl">
           {pendingTotal > 0
             ? <>NPR {formatNumber(pendingTotal)} still to reimburse · NPR {formatNumber(vatRoom)} can be used from the VAT account right now.</>
-            : "Lawyer, rent, printing… bills issued to Avernek and paid first from another account. Their VAT lowers what we owe IRD."}
+            : "Bills issued to Avernek: cafes, shops, lawyers… Their VAT lowers what we owe IRD."}
         </p>
         {canManage && <AddCompanyBill compact />}
       </div>
@@ -184,6 +189,12 @@ export default async function VatPage() {
       {billStatuses.length > 0 && (
         <BillsByMonth
           today={todayIso()}
+          onDelete={canManage ? deleteCompanyBills : undefined}
+          locked={Object.fromEntries(
+            billStatuses
+              .filter((item) => item.reimbursements.length > 0)
+              .map((item) => [item.bill.id, "It has been paid back. Delete its reimbursement first."])
+          )}
           items={billStatuses.map((item) => ({
             id: item.bill.id,
             date: item.bill.bill_date,
@@ -197,20 +208,26 @@ export default async function VatPage() {
                     <Icon name="file" size={17} />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="text-[15px] font-semibold">{item.bill.description}</div>
+                    {/* The shop is the title; what it was for sits underneath. */}
+                    <div className="text-[15px] font-semibold">{item.bill.vendor_name || item.bill.description}</div>
                     <div className="text-[13px] muted mt-0.5">
                       {formatServiceDate(item.bill.bill_date)}
-                      {item.bill.vendor_name ? ` · ${item.bill.vendor_name}` : ""}
+                      {item.bill.vendor_name ? ` · ${item.bill.description}` : ""}
                       {item.bill.bill_number ? ` · bill ${item.bill.bill_number}` : ""}
                       {item.bill.paid_by ? ` · paid by ${item.bill.paid_by}` : ""}
                     </div>
                     <FileLinks files={filesByOwner.get(item.bill.id) ?? []} label="Bill" />
                   </div>
-                  <dl className="grid grid-cols-4 gap-5 text-right">
+                  <dl className={`grid ${item.paysBack ? "grid-cols-4" : "grid-cols-2"} gap-5 text-right`}>
                     <BillFigure label="Bill" value={formatNumber(Number(item.bill.total_amount))} />
                     <BillFigure label="VAT in it" value={formatNumber(Number(item.bill.vat_amount))} tone="text-amber" />
-                    <BillFigure label="Paid back" value={formatNumber(item.reimbursed)} tone="text-green" />
-                    <BillFigure label="Pending" value={item.pending > 0 ? formatNumber(item.pending) : "Done"} tone={item.pending > 0 ? "text-amber" : "text-green"} />
+                    {/* Only a bill being paid back from the VAT account has these. */}
+                    {item.paysBack && (
+                      <>
+                        <BillFigure label="Paid back" value={formatNumber(item.reimbursed)} tone="text-green" />
+                        <BillFigure label="Pending" value={item.pending > 0 ? formatNumber(item.pending) : "Done"} tone={item.pending > 0 ? "text-amber" : "text-green"} />
+                      </>
+                    )}
                   </dl>
                   {canManage && (
                     <div className="flex items-center gap-1.5">
@@ -243,15 +260,23 @@ export default async function VatPage() {
   );
 
   const paidPanel = (
-    <>
+    <BulkSelect
+      ids={taxPayments.map((row) => row.id)}
+      noun={{ one: "VAT payment", many: "VAT payments" }}
+      onDelete={canManage ? deleteTaxPayments : undefined}
+    >
       <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5 border-b bg-[var(--surface-2)]">
         <p className="text-[13.5px] muted">Each deposit lowers both the VAT account and the VAT still to pay.</p>
-        {canManage && <PayVat balances={balances} vatOwed={tax.vatOwed} />}
+        <div className="flex items-center gap-2">
+          {taxPayments.length > 1 && <SelectToggle />}
+          {canManage && <PayVat balances={balances} vatOwed={tax.vatOwed} />}
+        </div>
       </div>
       {taxPayments.length === 0 && <EmptyState title="No VAT payment recorded yet" description="Record each deposit to IRD here." icon="bank" />}
       <div className="row-list">
         {taxPayments.map((row) => (
           <div key={row.id} className="row-item">
+            <SelectBox id={row.id} label="this VAT payment" />
             <div className="row-icon" style={{ "--tone": "var(--accent-ink)", "--tone-soft": "var(--accent-soft)" } as React.CSSProperties}><Icon name="bank" size={17} /></div>
             <div className="min-w-0 flex-1">
               <div className="row-title">VAT paid{row.period_label ? ` · ${row.period_label}` : ""}</div>
@@ -262,7 +287,7 @@ export default async function VatPage() {
           </div>
         ))}
       </div>
-    </>
+    </BulkSelect>
   );
 
   return (

@@ -1,7 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import BulkSelect, { SelectBox, SelectGroup, SelectToggle } from "@/components/BulkSelect";
 import PeriodPicker, { describePeriod, initialPeriod, periodRange, type Period } from "@/components/PeriodPicker";
+import type { BulkResult } from "@/lib/bulk";
 import { monthLabel } from "@/lib/dates";
 import { formatNumber } from "@/lib/format";
 
@@ -20,7 +22,19 @@ export type BillItem = {
  * Statement's period controls: a month, This month / Last month / This year /
  * All time, or a custom range. Starts on All time.
  */
-export default function BillsByMonth({ items, today }: { items: BillItem[]; today: string }) {
+export default function BillsByMonth({
+  items,
+  today,
+  onDelete,
+  locked,
+}: {
+  items: BillItem[];
+  today: string;
+  /** "Select" → delete several; only for those allowed to delete. */
+  onDelete?: (ids: string[]) => Promise<BulkResult>;
+  /** Bills that cannot be deleted, with why. */
+  locked?: Record<string, string>;
+}) {
   const [period, setPeriod] = useState<Period>(() => initialPeriod(today, "all"));
   const firstDate = items.length ? items[items.length - 1].date : today;
   const range = periodRange(period, today, firstDate);
@@ -34,9 +48,10 @@ export default function BillsByMonth({ items, today }: { items: BillItem[]; toda
   const count = (n: number) => `${n} ${n === 1 ? "bill" : "bills"}`;
 
   return (
-    <>
+    <BulkSelect ids={visible.map((item) => item.id)} locked={locked} noun={{ one: "bill", many: "bills" }} onDelete={onDelete}>
       <div className="stmt-toolbar">
         <PeriodPicker period={period} today={today} label={label} marked={marked} onChange={setPeriod} />
+        <SelectToggle className="ml-auto" />
       </div>
 
       {visible.length === 0 ? (
@@ -54,9 +69,11 @@ export default function BillsByMonth({ items, today }: { items: BillItem[]; toda
             <span>
               VAT <strong className="tnum text-amber">{formatNumber(sum(visible, (item) => item.vat))}</strong>
             </span>
-            <span>
-              To reimburse <strong className="tnum">{formatNumber(sum(visible, (item) => item.pending))}</strong>
-            </span>
+            {sum(visible, (item) => item.pending) > 0 && (
+              <span>
+                To reimburse <strong className="tnum">{formatNumber(sum(visible, (item) => item.pending))}</strong>
+              </span>
+            )}
           </div>
           {months.map((key) => {
             const rows = visible.filter((item) => item.date.startsWith(key));
@@ -64,6 +81,7 @@ export default function BillsByMonth({ items, today }: { items: BillItem[]; toda
               <section key={key}>
                 <div className="bills-month">
                   <div>
+                    <SelectGroup ids={rows.map((item) => item.id)} label={monthLabel(key)} />
                     <span className="font-semibold">{monthLabel(key)}</span>
                     <span className="muted"> · {count(rows.length)}</span>
                   </div>
@@ -78,7 +96,10 @@ export default function BillsByMonth({ items, today }: { items: BillItem[]; toda
                 </div>
                 <div className="row-list">
                   {rows.map((item) => (
-                    <div key={item.id}>{item.content}</div>
+                    <div key={item.id} className="bulk-row">
+                      <SelectBox id={item.id} />
+                      <div>{item.content}</div>
+                    </div>
                   ))}
                 </div>
               </section>
@@ -86,6 +107,6 @@ export default function BillsByMonth({ items, today }: { items: BillItem[]; toda
           })}
         </>
       )}
-    </>
+    </BulkSelect>
   );
 }

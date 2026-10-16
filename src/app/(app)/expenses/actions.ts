@@ -12,6 +12,7 @@ import {
   validateShareTotal,
 } from "@/lib/shares";
 import { assertCanManageExpenses } from "@/lib/authz";
+import { bulkIds, bulkResult, type BulkResult } from "@/lib/bulk";
 import {
   assertRoomFor,
   insertAttachments,
@@ -298,6 +299,23 @@ export async function deleteExpense(id: string) {
   revalidatePath("/income");
   revalidatePath("/clients");
   revalidatePath("/");
+}
+
+/** Several expenses at once: the list's "Select" → "Delete". Same rules as one. */
+export async function deleteExpenses(ids: string[]): Promise<BulkResult> {
+  const session = await requireSession();
+  assertCanManageExpenses(session);
+  const list = bulkIds(ids);
+  const deleted = list.length
+    ? await query<{ id: string }>(`delete from public.expenses where id = any($1::uuid[]) returning id`, [list])
+    : [];
+
+  revalidatePath("/expenses");
+  revalidatePath("/funds");
+  revalidatePath("/income");
+  revalidatePath("/clients");
+  revalidatePath("/");
+  return bulkResult(deleted.length, list.length, { one: "expense", many: "expenses" });
 }
 
 /** Retry FX for a pending USD expense (used by the "needs review" flow). */

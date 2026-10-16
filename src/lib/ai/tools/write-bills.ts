@@ -38,6 +38,10 @@ const billSchema = z.object({
   vat_amount: z.number().min(0).optional().describe("The VAT printed on the bill, only when the user gave it"),
   paid_by: z.string().max(120).optional().describe("Who paid it first, as the user said it"),
   note: z.string().max(300).optional(),
+  reimburse: z
+    .boolean()
+    .optional()
+    .describe("true only when the user says the VAT account should pay this bill back to whoever paid it; omit otherwise"),
 });
 
 const schema = z.object({
@@ -58,6 +62,8 @@ type Bill = {
   note: string | null;
   /** No date was given, so the app dated it today. */
   dated_today: boolean;
+  /** The VAT account is to pay it back; off unless the user asked. */
+  reimburse: boolean;
 };
 
 type Checked = { bill: Bill; vat: number; errors: Record<string, string> };
@@ -87,6 +93,7 @@ function toBill(raw: unknown): Bill {
     paid_by: text(v.paid_by, 120),
     note: text(v.note, 300),
     dated_today: v.dated_today === true,
+    reimburse: v.reimburse === true || v.reimburse === "true",
   };
 }
 
@@ -245,6 +252,17 @@ function billForm(bills: Bill[], index: number, errors: Record<string, string>, 
       error: errors.vat_amount,
     },
     { name: "f_paid_by", label: "Who paid it first?", type: "text", required: false, value: s(bill.paid_by), placeholder: "e.g. Swornim · non-VAT account" },
+    {
+      name: "f_reimburse",
+      label: "Pay it back from the VAT account?",
+      type: "choice",
+      required: true,
+      value: bill.reimburse ? "yes" : "no",
+      options: [
+        { value: "no", label: "No", hint: "Kept for the books and VAT only" },
+        { value: "yes", label: "Yes", hint: "Whoever paid gets it back" },
+      ],
+    },
     { name: "f_note", label: "Note", type: "text", required: false, value: s(bill.note) },
   ];
   return {
@@ -273,6 +291,7 @@ function fromForm(values: Record<string, unknown>, before: Bill): Bill {
     vat_amount: values.f_vat_amount,
     paid_by: values.f_paid_by,
     note: values.f_note,
+    reimburse: values.f_reimburse === "yes" ? true : values.f_reimburse === "no" ? false : before.reimburse,
   });
 }
 
@@ -287,6 +306,7 @@ function toInput(item: Checked): CompanyBillInput {
     vat_amount: item.vat,
     paid_by: bill.paid_by,
     note: bill.note,
+    reimburse: bill.reimburse,
   };
 }
 
@@ -372,7 +392,7 @@ export const addCompanyBillsTool: WriteTool = {
             label: label(item.bill, position),
             value: Object.keys(item.errors).length
               ? `Not saved: needs ${missing(item.errors)}`
-              : `${money(item.bill.total!)} · ${vatText(item)} · ${formatDate(item.bill.bill_date)}${item.bill.dated_today ? " (today)" : ""}`,
+              : `${money(item.bill.total!)} · ${vatText(item)} · ${formatDate(item.bill.bill_date)}${item.bill.dated_today ? " (today)" : ""}${item.bill.reimburse ? " · pay back" : ""}`,
           })),
           { label: "Total", value: `${count} · ${money(total)} · VAT ${formatNumber(vat)}` },
         ],

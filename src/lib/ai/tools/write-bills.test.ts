@@ -73,6 +73,7 @@ describe("add_company_bills", () => {
         vat_amount: 217.43,
         paid_by: null,
         note: null,
+        reimburse: false,
       },
       {
         description: "Office stationery",
@@ -83,6 +84,7 @@ describe("add_company_bills", () => {
         vat_amount: 0,
         paid_by: null,
         note: null,
+        reimburse: false,
       },
     ]);
   });
@@ -118,6 +120,14 @@ describe("add_company_bills", () => {
       context()
     );
     expect(rows(next)["1 · Team coffee"]).toBe("NPR 2,049.97 · VAT 235.84 (13%) · 5 Oct 2026");
+  });
+
+  it("marks a bill to be paid back only when asked", async () => {
+    const outcome = await tool.run({ bills: [{ ...lunch, reimburse: true }, coffee] }, context());
+    if (outcome.status !== "ready") throw new Error("expected a draft");
+    expect(rows(outcome)["1 · Malaya Cafe & Restaurant #189"]).toBe("NPR 1,040 · VAT 120 · 12 Aug 2026 · pay back");
+    await tool.execute(outcome.draft.args, context());
+    expect((saved.batches[0] as { reimburse: boolean }[]).map((bill) => bill.reimburse)).toEqual([true, false]);
   });
 
   it("refuses a date after today", async () => {

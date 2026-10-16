@@ -14,6 +14,7 @@ import {
 } from "@/lib/shares";
 import type { ShareInput } from "@/lib/shares";
 import { assertAppOwner } from "@/lib/authz";
+import { bulkIds, bulkResult, type BulkResult } from "@/lib/bulk";
 
 function n(v: FormDataEntryValue | null): number {
   const x = Number(v);
@@ -157,6 +158,17 @@ export async function deleteRecurring(id: string) {
 
   await exec(`delete from public.recurring where id = $1`, [id]);
   revalidatePath("/subscriptions");
+}
+
+export async function deleteRecurrings(ids: string[]): Promise<BulkResult> {
+  const session = await requireSession();
+  assertAppOwner(session);
+  const list = bulkIds(ids);
+  const deleted = list.length
+    ? await query<{ id: string }>(`delete from public.recurring where id = any($1::uuid[]) returning id`, [list])
+    : [];
+  revalidatePath("/subscriptions");
+  return bulkResult(deleted.length, list.length, { one: "subscription", many: "subscriptions" });
 }
 
 /**

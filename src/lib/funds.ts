@@ -207,7 +207,10 @@ export function computeMoneyAccountBalances(input: LedgerInput): MoneyAccountBal
 export type BillStatus = {
   bill: CompanyBill;
   reimbursed: number;
+  /** Still to pay back; zero for a bill that is not being paid back. */
   pending: number;
+  /** Marked to be paid back, or already (partly) paid back. */
+  paysBack: boolean;
   reimbursements: MoneyTransfer[];
 };
 
@@ -217,10 +220,13 @@ export function summarizeBills(bills: CompanyBill[], transfers: MoneyTransfer[])
       (transfer) => transfer.kind === "reimbursement" && transfer.bill_id === bill.id
     );
     const reimbursed = reimbursements.reduce((sum, transfer) => sum + Number(transfer.from_amount), 0);
+    // Only a bill marked to be paid back (or already partly paid back) is owed.
+    const paysBack = bill.reimburse === true || reimbursed > 0;
     return {
       bill,
       reimbursed: round2(reimbursed),
-      pending: round2(Math.max(0, Number(bill.total_amount) - reimbursed)),
+      pending: paysBack ? round2(Math.max(0, Number(bill.total_amount) - reimbursed)) : 0,
+      paysBack,
       reimbursements,
     };
   });
