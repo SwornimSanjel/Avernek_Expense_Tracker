@@ -14,6 +14,8 @@ import type { ToolAsk, ToolContext, ToolReady, WriteTool } from "./types";
  * with a pasted list. The rules are the Add VAT bill form's: what it was for,
  * the total (VAT included) and the date are required; a VAT bill's VAT is
  * worked out at 13% unless the bill's printed VAT is given; a PAN bill has none.
+ * That VAT is what was paid; it is claimed from IRD only when the user says so
+ * (VAT on food and drinks usually cannot be claimed).
  *
  * Every bill is shown on one confirmation. A bill with no date is dated today,
  * as on the form, and the confirmation says so. A bill missing anything else
@@ -42,6 +44,10 @@ const billSchema = z.object({
     .boolean()
     .optional()
     .describe("true only when the user says the VAT account should pay this bill back to whoever paid it; omit otherwise"),
+  claim_vat: z
+    .boolean()
+    .optional()
+    .describe("true only when the user says this bill's VAT can be claimed/deducted from the VAT owed to IRD; false or omit when they say it cannot (e.g. food and drinks)"),
 });
 
 const schema = z.object({
@@ -64,9 +70,12 @@ type Bill = {
   dated_today: boolean;
   /** The VAT account is to pay it back; off unless the user asked. */
   reimburse: boolean;
+  /** Its VAT is claimed from IRD; off unless the user said it can be. */
+  claim_vat: boolean;
 };
 
-type Checked = { bill: Bill; vat: number; errors: Record<string, string> };
+/** `vat` is the VAT on the bill (paid); `claimed` the part claimed from IRD. */
+type Checked = { bill: Bill; vat: number; claimed: number; errors: Record<string, string> };
 
 function text(value: unknown, max: number): string | null {
   return typeof value === "string" && value.trim() ? value.trim().slice(0, max) : null;
@@ -94,6 +103,7 @@ function toBill(raw: unknown): Bill {
     note: text(v.note, 300),
     dated_today: v.dated_today === true,
     reimburse: v.reimburse === true || v.reimburse === "true",
+    claim_vat: v.claim_vat === true || v.claim_vat === "true",
   };
 }
 
@@ -106,7 +116,7 @@ function check(bill: Bill, today: string): Checked {
   else if (bill.bill_date > today) errors.bill_date = "This date is after today. Check it.";
   const vat = !bill.vat_bill || bill.total == null ? 0 : (bill.vat_amount ?? vatInsideTotal(bill.total));
   if (bill.vat_bill && bill.total != null && (vat < 0 || vat > bill.total)) errors.vat_amount = "VAT must be between zero and the bill total.";
-  return { bill, vat, errors };
+  return { bill, vat, claimed: bill.claim_vat ? vat : 0, errors };
 }
 
 const FIELD_NAMES: Record<string, string> = {
@@ -130,7 +140,7 @@ function label(bill: Bill, index: number): string {
 function vatText(item: Checked): string {
   if (!item.bill.vat_bill) return "no VAT";
   const worked = item.bill.vat_amount == null ? " (13%)" : "";
-  return `VAT ${formatNumber(item.vat)}${worked}`;
+  return `VAT ${formatNumber(item.vat)}${worked} ${item.claimed > 0 ? "claimed" : "not claimed"}`;
 }
 
 /** Bills that look like ones already in VAT & bills, or repeated in the list. */
@@ -251,6 +261,17 @@ function billForm(bills: Bill[], index: number, errors: Record<string, string>, 
       help: "Leave empty to work it out at 13%.",
       error: errors.vat_amount,
     },
+    {
+      name: "f_claim",
+      label: "Claim this VAT from IRD?",
+      type: "choice",
+      required: true,
+      value: bill.claim_vat ? "yes" : "no",
+      options: [
+        { value: "no", label: "No", hint: "Paid, but not claimable (food, drinks)" },
+        { value: "yes", label: "Yes", hint: "Lowers the VAT Avernek owes" },
+      ],
+    },
     { name: "f_paid_by", label: "Who paid it first?", type: "text", required: false, value: s(bill.paid_by), placeholder: "e.g. Swornim · non-VAT account" },
     {
       name: "f_reimburse",
@@ -292,6 +313,7 @@ function fromForm(values: Record<string, unknown>, before: Bill): Bill {
     paid_by: values.f_paid_by,
     note: values.f_note,
     reimburse: values.f_reimburse === "yes" ? true : values.f_reimburse === "no" ? false : before.reimburse,
+    claim_vat: values.f_claim === "yes" ? true : values.f_claim === "no" ? false : before.claim_vat,
   });
 }
 
@@ -307,6 +329,7 @@ function toInput(item: Checked): CompanyBillInput {
     paid_by: bill.paid_by,
     note: bill.note,
     reimburse: bill.reimburse,
+    claim_vat: item.claimed > 0,
   };
 }
 
@@ -379,11 +402,12 @@ export const addCompanyBillsTool: WriteTool = {
     const warnings = [...incomplete, ...datedToday, ...duplicates(items, await existingBills(ctx)), ...vatWarnings(items)];
     const total = ready.reduce((sum, item) => sum + item.bill.total!, 0);
     const vat = ready.reduce((sum, item) => sum + item.vat, 0);
+    const claimed = ready.reduce((sum, item) => sum + item.claimed, 0);
     const count = `${ready.length} ${ready.length === 1 ? "bill" : "bills"}`;
 
     return {
       status: "ready",
-      summary: `Ready to add ${count}: ${money(total)} with VAT ${formatNumber(vat)}. Check them and confirm.`,
+      summary: `Ready to add ${count}: ${money(total)} with VAT ${formatNumber(vat)}, of which ${formatNumber(claimed)} claimed. Check them and confirm.`,
       draft: {
         title: `Add ${count} to VAT & bills`,
         confirmLabel: `Save ${count}`,
@@ -394,7 +418,7 @@ export const addCompanyBillsTool: WriteTool = {
               ? `Not saved: needs ${missing(item.errors)}`
               : `${money(item.bill.total!)} · ${vatText(item)} · ${formatDate(item.bill.bill_date)}${item.bill.dated_today ? " (today)" : ""}${item.bill.reimburse ? " · pay back" : ""}`,
           })),
-          { label: "Total", value: `${count} · ${money(total)} · VAT ${formatNumber(vat)}` },
+          { label: "Total", value: `${count} · ${money(total)} · VAT ${formatNumber(vat)} · claimed ${formatNumber(claimed)}` },
         ],
         warnings,
         // Every bill, the incomplete ones too, so "Change something" can fix them.

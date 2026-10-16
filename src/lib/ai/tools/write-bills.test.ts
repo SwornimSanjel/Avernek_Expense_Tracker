@@ -47,10 +47,10 @@ describe("add_company_bills", () => {
     const outcome = await tool.run({ bills: [lunch, coffee, stationery] }, context());
     expect(outcome.status).toBe("ready");
     expect(rows(outcome)).toEqual({
-      "1 · Malaya Cafe & Restaurant #189": "NPR 1,040 · VAT 120 · 12 Aug 2026",
-      "2 · Origin Coffee Pvt. Ltd. #TI3565": "NPR 1,890 · VAT 217.43 (13%) · 21 Sep 2026",
+      "1 · Malaya Cafe & Restaurant #189": "NPR 1,040 · VAT 120 not claimed · 12 Aug 2026",
+      "2 · Origin Coffee Pvt. Ltd. #TI3565": "NPR 1,890 · VAT 217.43 (13%) not claimed · 21 Sep 2026",
       "3 · Trisha Books #127": "NPR 660 · no VAT · 30 Aug 2026",
-      Total: "3 bills · NPR 3,590 · VAT 337.43",
+      Total: "3 bills · NPR 3,590 · VAT 337.43 · claimed 0",
     });
     if (outcome.status === "ready") {
       expect(outcome.draft.confirmLabel).toBe("Save 3 bills");
@@ -74,6 +74,7 @@ describe("add_company_bills", () => {
         paid_by: null,
         note: null,
         reimburse: false,
+        claim_vat: false,
       },
       {
         description: "Office stationery",
@@ -85,6 +86,7 @@ describe("add_company_bills", () => {
         paid_by: null,
         note: null,
         reimburse: false,
+        claim_vat: false,
       },
     ]);
   });
@@ -93,7 +95,7 @@ describe("add_company_bills", () => {
     const undated = { description: "Team coffee", vendor: "Himalayan SIP", bill_no: "1698", total: 2049.97, vat_amount: 235.83 };
     const outcome = await tool.run({ bills: [lunch, undated] }, context());
     if (outcome.status !== "ready") throw new Error("expected a draft");
-    expect(rows(outcome)["2 · Himalayan SIP #1698"]).toBe("NPR 2,049.97 · VAT 235.83 · 16 Oct 2026 (today)");
+    expect(rows(outcome)["2 · Himalayan SIP #1698"]).toBe("NPR 2,049.97 · VAT 235.83 not claimed · 16 Oct 2026 (today)");
     expect(outcome.draft.confirmLabel).toBe("Save 2 bills");
     expect(outcome.draft.warnings).toEqual([
       "Bill 2 · Himalayan SIP #1698 had no date, so it is dated today, 16 Oct 2026. Use Change something if it is from another day.",
@@ -119,13 +121,29 @@ describe("add_company_bills", () => {
       { ...outcome.form.values, f_description: "Team coffee", f_total: "2049.97", f_bill_date: "2026-10-05", f_vat: "yes" },
       context()
     );
-    expect(rows(next)["1 · Team coffee"]).toBe("NPR 2,049.97 · VAT 235.84 (13%) · 5 Oct 2026");
+    expect(rows(next)["1 · Team coffee"]).toBe("NPR 2,049.97 · VAT 235.84 (13%) not claimed · 5 Oct 2026");
+  });
+
+  it("records the VAT paid on every bill, and claims it only when told", async () => {
+    const lawyer = { description: "Company incorporation", vendor: "Summit Legal", bill_no: "010", total: 20340, bill_date: "2026-09-22", vat_amount: 2340, claim_vat: true };
+    const outcome = await tool.run({ bills: [lawyer, lunch] }, context());
+    if (outcome.status !== "ready") throw new Error("expected a draft");
+    expect(rows(outcome)).toMatchObject({
+      "1 · Summit Legal #010": "NPR 20,340 · VAT 2,340 claimed · 22 Sep 2026",
+      "2 · Malaya Cafe & Restaurant #189": "NPR 1,040 · VAT 120 not claimed · 12 Aug 2026",
+      Total: "2 bills · NPR 21,380 · VAT 2,460 · claimed 2,340",
+    });
+    await tool.execute(outcome.draft.args, context());
+    expect((saved.batches[0] as { vat_amount: number; claim_vat: boolean }[]).map((bill) => [bill.vat_amount, bill.claim_vat])).toEqual([
+      [2340, true],
+      [120, false],
+    ]);
   });
 
   it("marks a bill to be paid back only when asked", async () => {
     const outcome = await tool.run({ bills: [{ ...lunch, reimburse: true }, coffee] }, context());
     if (outcome.status !== "ready") throw new Error("expected a draft");
-    expect(rows(outcome)["1 · Malaya Cafe & Restaurant #189"]).toBe("NPR 1,040 · VAT 120 · 12 Aug 2026 · pay back");
+    expect(rows(outcome)["1 · Malaya Cafe & Restaurant #189"]).toBe("NPR 1,040 · VAT 120 not claimed · 12 Aug 2026 · pay back");
     await tool.execute(outcome.draft.args, context());
     expect((saved.batches[0] as { reimburse: boolean }[]).map((bill) => bill.reimburse)).toEqual([true, false]);
   });

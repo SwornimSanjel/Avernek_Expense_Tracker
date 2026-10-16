@@ -11,7 +11,10 @@ export type BillItem = {
   id: string;
   date: string;
   total: number;
+  /** VAT printed on the bill (paid). */
   vat: number;
+  /** The part claimed from IRD. */
+  claimed: number;
   pending: number;
   /** The bill's row, rendered on the server with its actions. */
   content: React.ReactNode;
@@ -67,7 +70,10 @@ export default function BillsByMonth({
               Total <strong className="tnum">{formatNumber(sum(visible, (item) => item.total))}</strong>
             </span>
             <span>
-              VAT <strong className="tnum text-amber">{formatNumber(sum(visible, (item) => item.vat))}</strong>
+              VAT in bills <strong className="tnum text-amber">{formatNumber(sum(visible, (item) => item.vat))}</strong>
+            </span>
+            <span>
+              VAT claimed <strong className="tnum text-green">{formatNumber(sum(visible, (item) => item.claimed))}</strong>
             </span>
             {sum(visible, (item) => item.pending) > 0 && (
               <span>
@@ -91,6 +97,9 @@ export default function BillsByMonth({
                     </span>
                     <span>
                       <span className="muted">VAT</span> <strong className="tnum text-amber">{formatNumber(sum(rows, (item) => item.vat))}</strong>
+                    </span>
+                    <span>
+                      <span className="muted">Claimed</span> <strong className="tnum text-green">{formatNumber(sum(rows, (item) => item.claimed))}</strong>
                     </span>
                   </div>
                 </div>

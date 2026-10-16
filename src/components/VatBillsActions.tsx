@@ -122,7 +122,7 @@ export function AddCompanyBill({
               <input type="checkbox" checked={isVatBill} onChange={(event) => setIsVatBill(event.target.checked)} />
               <span>
                 <strong>VAT bill (13% included in the total)</strong>
-                <small>The VAT inside it is input VAT — it reduces the VAT Avernek owes IRD.</small>
+                <small>The bill shows VAT, and you paid it as part of the total.</small>
               </span>
             </label>
             {isVatBill && (
@@ -139,6 +139,15 @@ export function AddCompanyBill({
                   }}
                   className="input tnum mt-1"
                 />
+              </label>
+            )}
+            {isVatBill && (
+              <label className="checkbox-row">
+                <input type="checkbox" name="claim_vat" defaultChecked={bill?.claim_vat ?? false} />
+                <span>
+                  <strong>Claim this VAT from IRD</strong>
+                  <small>Lowers the VAT Avernek owes. Leave it off for food and drinks: that VAT usually can’t be claimed.</small>
+                </span>
               </label>
             )}
             <input type="hidden" name="vat_amount" value={vatValue} />
@@ -322,19 +331,52 @@ export function ReimburseBill({
 }
 
 /** VAT deposited to IRD. It lowers the account and the VAT still owed. */
-export function PayVat({ balances, vatOwed }: { balances: MoneyAccountBalance[]; vatOwed: number }) {
+/** A month a VAT or TDS return can be recorded for. */
+export type TaxPeriodOption = { key: string; label: string; payable: number; filed: boolean };
+
+/**
+ * A VAT return filed (and paid) or TDS deposited, for one Nepali month. A month
+ * with nothing to pay is still filed: tick "Nothing to pay" for a nil return.
+ */
+export function PayTax({
+  kind,
+  balances,
+  periods,
+  label,
+}: {
+  kind: "vat" | "tds";
+  balances: MoneyAccountBalance[];
+  /** Months to choose from, oldest first; the first one not yet filed is preselected. */
+  periods: TaxPeriodOption[];
+  label?: string;
+}) {
   const vatAccount = balances.find((item) => item.account.kind === "company_bank") ?? balances[0];
   const [open, setOpen] = useState(false);
   const [state, action, pending] = useActionState(guardRequest(addTaxPayment), initialState);
+  const firstOpen = periods.find((period) => !period.filed) ?? periods[periods.length - 1];
+  const [periodKey, setPeriodKey] = useState(firstOpen?.key ?? "");
+  const period = periods.find((item) => item.key === periodKey);
+  const [nil, setNil] = useState(kind === "vat" && (firstOpen?.payable ?? 0) === 0);
+  const [amount, setAmount] = useState(firstOpen?.payable ? String(firstOpen.payable) : "");
+  const what = kind === "vat" ? "VAT" : "TDS";
 
   useEffect(() => {
     if (state.ok) setOpen(false);
   }, [state]);
 
+  function choose(key: string) {
+    setPeriodKey(key);
+    const next = periods.find((item) => item.key === key);
+    if (kind === "vat") {
+      setNil((next?.payable ?? 0) === 0);
+      setAmount(next?.payable ? String(next.payable) : "");
+    }
+  }
+
   if (!open) {
     return (
       <button type="button" onClick={() => setOpen(true)} className="btn !h-9 text-sm">
-        Pay VAT to IRD
+        {label ?? (kind === "vat" ? "File / pay VAT" : "Record TDS deposit")}
       </button>
     );
   }
@@ -342,45 +384,81 @@ export function PayVat({ balances, vatOwed }: { balances: MoneyAccountBalance[];
     <div className="modal-backdrop">
       <form action={action} className="modal-panel md:max-w-md p-5 md:p-6 space-y-4">
         <ModalHeader
-          title="VAT paid to IRD"
-          subtitle={`Estimated VAT still owed: ${formatIncomeMoney(vatOwed, "NPR")}. Enter what was actually paid.`}
+          title={kind === "vat" ? "VAT return for a month" : "TDS deposited"}
+          subtitle={
+            kind === "vat"
+              ? "Record it after filing on the IRD portal. Every month needs a return by the 25th of the next month, even with nothing to pay."
+              : "Tax held back from salaries, rent or other payments, deposited to IRD. Due by the 25th of the next month."
+          }
           onClose={() => setOpen(false)}
-         />
+        />
+        <input type="hidden" name="tax_type" value={kind} />
+        <input type="hidden" name="period_label" value={period?.label ?? ""} />
         <label className="block">
-          <span className="field-label">Paid from</span>
-          <select name="money_account_id" defaultValue={vatAccount?.account.id ?? ""} className="input mt-1">
-            {balances.map((item) => (
-              <option key={item.account.id} value={item.account.id}>
-                {accountShortName(item.account)} · {item.account.name}
+          <span className="field-label">For month</span>
+          <select name="period_key" value={periodKey} onChange={(event) => choose(event.target.value)} className="input mt-1">
+            {periods.map((item) => (
+              <option key={item.key} value={item.key}>
+                {item.label}
+                {item.filed ? " · already recorded" : kind === "vat" ? ` · to pay ${item.payable.toLocaleString("en-IN")}` : ""}
               </option>
             ))}
           </select>
         </label>
-        <div className="grid grid-cols-2 gap-3">
-          <label className="block">
-            <span className="field-label">Amount paid</span>
-            <input name="amount" type="number" min="0.01" step="0.01" required defaultValue={vatOwed > 0 ? vatOwed : ""} className="input tnum mt-1" />
+        {kind === "vat" && (
+          <label className="checkbox-row">
+            <input type="checkbox" name="nil" checked={nil} onChange={(event) => setNil(event.target.checked)} />
+            <span>
+              <strong>Nothing to pay (nil return)</strong>
+              <small>The return was filed with zero VAT to pay.</small>
+            </span>
           </label>
+        )}
+        <div className="grid grid-cols-2 gap-3">
+          {!nil && (
+            <label className="block">
+              <span className="field-label">Amount paid</span>
+              <input
+                name="amount"
+                type="number"
+                min="0.01"
+                step="0.01"
+                required
+                value={amount}
+                onChange={(event) => setAmount(event.target.value)}
+                className="input tnum mt-1"
+              />
+            </label>
+          )}
           <label className="block">
-            <span className="field-label">Date paid</span>
+            <span className="field-label">{nil ? "Date filed" : "Date paid"}</span>
             <input name="paid_on" type="date" required defaultValue={todayIso()} className="input mt-1" />
           </label>
-          <label className="block">
-            <span className="field-label">For month (optional)</span>
-            <input name="period_label" placeholder="e.g. Ashwin 2083" className="input mt-1" />
-          </label>
+          {!nil && (
+            <label className="block col-span-2">
+              <span className="field-label">Paid from</span>
+              <select name="money_account_id" defaultValue={vatAccount?.account.id ?? ""} className="input mt-1">
+                {balances.map((item) => (
+                  <option key={item.account.id} value={item.account.id}>
+                    {accountShortName(item.account)} · {item.account.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          {nil && <input type="hidden" name="money_account_id" value={vatAccount?.account.id ?? ""} />}
           <label className="block">
             <span className="field-label">Voucher / reference</span>
             <input name="reference" className="input mt-1" />
           </label>
+          <label className="block">
+            <span className="field-label">Note (optional)</span>
+            <input name="note" className="input mt-1" />
+          </label>
         </div>
-        <label className="block">
-          <span className="field-label">Note (optional)</span>
-          <input name="note" className="input mt-1" />
-        </label>
         {state.error && <p className="text-sm" style={{ color: "var(--red)" }}>{state.error}</p>}
-        <button disabled={pending} className="btn btn-primary w-full !h-12">
-          {pending ? "Saving…" : "Record VAT payment"}
+        <button disabled={pending || !periodKey} className="btn btn-primary w-full !h-12">
+          {pending ? "Saving…" : nil ? `Record nil ${what} return` : `Record ${what} ${kind === "vat" ? "payment" : "deposit"}`}
         </button>
       </form>
     </div>

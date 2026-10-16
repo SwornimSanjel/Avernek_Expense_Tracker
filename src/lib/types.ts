@@ -412,6 +412,8 @@ export interface CompanyBill {
   note: string | null;
   /** The VAT account is to pay it back to whoever paid it. */
   reimburse: boolean;
+  /** vat_amount is claimed from IRD as input VAT (food and drinks usually are not). */
+  claim_vat: boolean;
   created_by: string | null;
   created_at: string;
   updated_at: string;
@@ -420,7 +422,9 @@ export interface CompanyBill {
 /** VAT deposited to the Inland Revenue Department. */
 export interface TaxPayment {
   id: string;
-  tax_type: "vat";
+  tax_type: "vat" | "tds" | "income_tax";
+  /** The Nepali month a VAT or TDS return covers ("2083-06"), or the fiscal year ("2083/84"). */
+  period_key: string | null;
   money_account_id: string;
   amount: number;
   paid_on: string;

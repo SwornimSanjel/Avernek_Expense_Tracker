@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { formatNumber } from "@/lib/format";
+import { claimedVat } from "@/lib/funds";
 import { monthLabel } from "@/lib/dates";
 import { money, plural, truncate } from "../format";
 import { normalizeName } from "../match";
@@ -62,6 +63,7 @@ export const listCompanyBills: ReadTool = {
     const sum = (list: typeof items, pick: (item: (typeof items)[number]) => number) => list.reduce((total, item) => total + pick(item), 0);
     const totalOf = (list: typeof items) => sum(list, (item) => Number(item.bill.total_amount));
     const vatOf = (list: typeof items) => sum(list, (item) => Number(item.bill.vat_amount));
+    const claimedOf = (list: typeof items) => sum(list, (item) => claimedVat(item.bill));
     const pending = sum(items, (item) => item.pending);
 
     const months = [...new Set(items.map((item) => item.bill.bill_date.slice(0, 7)))];
@@ -71,7 +73,8 @@ export const listCompanyBills: ReadTool = {
         items: [
           { label: "Bills", value: String(items.length), hint: `${plural(months.length, "month")}` },
           { label: "Total", value: money(totalOf(items)), hint: "VAT included" },
-          { label: "VAT inside", value: money(vatOf(items)), tone: "warn" },
+          { label: "VAT inside", value: money(vatOf(items)), hint: "Paid on these bills", tone: "warn" },
+          { label: "VAT claimed", value: money(claimedOf(items)), hint: "Lowers the VAT owed to IRD", tone: "good" },
           ...(pending > 0 ? [{ label: "Still to reimburse", value: money(pending), tone: "warn" as const }] : []),
         ],
       },
@@ -96,7 +99,10 @@ export const listCompanyBills: ReadTool = {
           // The bill number stays whole: it is what tells two bills from one shop apart.
           bill: `${truncate(bill.vendor_name ?? bill.description, 30)}${bill.bill_number ? ` #${bill.bill_number}` : ""}${left > 0 ? " · to pay back" : reimbursed > 0 ? " · paid back" : ""}`,
           total: formatNumber(Number(bill.total_amount)),
-          vat: Number(bill.vat_amount) > 0 ? formatNumber(Number(bill.vat_amount)) : "—",
+          vat:
+            Number(bill.vat_amount) > 0
+              ? `${formatNumber(Number(bill.vat_amount))}${claimedVat(bill) > 0 ? " claimed" : ""}`
+              : "—",
         })),
         footer: { date: "Total", bill: "", total: formatNumber(totalOf(rows)), vat: formatNumber(vatOf(rows)) },
         note: visible.length < rows.length ? `Showing ${visible.length} of ${rows.length}.` : undefined,
@@ -108,12 +114,13 @@ export const listCompanyBills: ReadTool = {
 
     return {
       status: "ok",
-      summary: `${plural(items.length, "bill")} ${when}: ${money(totalOf(items))} with VAT ${formatNumber(vatOf(items))}${pending > 0 ? `; ${money(pending)} still to reimburse` : ""}.`,
+      summary: `${plural(items.length, "bill")} ${when}: ${money(totalOf(items))} with VAT ${formatNumber(vatOf(items))}, of which ${formatNumber(claimedOf(items))} claimed${pending > 0 ? `; ${money(pending)} still to reimburse` : ""}.`,
       cards,
       data: {
         count: items.length,
         total_npr: totalOf(items),
         vat_npr: vatOf(items),
+        vat_claimed_npr: claimedOf(items),
         to_reimburse_npr: pending,
         months: months.map((key) => {
           const rows = items.filter((item) => item.bill.bill_date.startsWith(key));

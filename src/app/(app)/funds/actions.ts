@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { exec, one, query, transaction } from "@/lib/db";
 import { bulkIds, bulkResult, type BulkResult } from "@/lib/bulk";
+import { bsMonthLabel } from "@/lib/nepali-date";
 import { assertRoomFor, insertAttachments, readUploads } from "@/lib/attachments.server";
 import { loadLedger } from "@/lib/ledger";
 import { requireSession } from "@/lib/auth/server";
@@ -133,6 +134,7 @@ const CAPITAL_TYPES: CapitalInflowType[] = [
 
 function revalidateFunds() {
   revalidatePath("/funds");
+  revalidatePath("/vat");
   revalidatePath("/income");
   revalidatePath("/");
 }
@@ -273,6 +275,8 @@ export type CompanyBillInput = {
   note: string | null;
   /** The VAT account is to pay it back to whoever paid it. */
   reimburse: boolean;
+  /** The bill's VAT is claimed from IRD as input VAT. */
+  claim_vat: boolean;
 };
 
 /** The bill form's rules, shared by the form and the assistant's batch. */
@@ -319,6 +323,7 @@ async function addCompanyBillUnguarded(
     value(formData, "paid_by") || null,
     value(formData, "note") || null,
     formData.get("reimburse") === "on",
+    vat > 0 && formData.get("claim_vat") === "on",
   ];
 
   if (id) {
@@ -334,8 +339,9 @@ async function addCompanyBillUnguarded(
       await client.query(
         `update public.company_bills
             set description = $1, vendor_name = $2, bill_number = $3, bill_date = $4,
-                total_amount = $5, vat_amount = $6, paid_by = $7, note = $8, reimburse = $9, updated_at = now()
-          where id = $10`,
+                total_amount = $5, vat_amount = $6, paid_by = $7, note = $8, reimburse = $9, claim_vat = $10,
+                updated_at = now()
+          where id = $11`,
         [...params, id]
       );
       await insertAttachments(client, { kind: "company_bill", id }, files, session.sub);
@@ -344,8 +350,8 @@ async function addCompanyBillUnguarded(
     await transaction(async (client) => {
       const inserted = await client.query<{ id: string }>(
         `insert into public.company_bills
-           (description, vendor_name, bill_number, bill_date, total_amount, vat_amount, paid_by, note, reimburse, created_by)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+           (description, vendor_name, bill_number, bill_date, total_amount, vat_amount, paid_by, note, reimburse, claim_vat, created_by)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
          returning id`,
         [...params, session.sub]
       );
@@ -377,6 +383,7 @@ async function addCompanyBillsUnguarded(bills: CompanyBillInput[]): Promise<Fund
     paid_by: String(bill.paid_by ?? "").trim() || null,
     note: String(bill.note ?? "").trim() || null,
     reimburse: bill.reimburse === true,
+    claim_vat: bill.claim_vat === true && Number(bill.vat_amount ?? 0) > 0,
   }));
   for (const [index, row] of rows.entries()) {
     const invalid = companyBillError({
@@ -392,9 +399,9 @@ async function addCompanyBillsUnguarded(bills: CompanyBillInput[]): Promise<Fund
     for (const row of rows) {
       await client.query(
         `insert into public.company_bills
-           (description, vendor_name, bill_number, bill_date, total_amount, vat_amount, paid_by, note, reimburse, created_by)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-        [row.description, row.vendor_name, row.bill_number, row.bill_date, row.total_amount, row.vat_amount, row.paid_by, row.note, row.reimburse, session.sub]
+           (description, vendor_name, bill_number, bill_date, total_amount, vat_amount, paid_by, note, reimburse, claim_vat, created_by)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+        [row.description, row.vendor_name, row.bill_number, row.bill_date, row.total_amount, row.vat_amount, row.paid_by, row.note, row.reimburse, row.claim_vat, session.sub]
       );
     }
   });
@@ -501,27 +508,42 @@ export async function addTaxPayment(
   formData: FormData
 ): Promise<FundsFormState> {
   const session = await owner();
+  const taxType = value(formData, "tax_type") || "vat";
   const accountId = value(formData, "money_account_id");
-  const amount = money2(formData.get("amount"));
+  // A nil return: the month is filed, nothing is paid.
+  const nil = formData.get("nil") === "on";
+  const amount = nil ? 0 : money2(formData.get("amount"));
   const paidOn = value(formData, "paid_on");
-  if (!accountId) return { error: "Choose the account the VAT was paid from.", ok: null };
-  if (!Number.isFinite(amount) || amount <= 0) return { error: "Enter the VAT amount paid.", ok: null };
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(paidOn)) return { error: "Enter the date VAT was paid.", ok: null };
+  const periodKey = value(formData, "period_key");
+  const what = taxType === "tds" ? "TDS" : taxType === "income_tax" ? "income tax" : "VAT";
 
-  const balance = (await loadLedger()).balances.find((item) => item.account.id === accountId);
-  if (!balance) return { error: "That account is unavailable.", ok: null };
-  if (amount > balance.balance + 0.001) {
-    return { error: `Only ${balance.balance.toLocaleString("en-NP")} is in ${balance.account.name}.`, ok: null };
+  if (!["vat", "tds", "income_tax"].includes(taxType)) return { error: "Choose which tax this is.", ok: null };
+  if (!accountId) return { error: `Choose the account the ${what} was paid from.`, ok: null };
+  if (!Number.isFinite(amount) || amount < 0 || (amount === 0 && !nil)) {
+    return { error: `Enter the ${what} amount paid, or tick “Nothing to pay”.`, ok: null };
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(paidOn)) return { error: "Enter the date it was paid or filed.", ok: null };
+  if (periodKey && !/^\d{4}-\d{2}$|^\d{4}\/\d{2}$/.test(periodKey)) return { error: "Choose the month it is for.", ok: null };
+  if (nil && !periodKey) return { error: "Choose the month this nil return is for.", ok: null };
+
+  if (amount > 0) {
+    const balance = (await loadLedger()).balances.find((item) => item.account.id === accountId);
+    if (!balance) return { error: "That account is unavailable.", ok: null };
+    if (amount > balance.balance + 0.001) {
+      return { error: `Only ${balance.balance.toLocaleString("en-NP")} is in ${balance.account.name}.`, ok: null };
+    }
   }
 
+  const periodLabel =
+    value(formData, "period_label") || (/^\d{4}-\d{2}$/.test(periodKey) ? bsMonthLabel(periodKey) : periodKey ? `FY ${periodKey}` : "");
   await exec(
-    `insert into public.tax_payments (tax_type, money_account_id, amount, paid_on, period_label, reference, note, created_by)
-     values ('vat',$1,$2,$3,$4,$5,$6,$7)`,
-    [accountId, amount, paidOn, value(formData, "period_label") || null,
+    `insert into public.tax_payments (tax_type, money_account_id, amount, paid_on, period_key, period_label, reference, note, created_by)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+    [taxType, accountId, amount, paidOn, periodKey || null, periodLabel || null,
      value(formData, "reference") || null, value(formData, "note") || null, session.sub]
   );
   revalidateFunds();
-  return { error: null, ok: "VAT payment recorded." };
+  return { error: null, ok: nil ? `Nil ${what} return recorded.` : `${what === "VAT" ? "VAT" : what[0].toUpperCase() + what.slice(1)} payment recorded.` };
 }
 
 export async function deleteTaxPayment(id: string) {

@@ -219,6 +219,9 @@ export function buildStatementEvents({
   }
 
   for (const row of ledger.taxPayments) {
+    // A nil return moves no money.
+    if (Number(row.amount) <= 0) continue;
+    const what = row.tax_type === "tds" ? "TDS deposited" : row.tax_type === "income_tax" ? "Income tax paid" : "VAT paid";
     events.push({
       id: `vat-${row.id}`,
       date: row.paid_on,
@@ -226,7 +229,7 @@ export function buildStatementEvents({
       account: row.money_account_id,
       direction: "out",
       kind: "vat",
-      title: `VAT paid to IRD${row.period_label ? ` · ${row.period_label}` : ""}`,
+      title: `${what} to IRD${row.period_label ? ` · ${row.period_label}` : ""}`,
       detail: row.reference ?? "Tax deposit",
       amount: Number(row.amount),
       currency: accountById.get(row.money_account_id)?.currency ?? "NPR",

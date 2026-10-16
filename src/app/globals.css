@@ -658,6 +658,7 @@ details.no-marker > summary::after { content: none; }
 .bills-summary { display: flex; flex-wrap: wrap; gap: 6px 22px; padding: 12px 20px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 13.5px; }
 .bills-summary strong { color: var(--ink); font-weight: 650; }
 .bills-summary .text-amber { color: var(--amber); }
+.bills-summary .text-green { color: var(--green); }
 .bills-month { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 16px; padding: 10px 20px; border-bottom: 1px solid var(--line); background: var(--surface-2); font-size: 14px; }
 section + section > .bills-month { border-top: 1px solid var(--line); }
 .bills-month-figures { display: flex; gap: 18px; font-size: 13.5px; }
@@ -1971,6 +1972,81 @@ section + section > .bills-month { border-top: 1px solid var(--line); }
 .switch:disabled { opacity: 0.6; }
 .settings-nav a { display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 12px; border-radius: 9px; color: var(--muted); font-size: 14px; font-weight: 520; transition: background 130ms ease, color 130ms ease; }
 .settings-nav a:hover { background: var(--hover); color: var(--ink); }
+
+/* ----- VAT at a glance (components/TaxOverview) ----- */
+.tax-overview { display: flex; flex-direction: column; gap: 14px; }
+.tax-boxes { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (min-width: 1024px) {
+  .tax-boxes { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+.tax-box {
+  --tone: var(--accent-ink);
+  --tone-soft: var(--accent-soft);
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 16px 16px 15px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+  color: var(--ink);
+  text-align: left;
+  transition: transform 160ms cubic-bezier(.22, 1, .36, 1), border-color 160ms ease, box-shadow 160ms ease;
+}
+.tax-box:hover { border-color: var(--line-strong); transform: translateY(-1px); }
+.tax-box.tone-green { --tone: var(--green); --tone-soft: var(--green-soft); }
+.tax-box.tone-amber { --tone: var(--amber); --tone-soft: var(--amber-soft); }
+.tax-box.tone-blue { --tone: var(--blue); --tone-soft: var(--blue-soft); }
+.tax-box-on { border-color: color-mix(in srgb, var(--tone) 55%, transparent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--tone) 18%, transparent), var(--shadow-card); }
+.tax-box-head { display: flex; width: 100%; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+.tax-box-icon { display: inline-grid; width: 34px; height: 34px; place-items: center; border-radius: 10px; background: var(--tone-soft); color: var(--tone); }
+.tax-box-chevron { color: var(--muted-2); transition: transform 180ms ease; }
+.tax-box-on .tax-box-chevron { color: var(--tone); transform: rotate(180deg); }
+.tax-box-label { color: var(--muted); font-size: 13.5px; font-weight: 560; }
+.tax-box-value { font-size: 26px; font-variant-numeric: tabular-nums; font-weight: 700; letter-spacing: -0.02em; line-height: 1.15; }
+.tax-box-value small { color: var(--muted-2); font-size: 14px; font-weight: 600; }
+.tax-box.tone-accent .tax-box-value { color: var(--tone); }
+.tax-box-sub { color: var(--muted-2); font-size: 12.5px; line-height: 1.4; }
+.tax-detail { padding: 18px 20px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); box-shadow: var(--shadow-card); animation: rise 260ms cubic-bezier(.22, 1, .36, 1) backwards; }
+.tax-detail-head { margin-bottom: 12px; }
+.tax-detail-head h3 { font-size: 16px; font-weight: 680; }
+.tax-detail-head p { max-width: 760px; margin-top: 4px; color: var(--muted); font-size: 13.5px; line-height: 1.5; }
+.tax-empty { padding: 14px 0 4px; color: var(--muted); font-size: 14px; }
+.tax-two { display: inline-flex; flex-direction: column; }
+.tax-two small { color: var(--muted-2); font-size: 12px; }
+.tax-table td { vertical-align: middle; }
+.tax-equation { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-bottom: 14px; padding: 12px 14px; border-radius: 12px; background: var(--surface-2); font-size: 16px; font-variant-numeric: tabular-nums; font-weight: 650; }
+.tax-equation span { display: inline-flex; flex-direction: column; }
+.tax-equation small { color: var(--muted); font-size: 12px; font-weight: 500; }
+.tax-equation b { color: var(--muted-2); font-size: 20px; font-weight: 300; }
+.tax-equation-result { color: var(--accent-ink); }
+.tax-deadlines { padding: 16px 18px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); box-shadow: var(--shadow-card); }
+.tax-deadlines-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+.tax-deadlines-head h3 { font-size: 16px; font-weight: 680; }
+.tax-deadlines-head p { margin-top: 2px; color: var(--muted); font-size: 13.5px; }
+.tax-deadline-list > * + * { border-top: 1px solid var(--line); }
+.tax-deadline { display: flex; align-items: center; gap: 12px; padding: 12px 0; }
+.tax-deadline-icon { display: inline-grid; width: 34px; height: 34px; flex: none; place-items: center; border-radius: 10px; background: var(--accent-soft); color: var(--accent-ink); }
+.tax-deadline-icon.kind-tds { background: var(--blue-soft); color: var(--blue); }
+.tax-deadline-icon.kind-advance, .tax-deadline-icon.kind-annual { background: var(--green-soft); color: var(--green); }
+.tax-deadline-late .tax-deadline-icon { background: var(--red-soft); color: var(--red); }
+.tax-deadline-title { font-size: 14.5px; font-weight: 620; }
+.tax-deadline-detail { margin-top: 1px; color: var(--muted); font-size: 13px; line-height: 1.45; }
+.tax-deadline-when { display: flex; flex: none; flex-direction: column; align-items: flex-end; gap: 3px; text-align: right; }
+.tax-deadline-when strong { font-size: 14px; }
+.tax-deadline-when span:not(.pill) { color: var(--muted-2); font-size: 12px; }
+.tax-guide { display: grid; gap: 14px; margin: 6px 0 12px; padding: 14px 16px; border-radius: 12px; background: var(--surface-2); grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+.tax-guide h4 { margin-bottom: 6px; font-size: 14px; font-weight: 680; }
+.tax-guide ol { padding-left: 18px; color: var(--ink-2); font-size: 13.5px; line-height: 1.55; list-style: decimal; }
+.tax-guide li + li { margin-top: 4px; }
+.tax-guide-note { grid-column: 1 / -1; color: var(--muted); font-size: 12.5px; }
+@media (max-width: 640px) {
+  .tax-box-value { font-size: 22px; }
+  .tax-deadline { align-items: flex-start; }
+}
 
 /* ----- select several, delete at once (components/BulkSelect) ----- */
 .bulk-box { display: inline-grid; width: 30px; height: 30px; flex: none; place-items: center; margin: 0 2px 0 -6px; cursor: pointer; }

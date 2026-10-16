@@ -7,7 +7,7 @@ import type { ToolContext } from "./types";
 
 const TODAY = "2026-10-16";
 
-function status(id: string, vendor: string, no: string, date: string, total: number, vat: number, reimbursed = 0, reimburse = false): BillStatus {
+function status(id: string, vendor: string, no: string, date: string, total: number, vat: number, reimbursed = 0, reimburse = false, claim = false): BillStatus {
   const bill = {
     id,
     description: "Team food",
@@ -19,13 +19,14 @@ function status(id: string, vendor: string, no: string, date: string, total: num
     paid_by: null,
     note: null,
     reimburse,
+    claim_vat: claim,
   } as unknown as CompanyBill;
   const paysBack = reimburse || reimbursed > 0;
   return { bill, reimbursed, pending: paysBack ? total - reimbursed : 0, paysBack, reimbursements: [] };
 }
 
 const billStatuses = [
-  status("b1", "Origin Coffee", "TI3565", "2026-09-21", 1890, 217.43, 0, true),
+  status("b1", "Origin Coffee", "TI3565", "2026-09-21", 1890, 217.43, 0, true, true),
   status("b2", "Achaar Ghar", "2035", "2026-09-13", 1480, 170.26, 1480),
   status("b3", "Malaya Cafe", "189", "2026-08-12", 1040, 120),
   status("b4", "Trisha Books", "127", "2026-08-30", 660, 0),
@@ -49,7 +50,9 @@ describe("list_company_bills", () => {
     expect(months[0].rows[1].bill).toBe("Achaar Ghar #2035 · paid back");
     expect(months[1].footer).toEqual({ date: "Total", bill: "", total: "1,700", vat: "120" });
     expect(months[0].rows[0].bill).toBe("Origin Coffee #TI3565 · to pay back");
-    expect(outcome.summary).toBe("4 bills in total: NPR 5,070 with VAT 507.69; NPR 1,890 still to reimburse.");
+    expect(months[0].rows[0].vat).toBe("217.43 claimed");
+    expect(months[0].rows[1].vat).toBe("170.26");
+    expect(outcome.summary).toBe("4 bills in total: NPR 5,070 with VAT 507.69, of which 217.43 claimed; NPR 1,890 still to reimburse.");
   });
 
   it("narrows to a period, a shop and unpaid bills", async () => {

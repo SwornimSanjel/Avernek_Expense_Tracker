@@ -88,6 +88,11 @@ function sumWhere<T>(rows: T[], keep: (row: T) => boolean, value: (row: T) => nu
   return rows.reduce((total, row) => (keep(row) ? total + value(row) : total), 0);
 }
 
+/** The VAT on a bill that is claimed from IRD; VAT paid but not claimable counts as none. */
+export function claimedVat(bill: Pick<CompanyBill, "vat_amount" | "claim_vat">): number {
+  return bill.claim_vat === false ? 0 : Number(bill.vat_amount ?? 0);
+}
+
 export function computeTaxPosition({
   payments,
   otherIncome = [],
@@ -97,7 +102,7 @@ export function computeTaxPosition({
   const outputVat =
     sumWhere(payments, () => true, (row) => Number(row.vat_amount ?? 0)) +
     sumWhere(otherIncome, () => true, (row) => Number(row.vat_amount ?? 0));
-  const inputVat = sumWhere(bills, () => true, (bill) => Number(bill.vat_amount ?? 0));
+  const inputVat = sumWhere(bills, () => true, claimedVat);
   const vatDeposited = sumWhere(taxPayments, (row) => row.tax_type === "vat", (row) => Number(row.amount));
   const net = outputVat - inputVat - vatDeposited;
   return {
@@ -150,7 +155,9 @@ export function computeMoneyAccountBalances(input: LedgerInput): MoneyAccountBal
       (t) => t.kind === "reimbursement" && mine(t.from_account_id),
       (t) => Number(t.from_amount)
     );
-    const vatPaid = sumWhere(taxPayments, (t) => mine(t.money_account_id), (t) => Number(t.amount));
+    // Every tax deposit leaves the account; only VAT deposits lower the VAT kept aside.
+    const taxPaid = sumWhere(taxPayments, (t) => mine(t.money_account_id), (t) => Number(t.amount));
+    const vatPaid = sumWhere(taxPayments, (t) => t.tax_type === "vat" && mine(t.money_account_id), (t) => Number(t.amount));
     // A loan leaves the account when it is lent and comes back when repaid —
     // possibly into a different account. Neither side is revenue or expense.
     const lentOut = sumWhere(loans, (l) => mine(l.money_account_id), (l) => Number(l.amount));
@@ -181,7 +188,7 @@ export function computeMoneyAccountBalances(input: LedgerInput): MoneyAccountBal
       lentOut: round2(lentOut),
       loanRepaidIn: round2(loanRepaidIn),
       balance: round2(
-        revenue + vatIn - tdsWithheld + capitalIn + transferredIn - spent - transferredOut - vatPaid
+        revenue + vatIn - tdsWithheld + capitalIn + transferredIn - spent - transferredOut - taxPaid
           - lentOut + loanRepaidIn
       ),
       vatReserved: Math.max(0, vatIn - vatPaid),
@@ -191,7 +198,7 @@ export function computeMoneyAccountBalances(input: LedgerInput): MoneyAccountBal
 
   // Input VAT from company bills lowers what is owed. Apply that credit to the
   // official VAT account first, which is where VAT is collected and paid from.
-  let inputCredit = sumWhere(bills, () => true, (bill) => Number(bill.vat_amount ?? 0));
+  let inputCredit = sumWhere(bills, () => true, claimedVat);
   const order = [...rows].sort(
     (a, b) => Number(b.account.kind === "company_bank") - Number(a.account.kind === "company_bank")
   );
