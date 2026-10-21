@@ -1997,6 +1997,13 @@ section + section > .bills-month { border-top: 1px solid var(--line); }
 .loan-figure-value small { color: var(--muted-2); font-size: 14px; font-weight: 600; }
 .loan-figure.tone-blue .loan-figure-value { color: var(--blue); }
 .loan-figure-sub { color: var(--muted-2); font-size: 12.5px; }
+/* Phones: one compact row per figure, so the loans themselves stay in view. */
+@media (max-width: 640px) {
+  .loan-figures { gap: 8px; }
+  .loan-figure { display: grid; grid-template-columns: 34px 1fr; align-items: center; column-gap: 12px; row-gap: 1px; padding: 12px 14px; }
+  .loan-figure-icon { grid-row: span 3; margin: 0; }
+  .loan-figure-value { font-size: 22px; }
+}
 .loan-person { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px 6px 6px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--muted); font-size: 13.5px; }
 .loan-person strong { color: var(--ink); }
 .loan-explain { display: flex; gap: 12px; margin-top: 22px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface-2); color: var(--muted); font-size: 13.5px; line-height: 1.55; }
