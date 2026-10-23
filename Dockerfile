@@ -17,7 +17,7 @@
 #
 #   docker build -t avernek-expense-tracker:local .
 
-ARG NODE_IMAGE=node:22-alpine
+ARG NODE_IMAGE=node:24.22.1-alpine
 
 ##############################################################################
 # deps: production and build dependencies, pinned by package-lock.json
@@ -92,7 +92,7 @@ COPY --from=builder --chown=nextjs:nodejs /app/scripts/seed-admin.mjs ./scripts/
 USER 1001:1001
 EXPOSE 3000
 
-# Node 22 has a global fetch, so the image needs no curl.
+# Node 24 has a global fetch, so the image needs no curl.
 HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=3 \
   CMD ["node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
 
