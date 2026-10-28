@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/AppLink";
 import { notFound } from "next/navigation";
 import { one, query } from "@/lib/db";
 import { requireSession } from "@/lib/auth/server";
@@ -168,7 +168,7 @@ export default async function ClientBillingPage({
           <div className="detail-label">Client</div>
           <div className="mt-2 flex items-center gap-2 flex-wrap">
             <StatusPill kind="agreement" value={agreement.status} />
-            <StatusPill kind="billing" value={summary.overallStatus} prefix="Billing:" />
+            {!summary.churned && <StatusPill kind="billing" value={summary.overallStatus} prefix="Billing:" />}
           </div>
           <div className="mt-3">
             <ServiceBadges services={summary.services} size="md" />
@@ -201,11 +201,15 @@ export default async function ClientBillingPage({
             value={formatIncomeMoney(summary.totalCollected, currency)}
             tone="var(--green)"
           />
-          <DetailRow
-            label="Outstanding now"
-            value={formatIncomeMoney(summary.outstanding, currency)}
-            tone={summary.outstanding > 0 ? "var(--amber)" : "var(--green)"}
-          />
+          {summary.churned ? (
+            <DetailRow label="Unpaid when they left" value={formatIncomeMoney(summary.unpaidWhenLeft, currency)} />
+          ) : (
+            <DetailRow
+              label="Outstanding now"
+              value={formatIncomeMoney(summary.outstanding, currency)}
+              tone={summary.outstanding > 0 ? "var(--amber)" : "var(--green)"}
+            />
+          )}
           <DetailRow
             label="Overdue"
             value={formatIncomeMoney(summary.totalOverdue, currency)}
@@ -214,9 +218,11 @@ export default async function ClientBillingPage({
           <DetailRow
             label="Next payment due"
             value={
-              summary.nextDueDate
-                ? `${formatServiceDate(summary.nextDueDate)} · ${summary.nextDueLabel}`
-                : "Nothing scheduled"
+              summary.churned
+                ? "None · client churned"
+                : summary.nextDueDate
+                  ? `${formatServiceDate(summary.nextDueDate)} · ${summary.nextDueLabel}`
+                  : "Nothing scheduled"
             }
           />
         </div>

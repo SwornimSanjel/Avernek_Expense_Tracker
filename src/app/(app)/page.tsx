@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/AppLink";
 import { one, query } from "@/lib/db";
 import { requireSession } from "@/lib/auth/server";
 import { Avatar, Callout, Delta, Kpi, Money, PageHeader, SectionHeader } from "@/components/ui";

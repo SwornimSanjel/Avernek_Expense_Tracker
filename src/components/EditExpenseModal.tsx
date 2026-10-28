@@ -4,35 +4,19 @@ import Icon from "@/components/Icons";
 import { pickerPeople } from "@/lib/people";
 import { useState, useTransition } from "react";
 import { updateExpense } from "@/app/(app)/expenses/actions";
-import type {
-  AppUser,
-  Category,
-  Currency,
-  Expense,
-  ExpenseFundingSource,
-  MoneyAccount,
-  Vendor,
-} from "@/lib/types";
+import type { Currency, Expense, ExpenseFundingSource } from "@/lib/types";
 import ShareAllocationFields from "./ShareAllocationFields";
-import { BillDocuments } from "./DocumentSections";
+import ExpenseBillFields, { type BillAnswer } from "./ExpenseBillFields";
+import { useExpenseFormData } from "./ExpenseFormData";
 
 export default function EditExpenseModal({
   expense,
-  categories,
-  vendors,
-  users: allUsers,
-  moneyAccounts,
-  clients,
   onClose,
 }: {
   expense: Expense;
-  categories: Category[];
-  vendors: Vendor[];
-  users: AppUser[];
-  moneyAccounts: MoneyAccount[];
-  clients: string[];
   onClose: () => void;
 }) {
+  const { categories, vendors, users: allUsers, moneyAccounts, clients } = useExpenseFormData();
   const users = pickerPeople(allUsers, [expense.paid_by_user_id, ...(expense.expense_shares ?? []).map((share) => share.user_id)]);
   const [amount, setAmount] = useState(String(expense.amount));
   const [currency, setCurrency] = useState<Currency>(expense.currency);
@@ -42,6 +26,11 @@ export default function EditExpenseModal({
   const [moneyAccountId, setMoneyAccountId] = useState(expense.money_account_id ?? "");
   const [busy, start] = useTransition();
   const [filesBusy, setFilesBusy] = useState(false);
+  const savedPhotos = expense.attachments?.length ?? 0;
+  const initialBill: BillAnswer = expense.has_bill === true ? "yes" : expense.has_bill === false ? "no" : "";
+  const [billAnswer, setBillAnswer] = useState<BillAnswer>(initialBill);
+  const [billPhotos, setBillPhotos] = useState(0);
+  const [billError, setBillError] = useState<string | null>(null);
   const matchingAccounts = moneyAccounts.filter(
     (account) =>
       account.is_active &&
@@ -54,6 +43,17 @@ export default function EditExpenseModal({
   return (
     <div className="modal-backdrop">
       <form
+        // Checked in onSubmit, not in the action: React resets a form after
+        // every action call, which would wipe the edits whenever it fails.
+        onSubmit={(event) => {
+          // Older expenses may stay unanswered; a "Yes" needs a photo on file.
+          const problem = billAnswer === "yes" && savedPhotos + billPhotos === 0 ? "Add a photo of the bill." : null;
+          setBillError(problem);
+          if (problem) {
+            event.preventDefault();
+            document.getElementById("expense-bill")?.scrollIntoView({ behavior: "smooth", block: "center" });
+          }
+        }}
         action={(formData) =>
           start(async () => {
             const result = await updateExpense(formData);
@@ -253,7 +253,23 @@ export default function EditExpenseModal({
           <textarea name="note" defaultValue={expense.note ?? ""} className="input mt-1 min-h-20" />
         </label>
 
-        <BillDocuments name="bills" existing={expense.attachments ?? []} onBusyChange={setFilesBusy} />
+        <ExpenseBillFields
+          initial={initialBill}
+          initialNumber={expense.bill_number ?? ""}
+          initialPan={expense.seller_pan ?? ""}
+          existing={expense.attachments ?? []}
+          error={billError}
+          onAnswer={(answer) => {
+            setBillAnswer(answer);
+            if (answer === "no") setBillPhotos(0);
+            setBillError(null);
+          }}
+          onPhotoCount={(count) => {
+            setBillPhotos(count);
+            if (count > 0) setBillError(null);
+          }}
+          onBusyChange={setFilesBusy}
+        />
 
         <button type="submit" disabled={busy || filesBusy} className="btn btn-primary w-full !h-12">
           {busy ? "Saving…" : filesBusy ? "Preparing photos…" : "Save changes"}

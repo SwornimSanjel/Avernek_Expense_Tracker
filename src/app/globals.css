@@ -227,6 +227,18 @@ html[data-sidebar="collapsed"] .sidebar { --sidebar-w: 72px; }
 .sb-icon { display: grid; width: 20px; height: 20px; flex: 0 0 20px; place-items: center; color: var(--muted-2); transition: color 140ms ease; }
 .sb-link:hover .sb-icon { color: var(--ink-2); }
 .sb-label { overflow: hidden; text-overflow: ellipsis; transition: opacity 120ms ease; }
+.sb-pending {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 13px;
+  margin-left: auto;
+  border: 2px solid var(--accent-line);
+  border-top-color: var(--accent-ink);
+  border-radius: 999px;
+  animation: sb-spin 700ms linear infinite;
+}
+html[data-sidebar="collapsed"] .sb-pending { position: absolute; top: 4px; right: 4px; width: 9px; height: 9px; flex-basis: 9px; border-width: 1.5px; }
+@keyframes sb-spin { to { transform: rotate(360deg); } }
 .sb-kbd { margin-left: auto; color: var(--muted-2); font-size: 11.5px; }
 .sb-foot { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
 .sb-user {
@@ -783,6 +795,7 @@ section + section > .bills-month { border-top: 1px solid var(--line); }
 .menu-pop { position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; min-width: 200px; padding: 5px; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow-float); font-size: 13.5px; }
 .menu-item { display: flex; width: 100%; align-items: center; gap: 9px; padding: 9px 11px; border-radius: 8px; text-align: left; transition: background 120ms ease; }
 .menu-item:hover { background: var(--hover); }
+.export-menu { min-width: 240px; max-width: min(320px, calc(100vw - 32px)); }
 
 /* ----- loading & motion ----------------------------------------------------------- */
 .loading-shell { animation: loading-enter 220ms ease both; }
@@ -1786,6 +1799,10 @@ section + section > .bills-month { border-top: 1px solid var(--line); }
 .doc-section-vat .uploader-add-plus { background: var(--green); box-shadow: 0 8px 22px color-mix(in srgb, var(--green) 30%, transparent); }
 .doc-section-bill .doc-section-icon { background: color-mix(in srgb, var(--amber) 12%, transparent); color: var(--amber); }
 .doc-section-toggle { width: auto; min-width: 190px; }
+.doc-section-error { border-color: color-mix(in srgb, var(--red) 55%, var(--line)); }
+/* Phones: the Yes / No toggle takes its own row so the question keeps its width. */
+@media (max-width: 560px) { .doc-section-toggle { flex: 1 1 100%; } }
+.bill-field-error { display: flex; align-items: center; gap: 6px; margin: -4px 0 12px; color: var(--red); font-size: 13px; font-weight: 550; }
 
 /* ----- big edit modal: sticky header with tabs, sticky save bar ----- */
 .modal-panel.modal-panel-sheet { display: flex; flex-direction: column; overflow: hidden; padding: 0; }

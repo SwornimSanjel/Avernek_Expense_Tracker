@@ -7,7 +7,7 @@ import {
   deleteExpense,
   retryConversion,
 } from "@/app/(app)/expenses/actions";
-import type { AppUser, Category, Expense, MoneyAccount, Vendor } from "@/lib/types";
+import type { Expense } from "@/lib/types";
 import EditExpenseModal from "./EditExpenseModal";
 import Icon from "./Icons";
 
@@ -15,20 +15,10 @@ export default function ExpenseRowActions({
   expense,
   isReimbursed,
   pending,
-  categories,
-  vendors,
-  users,
-  moneyAccounts,
-  clients,
 }: {
   expense: Expense;
   isReimbursed: boolean;
   pending: boolean;
-  categories: Category[];
-  vendors: Vendor[];
-  users: AppUser[];
-  moneyAccounts: MoneyAccount[];
-  clients: string[];
 }) {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -120,15 +110,7 @@ export default function ExpenseRowActions({
         )}
       </AnimatePresence>
       {editing && (
-        <EditExpenseModal
-          expense={expense}
-          categories={categories}
-          vendors={vendors}
-          users={users}
-          moneyAccounts={moneyAccounts}
-          clients={clients}
-          onClose={() => setEditing(false)}
-        />
+        <EditExpenseModal expense={expense} onClose={() => setEditing(false)} />
       )}
     </div>
   );

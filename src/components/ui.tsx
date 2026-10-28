@@ -1,6 +1,6 @@
 import type { ConversionStatus, FxSource } from "@/lib/types";
 import { formatNumber, fxSourceLabel } from "@/lib/format";
-import Link from "next/link";
+import Link from "@/components/AppLink";
 import Icon, { type IconName } from "@/components/Icons";
 
 /**

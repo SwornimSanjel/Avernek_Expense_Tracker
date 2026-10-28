@@ -191,6 +191,7 @@ export const AGREEMENT_STATUS_LABELS: Record<IncomeAgreement["status"], string> 
   paused: "Paused",
   completed: "Completed",
   cancelled: "Cancelled",
+  churned: "Churned",
 };
 
 export const PAYMENT_METHOD_LABELS: Record<IncomePaymentMethod, string> = {
@@ -465,6 +466,10 @@ export type IncomeAgreementSummary = {
   nextDueLabel: string | null;
   lastPaymentDate: string | null;
   serviceLive: boolean;
+  /** The client left: nothing below counts as due or overdue any more. */
+  churned: boolean;
+  /** For a churned client, what was still owed when they left. 0 otherwise. */
+  unpaidWhenLeft: number;
 };
 
 function streamLabel(key: BillingStream): string {
@@ -753,7 +758,7 @@ export function summarizeIncomeAgreement(
 
   const lastPaymentDate = ownPayments.map((payment) => payment.paid_on).sort().at(-1) ?? null;
 
-  return {
+  const summary: IncomeAgreementSummary = {
     services: agreementServices(agreement),
     setup,
     website,
@@ -796,6 +801,43 @@ export function summarizeIncomeAgreement(
     nextDueLabel: nextDates[0]?.label ?? null,
     lastPaymentDate,
     serviceLive: agreement.ads_status === "live" || agreement.automation_status === "live",
+    churned: false,
+    unpaidWhenLeft: 0,
+  };
+  return agreement.status === "churned" ? asChurned(summary) : summary;
+}
+
+/** Nothing still owed counts as overdue once overdue no longer applies. */
+function notOverdue(status: BillingStatus, paid: number): BillingStatus {
+  return status === "overdue" ? (paid > 0 ? "partial" : "unpaid") : status;
+}
+
+/**
+ * A churned client left us. Their payments stay counted, and the balances
+ * stay on the buckets so a late payment can still be recorded, but none of it
+ * is due, overdue or "next" any more: what they owed becomes unpaidWhenLeft.
+ */
+function asChurned(summary: IncomeAgreementSummary): IncomeAgreementSummary {
+  const streams = summary.recurring.streams.map((stream) => ({
+    ...stream,
+    periods: stream.periods.map((period) => ({ ...period, status: notOverdue(period.status, period.paid) })),
+    dueNow: 0,
+    overdue: 0,
+    nextDuePeriod: null,
+  }));
+  return {
+    ...summary,
+    setup: { ...summary.setup, status: notOverdue(summary.setup.status, summary.setup.paid) },
+    website: summary.website ? { ...summary.website, status: notOverdue(summary.website.status, summary.website.paid) } : null,
+    recurring: { ...summary.recurring, streams, dueNow: 0, overdue: 0, nextDuePeriod: null, nextDueDate: null },
+    totalDueNow: 0,
+    totalOverdue: 0,
+    outstanding: 0,
+    overallStatus: summary.outstanding > 0 ? "unpaid" : "paid",
+    nextDueDate: null,
+    nextDueLabel: null,
+    churned: true,
+    unpaidWhenLeft: summary.outstanding,
   };
 }
 

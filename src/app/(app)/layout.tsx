@@ -5,6 +5,14 @@ import MotionPage from "@/components/MotionPage";
 import { requireSession } from "@/lib/auth/server";
 import { one } from "@/lib/db";
 
+/*
+ * There is deliberately no loading.tsx in this folder. With one, Next.js 15
+ * answers a change of filters on the same page (?period=year, ?status=paused,
+ * ?client=…) by showing the cached page's skeleton and patching the real page
+ * in afterwards — and on a streamed page that patch never landed, so filters
+ * sat on "Updating…" forever. Without it every navigation fetches the whole
+ * page in one request. The sidebar shows a spinner on the item being opened.
+ */
 export default async function AppLayout({
   children,
 }: {

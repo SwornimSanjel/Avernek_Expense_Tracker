@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/AppLink";
 import { query } from "@/lib/db";
 import { requireSession } from "@/lib/auth/server";
 import { isAppOwner } from "@/lib/authz";
@@ -11,6 +11,7 @@ import IncomeAgreementControls from "@/components/IncomeAgreementControls";
 import ServiceBadges from "@/components/ServiceBadges";
 import StatusPill from "@/components/StatusPill";
 import UrlFilters from "@/components/UrlFilters";
+import ExportMenu from "@/components/ExportMenu";
 import {
   AGREEMENT_STATUS_LABELS,
   OTHER_INCOME_LABELS,
@@ -28,7 +29,7 @@ import { formatNumber, percentChange } from "@/lib/format";
 import type { IncomeAgreement, ServiceKey } from "@/lib/types";
 import { ATTACHMENT_COLUMNS, type Attachment } from "@/lib/attachments";
 import { accountLabel } from "@/lib/statement";
-import { monthName, shiftMonth } from "@/lib/dates";
+import { monthLabel, monthName, shiftMonth } from "@/lib/dates";
 
 export const dynamic = "force-dynamic";
 
@@ -108,9 +109,15 @@ export default async function IncomePage({
     .reduce((sum, agreement) => sum + summaries.get(agreement.id)!.recurring.monthlyTotal, 0);
   const activeCount = agreements.filter((agreement) => agreement.status === "active").length;
 
+  // Churned clients left us: they get their own section below, unless the
+  // status filter asks for them.
+  const showChurned = filters.status === "churned";
+  const current = agreements.filter((agreement) => agreement.status !== "churned");
+  const churned = agreements.filter((agreement) => agreement.status === "churned");
+
   // Filters run over the computed summaries because payment status and service
   // status are derived, not stored.
-  const visible = agreements.filter((agreement) => {
+  const visible = (showChurned ? churned : current).filter((agreement) => {
     const summary = summaries.get(agreement.id)!;
     if (filters.service && !summary.services.includes(filters.service as ServiceKey)) return false;
     if (filters.status && agreement.status !== filters.status) return false;
@@ -176,7 +183,7 @@ export default async function IncomePage({
       {/* clients */}
       <section className="section">
         <SectionHeader
-          title={`Clients · ${visible.length === agreements.length ? agreements.length : `${visible.length} of ${agreements.length}`}`}
+          title={`${showChurned ? "Churned clients" : "Clients"} · ${visible.length === (showChurned ? churned : current).length ? visible.length : `${visible.length} of ${(showChurned ? churned : current).length}`}`}
           subtitle="Open a client for its full billing history."
         />
         <UrlFilters
@@ -189,6 +196,17 @@ export default async function IncomePage({
             { name: "live", label: "Live or not", options: [{ value: "live", label: "Live" }, { value: "not_live", label: "Not live" }] },
             { name: "account", label: "Both accounts", options: moneyAccounts.map((account) => ({ value: account.id, label: accountLabel(account) })) },
           ]}
+          trailing={
+            <ExportMenu
+              label="Export income"
+              choices={[
+                { label: "This month", hint: `${monthLabel(thisMonth)} · clients and other income`, href: `/api/export/income?period=month&month=${thisMonth}` },
+                { label: "Last month", hint: monthLabel(lastMonth), href: "/api/export/income?period=last" },
+                { label: "This year", hint: today.slice(0, 4), href: "/api/export/income?period=year" },
+                { label: "All time", hint: "Every payment ever", href: "/api/export/income?period=all" },
+              ]}
+            />
+          }
         />
 
         <div className="card mt-3 overflow-hidden">
@@ -222,7 +240,7 @@ export default async function IncomePage({
                       <div className="text-[15px] font-semibold truncate" title={agreement.client_name}>{agreement.client_name}</div>
                       <div className="flex items-center gap-1.5 mt-1 flex-wrap">
                         <StatusPill kind="agreement" value={agreement.status} />
-                        <StatusPill kind="billing" value={summary.overallStatus} />
+                        {!summary.churned && <StatusPill kind="billing" value={summary.overallStatus} />}
                         <ServiceBadges services={summary.services} />
                       </div>
                     </div>
@@ -263,6 +281,37 @@ export default async function IncomePage({
         </div>
       </section>
 
+      {!showChurned && churned.length > 0 && (
+        <section className="section">
+          <SectionHeader
+            title={`Churned clients · ${churned.length}`}
+            subtitle="They left us. What they still owed is not counted as due."
+          />
+          <div className="card overflow-hidden">
+            <div className="row-list">
+              {churned.map((agreement) => {
+                const summary = summaries.get(agreement.id)!;
+                return (
+                  <Link key={agreement.id} href={`/income/${agreement.id}`} className="row-item">
+                    <Avatar name={agreement.client_name} size={36} />
+                    <div className="min-w-0 flex-1">
+                      <div className="row-title">{agreement.client_name}</div>
+                      <div className="row-meta">
+                        Left {formatServiceDate(agreement.service_end_date, "—")} · received {formatNumber(summary.totalCollected)}
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <div className="row-amount muted">{summary.unpaidWhenLeft > 0 ? formatNumber(summary.unpaidWhenLeft) : "—"}</div>
+                      <div className="row-sub">{summary.unpaidWhenLeft > 0 ? "unpaid when they left" : "nothing unpaid"}</div>
+                    </div>
+                    <Icon name="chevronRight" size={16} className="muted shrink-0" />
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+        </section>
+      )}
     </>
   );
 }

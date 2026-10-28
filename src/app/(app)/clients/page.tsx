@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/AppLink";
 import AddIncomeAgreement from "@/components/AddIncomeAgreement";
 import Icon from "@/components/Icons";
 import RecordIncomePayment from "@/components/RecordIncomePayment";
@@ -56,6 +56,7 @@ function groupOf(status: IncomeAgreement["status"]): RailClient["group"] {
   if (status === "active") return "Active";
   if (status === "pending") return "Pending";
   if (status === "paused") return "Paused";
+  if (status === "churned") return "Churned";
   return "Inactive";
 }
 
@@ -198,7 +199,7 @@ export default async function ClientsPage({
                                 <span className="min-w-0">
                                   <span className="block font-semibold truncate max-w-[260px]" title={agreement.client_name}>{agreement.client_name}</span>
                                   <span className="flex flex-wrap items-center gap-1 mt-1">
-                                    <StatusPill kind="billing" value={summary.overallStatus} />
+                                    {summary.churned ? <StatusPill kind="agreement" value="churned" /> : <StatusPill kind="billing" value={summary.overallStatus} />}
                                     <ServiceBadges services={agreementServices(agreement)} />
                                   </span>
                                 </span>
@@ -214,8 +215,10 @@ export default async function ClientsPage({
                               <div className="text-[12.5px] muted">{costs ? `cost ${formatNumber(costs)}` : "no costs"}</div>
                             </td>
                             <td className="whitespace-nowrap">
-                              <div className="text-[13.5px]">{summary.nextDueDate ? formatServiceDate(summary.nextDueDate) : "Settled"}</div>
-                              <div className={`text-[12.5px] ${due.tone}`}>{due.text}</div>
+                              <div className="text-[13.5px]">{summary.churned ? "Left us" : summary.nextDueDate ? formatServiceDate(summary.nextDueDate) : "Settled"}</div>
+                              <div className={`text-[12.5px] ${summary.churned ? "muted" : due.tone}`}>
+                                {summary.churned ? (summary.unpaidWhenLeft > 0 ? `${formatNumber(summary.unpaidWhenLeft)} unpaid, not due` : "Nothing unpaid") : due.text}
+                              </div>
                             </td>
                           </tr>
                         );
@@ -270,7 +273,8 @@ function ClientProfile({
   const net = summary.totalCollected - allCost;
   const oneOffLeft = summary.setup.remaining + (summary.website?.remaining ?? 0);
   const due = dueLabel(summary.nextDueDate, today);
-  const billedSoFar = summary.totalCollected + summary.outstanding;
+  // A churned client's unpaid balance still shows on the bar, greyed out.
+  const billedSoFar = summary.totalCollected + (summary.churned ? summary.unpaidWhenLeft : summary.outstanding);
   const paidShare = billedSoFar > 0 ? Math.min(100, (summary.totalCollected / billedSoFar) * 100) : 100;
 
   return (
@@ -283,7 +287,7 @@ function ClientProfile({
               <h2 className="text-[22px] font-semibold tracking-tight">{agreement.client_name}</h2>
               <div className="flex flex-wrap items-center gap-1.5 mt-2">
                 <StatusPill kind="agreement" value={agreement.status} />
-                <StatusPill kind="billing" value={summary.overallStatus} />
+                {!summary.churned && <StatusPill kind="billing" value={summary.overallStatus} />}
                 <ServiceBadges services={agreementServices(agreement)} size="md" />
               </div>
               <p className="text-[13.5px] muted mt-2">
@@ -318,7 +322,7 @@ function ClientProfile({
           </div>
           <div className="stack-bar !h-2.5">
             <span style={{ width: `${paidShare}%`, background: "var(--green)" }} />
-            {paidShare < 100 && <span style={{ width: `${100 - paidShare}%`, background: summary.totalOverdue > 0 ? "var(--red)" : "var(--amber)" }} />}
+            {paidShare < 100 && <span style={{ width: `${100 - paidShare}%`, background: summary.churned ? "var(--muted-2)" : summary.totalOverdue > 0 ? "var(--red)" : "var(--amber)" }} />}
           </div>
         </div>
 
@@ -328,11 +332,19 @@ function ClientProfile({
             <dd className="text-green">{formatNumber(summary.totalCollected)}</dd>
             <small>{summary.lastPaymentDate ? `Last on ${formatServiceDate(summary.lastPaymentDate)}` : "No payment yet"}</small>
           </div>
-          <div>
-            <dt>Due now</dt>
-            <dd className={summary.totalDueNow > 0 ? (summary.totalOverdue > 0 ? "text-red" : "text-amber") : ""}>{formatNumber(summary.totalDueNow)}</dd>
-            <small className={due.tone}>{summary.nextDueDate ? `${summary.nextDueLabel} · ${due.text}` : "All settled"}</small>
-          </div>
+          {summary.churned ? (
+            <div>
+              <dt>Unpaid when they left</dt>
+              <dd className="muted">{formatNumber(summary.unpaidWhenLeft)}</dd>
+              <small>Churned · not counted as due</small>
+            </div>
+          ) : (
+            <div>
+              <dt>Due now</dt>
+              <dd className={summary.totalDueNow > 0 ? (summary.totalOverdue > 0 ? "text-red" : "text-amber") : ""}>{formatNumber(summary.totalDueNow)}</dd>
+              <small className={due.tone}>{summary.nextDueDate ? `${summary.nextDueLabel} · ${due.text}` : "All settled"}</small>
+            </div>
+          )}
           <div>
             <dt>Monthly fee</dt>
             <dd>{hasRecurringService(agreement) ? formatNumber(summary.recurring.monthlyTotal) : "—"}</dd>

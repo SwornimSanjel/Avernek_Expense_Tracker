@@ -4,6 +4,7 @@ import { Avatar, EmptyState, FxBadge, Kpi, Money, PageHeader } from "@/component
 import AddExpense from "@/components/AddExpense";
 import ExpenseFilters from "@/components/ExpenseFilters";
 import ExpenseRowActions from "@/components/ExpenseRowActions";
+import { ExpenseFormDataProvider } from "@/components/ExpenseFormData";
 import BulkSelect, { SelectBox, SelectGroup, SelectToggle } from "@/components/BulkSelect";
 import { deleteExpenses } from "./actions";
 import Icon from "@/components/Icons";
@@ -120,11 +121,11 @@ export default async function ExpensesPage({
   };
 
   return (
-    <>
+    <ExpenseFormDataProvider value={formProps}>
       <PageHeader
         title="Expenses"
         subtitle="Every cost Avernek has — company money and founder money — filtered instantly."
-        action={canManage ? <AddExpense {...formProps} meId={session.sub} /> : undefined}
+        action={canManage ? <AddExpense meId={session.sub} /> : undefined}
       />
 
       <ExpenseFilters
@@ -244,6 +245,7 @@ export default async function ExpensesPage({
                           {future && <span className="pill warn">Future date</span>}
                           {e.currency === "USD" && <FxBadge source={e.fx_source} status={e.conversion_status} />}
                           {e.is_reimbursed && <span className="pill ok">Reimbursed</span>}
+                          {e.has_bill === false && <span className="pill">No bill</span>}
                           {e.attachments?.map((bill, index) => (
                             <a key={bill.id} href={attachmentUrl(bill.id)} target="_blank" rel="noopener" className="pill accent" title={bill.file_name}>
                               <Icon name="receipt" size={12} />
@@ -258,6 +260,8 @@ export default async function ExpensesPage({
                           {company ? "" : ` · paid by ${shortName(e.paid_by_user_id)}`}
                           {e.client ? ` · ${e.client}` : ""}
                           {e.billing_month && e.billing_month.slice(0, 7) !== e.expense_date.slice(0, 7) ? ` · for ${monthLabel(e.billing_month.slice(0, 7), "short")}` : ""}
+                          {e.bill_number ? ` · Bill ${e.bill_number}` : ""}
+                          {e.seller_pan ? ` · PAN ${e.seller_pan}` : ""}
                         </div>
                         {!!e.expense_shares?.length && !company && (
                           <div className="flex flex-wrap gap-1.5 mt-1.5">
@@ -280,12 +284,7 @@ export default async function ExpensesPage({
                         ) : null}
                       </div>
                       {canManage && (
-                        <ExpenseRowActions
-                          expense={e}
-                          isReimbursed={e.is_reimbursed}
-                          pending={e.conversion_status === "pending"}
-                          {...formProps}
-                        />
+                        <ExpenseRowActions expense={e} isReimbursed={e.is_reimbursed} pending={e.conversion_status === "pending"} />
                       )}
                     </div>
                   );
@@ -295,6 +294,6 @@ export default async function ExpensesPage({
           ))}
         </div>
       </BulkSelect>
-    </>
+    </ExpenseFormDataProvider>
   );
 }

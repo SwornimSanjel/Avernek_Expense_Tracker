@@ -21,6 +21,7 @@ const AGREEMENT_TONE: Record<IncomeAgreementStatus, Tone> = {
   paused: "warn",
   completed: "muted",
   cancelled: "muted",
+  churned: "muted",
 };
 
 const BILLING_TONE: Record<BillingStatus, Tone> = {

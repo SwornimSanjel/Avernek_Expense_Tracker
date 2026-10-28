@@ -2,6 +2,7 @@ import { requireSession } from "@/lib/auth/server";
 import { isAppOwner } from "@/lib/authz";
 import { EmptyState, Kpi, Money, PageHeader } from "@/components/ui";
 import AddOtherIncome from "@/components/AddOtherIncome";
+import ExportMenu from "@/components/ExportMenu";
 import BulkSelect, { SelectBox, SelectToggle } from "@/components/BulkSelect";
 import { deleteOtherIncomes } from "../income/actions";
 import { OTHER_INCOME_LABELS, formatServiceDate, todayIso } from "@/lib/income";
@@ -9,7 +10,7 @@ import { loadLedger } from "@/lib/ledger";
 import { bankAmount } from "@/lib/tax";
 import { formatNumber } from "@/lib/format";
 import { accountLabel } from "@/lib/statement";
-import { monthName } from "@/lib/dates";
+import { monthLabel, monthName, shiftMonth } from "@/lib/dates";
 
 export const dynamic = "force-dynamic";
 
@@ -33,7 +34,19 @@ export default async function OtherIncomePage() {
       <PageHeader
         title="Other income"
         subtitle="Money earned without a client agreement — one-off jobs and extra work."
-        action={canManage ? <AddOtherIncome accounts={moneyAccounts} /> : undefined}
+        action={
+          <>
+            <ExportMenu
+              choices={[
+                { label: "This month", hint: monthLabel(thisMonth), href: `/api/export/income?kind=other&period=month&month=${thisMonth}` },
+                { label: "Last month", hint: monthLabel(shiftMonth(thisMonth, -1)), href: "/api/export/income?kind=other&period=last" },
+                { label: "This year", hint: thisMonth.slice(0, 4), href: "/api/export/income?kind=other&period=year" },
+                { label: "All time", hint: "Every job without a client", href: "/api/export/income?kind=other&period=all" },
+              ]}
+            />
+            {canManage && <AddOtherIncome accounts={moneyAccounts} />}
+          </>
+        }
       />
 
       <div className="kpi-grid">

@@ -16,6 +16,7 @@ const options: {
   { value: "paused", label: "Paused", description: "Temporarily on hold", color: "var(--amber)" },
   { value: "completed", label: "Completed", description: "Work has ended", color: "var(--muted)" },
   { value: "cancelled", label: "Cancelled", description: "Agreement did not proceed", color: "var(--muted)" },
+  { value: "churned", label: "Churned", description: "Client left us · nothing more is due", color: "var(--red)" },
 ];
 
 export default function ClientStatusControl({
@@ -47,6 +48,12 @@ export default function ClientStatusControl({
       (next === "completed" || next === "cancelled") &&
       !window.confirm(
         "Stop future recurring dues for this client? Every payment and date already recorded is kept."
+      )
+    ) return;
+    if (
+      next === "churned" &&
+      !window.confirm(
+        "Mark this client as churned? Nothing they still owe will count as due or overdue. Their payments stay on record."
       )
     ) return;
 
@@ -114,7 +121,7 @@ export default function ClientStatusControl({
             })}
           </div>
           <p className="mx-2 mt-2 border-t pt-2 text-[12px] leading-relaxed muted" style={{ borderColor: "var(--line)" }}>
-            Completed and cancelled stop future recurring dues and keep the complete history.
+            Completed, cancelled and churned stop future dues and keep the complete history.
           </p>
         </div>
       )}

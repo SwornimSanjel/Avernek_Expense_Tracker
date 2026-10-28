@@ -26,6 +26,28 @@ function n(v: FormDataEntryValue | null): number | null {
 }
 
 /**
+ * "Do you have a bill?" from the expense form. A "yes" needs the bill number,
+ * the seller's 9-digit PAN / VAT number and at least one photo (`photos`
+ * counts the new uploads plus any already saved). New expenses must answer;
+ * an older expense being edited may stay unanswered (null).
+ */
+function readBill(formData: FormData, photos: number, mustAnswer: boolean) {
+  const answer = String(formData.get("has_bill") ?? "");
+  if (answer === "no") return { has_bill: false, bill_number: null, seller_pan: null };
+  if (answer !== "yes") {
+    if (mustAnswer) throw new Error("Answer “Do you have a bill?” — choose No bill or Yes.");
+    return { has_bill: null, bill_number: null, seller_pan: null };
+  }
+  const billNumber = String(formData.get("bill_number") ?? "").trim();
+  const pan = String(formData.get("seller_pan") ?? "").replace(/[\s-]/g, "");
+  if (!billNumber) throw new Error("Enter the bill number.");
+  if (billNumber.length > 60) throw new Error("The bill number is too long.");
+  if (!/^\d{9}$/.test(pan)) throw new Error("The PAN / VAT number must be 9 digits.");
+  if (photos < 1) throw new Error("Add a photo of the bill.");
+  return { has_bill: true, bill_number: billNumber, seller_pan: pan };
+}
+
+/**
  * Returns the error instead of throwing it: in production Next.js replaces a
  * thrown server-action message with a generic one, and "this file is not a
  * bill" has to reach the person who picked it.
@@ -71,6 +93,9 @@ async function saveNewExpense(formData: FormData): Promise<string> {
   const shares = fundingSource === "personal" ? readShareInputs(formData) : [];
   validateShareTotal(shares, amount);
   const bills = await readUploads(formData, "bills");
+  // The expense form always posts has_bill ("" until answered), so a person
+  // adding an expense must answer. Receipt scans and the assistant don't ask.
+  const bill = readBill(formData, bills.length, formData.has("has_bill"));
 
   // Look up the NRB sell rate for the expense date only when we actually need it
   // (USD, and no exact charge / manual rate supplied).
@@ -104,8 +129,8 @@ async function saveNewExpense(formData: FormData): Promise<string> {
           paid_by_user_id, funding_source, money_account_id, client, note,
           receipt_url, source, created_by,
           amount_npr, fx_rate_to_npr, fx_rate_date, fx_source, conversion_status,
-          actual_npr_charged)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'manual',$13,$14,$15,$16,$17,$18,$19)
+          actual_npr_charged, has_bill, bill_number, seller_pan)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'manual',$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
        returning id`,
       [
         amount,
@@ -129,6 +154,9 @@ async function saveNewExpense(formData: FormData): Promise<string> {
         conv.fx_source,
         conv.conversion_status,
         conv.actual_npr_charged,
+        bill.has_bill,
+        bill.bill_number,
+        bill.seller_pan,
       ]
     );
 
@@ -195,6 +223,11 @@ export async function updateExpense(formData: FormData) {
     // Any expense — however old — can gain bills here; existing ones stay.
     const bills = await readUploads(formData, "bills");
     await assertRoomFor({ kind: "expense_bill", id }, bills.length);
+    const saved = await one<{ count: string }>(
+      `select count(*) from public.attachments where kind = 'expense_bill' and expense_id = $1`,
+      [id]
+    );
+    const bill = readBill(formData, bills.length + Number(saved?.count ?? 0), false);
 
     let nrbRate = null;
     if (currency === "USD" && actualNprCharged == null && manualRate == null) {
@@ -236,6 +269,7 @@ export async function updateExpense(formData: FormData) {
           money_account_id: moneyAccountId,
           client: String(formData.get("client") ?? "") || null,
           note: String(formData.get("note") ?? "") || null,
+          ...bill,
           ...conv,
         },
         id,

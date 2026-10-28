@@ -1,8 +1,9 @@
 "use client";
 
-import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import Link from "@/components/AppLink";
+import { useLinkStatus } from "next/link";
+import { usePathname, useRouter, useSelectedLayoutSegment } from "next/navigation";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { signOut } from "@/app/login/actions";
 import Icon, { type IconName } from "@/components/Icons";
@@ -91,6 +92,7 @@ export default function Nav({ name, isAdmin }: { name: string; isAdmin: boolean 
 
   return (
     <>
+      <RouteSync path={path} />
       <aside className="sidebar" aria-label="Main navigation">
         <div className="sb-top">
           <Link href="/" className="sb-brand" aria-label="Avernek overview">
@@ -175,7 +177,41 @@ function NavLink({ item, active }: { item: Item; active: boolean }) {
       )}
       <span className="sb-icon"><Icon name={item.icon} size={18} strokeWidth={active ? 2 : 1.75} /></span>
       <span className="sb-label">{item.label}</span>
+      <PendingMark />
       <span className="sb-tip">{item.label}</span>
     </Link>
   );
+}
+
+/** A small spinner on the item just clicked, until its page arrives. */
+function PendingMark() {
+  const { pending } = useLinkStatus();
+  return pending ? <span className="sb-pending" aria-hidden="true" /> : null;
+}
+
+/**
+ * Safety net for the router: the page on screen must be the page in the
+ * address bar. If a late response ever paints a different page (the Expenses
+ * sidebar with Other income showing), fetch the address's page again.
+ */
+function RouteSync({ path }: { path: string }) {
+  const router = useRouter();
+  // The page segment actually rendered under this layout, e.g. "expenses".
+  const rendered = useSelectedLayoutSegment();
+  const wanted = path.split("/")[1] || null;
+  const healed = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (rendered === wanted) {
+      healed.current = null;
+      return;
+    }
+    // Once per mismatch, so a refresh that cannot fix it never loops.
+    const key = `${wanted}|${rendered}`;
+    if (healed.current === key) return;
+    healed.current = key;
+    router.refresh();
+  }, [rendered, wanted, router]);
+
+  return null;
 }

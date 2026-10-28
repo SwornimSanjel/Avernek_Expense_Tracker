@@ -14,7 +14,9 @@ export type IncomeAgreementStatus =
   | "pending"
   | "paused"
   | "completed"
-  | "cancelled";
+  | "cancelled"
+  /** The client left: what they still owed is no longer due or overdue. */
+  | "churned";
 /** Legacy mirror of the has_website / has_ads / has_automation flags. */
 export type IncomeServiceType =
   | "ai_automation"
@@ -144,6 +146,11 @@ export interface Expense {
   recurring_id: string | null;
   created_by: string | null;
   created_at: string;
+  /** "Do you have a bill?" — null for expenses saved before it was asked. */
+  has_bill?: boolean | null;
+  bill_number?: string | null;
+  /** Seller's PAN / VAT number, 9 digits. */
+  seller_pan?: string | null;
   expense_shares?: ExpenseShare[];
   /** Bills / receipts — metadata only, the bytes are served by /api/files/[id]. */
   attachments?: Attachment[];

@@ -5,7 +5,7 @@ import { EmptyState, PageHeader } from "@/components/ui";
 import PanelTabs from "@/components/PanelTabs";
 import { ConfirmDelete, PayTax, type TaxPeriodOption } from "@/components/VatBillsActions";
 import FileLinks from "@/components/FileLinks";
-import Link from "next/link";
+import Link from "@/components/AppLink";
 import TaxOverview from "@/components/TaxOverview";
 import { daysUntil, firstTaxMonth, tdsPeriods, upcomingDeadlines, vatPeriods, type PeriodStatus } from "@/lib/tax-calendar";
 import { bsMonthLabel, fiscalYearOf, formatBs } from "@/lib/nepali-date";

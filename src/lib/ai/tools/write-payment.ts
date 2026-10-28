@@ -131,7 +131,7 @@ export const recordClientPayment: WriteTool = {
       if (typeof v.client === "string") {
         const found = await resolveClient(ctx, v.client, "record_client_payment", v);
         if ("status" in found) return found;
-        const open = found.client.agreements.filter((a) => a.status !== "cancelled" && a.status !== "completed");
+        const open = found.client.agreements.filter((a) => a.status !== "cancelled" && a.status !== "completed" && a.status !== "churned");
         candidates = open.length ? open : found.client.agreements;
         message = `${found.client.name} has more than one agreement. Which one is this payment for?`;
       } else {

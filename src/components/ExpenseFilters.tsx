@@ -4,7 +4,8 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import Icon from "@/components/Icons";
 import { MonthPicker, Segmented } from "@/components/controls";
-import { shiftMonth } from "@/lib/dates";
+import ExportMenu from "@/components/ExportMenu";
+import { monthLabel, shiftMonth } from "@/lib/dates";
 import type { ExpenseSearch } from "@/lib/expense-filters";
 
 type Option = { value: string; label: string };
@@ -81,10 +82,23 @@ export default function ExpenseFilters({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search]);
 
+  // Custom dates apply after a short pause too: typing a year digit by digit
+  // passes through 0002, 0020, 0202 on the way to 2026.
+  useEffect(() => {
+    if (period !== "custom") return;
+    const complete = (value: string) => value === "" || /^(19|20)\d\d-\d\d-\d\d$/.test(value);
+    if (!complete(from) || !complete(to)) return;
+    if ((sp.from ?? "") === from && (sp.to ?? "") === to) return;
+    const timer = window.setTimeout(() => apply({ period: "custom", from: from || null, to: to || null }), 450);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [from, to, period]);
+
   const ledger = sp.ledger ?? "";
   const personId = sp.person ?? sp.payer ?? "";
   const active =
     Boolean(sp.ledger || sp.cat || sp.vendor || sp.client || personId || sp.q) || (sp.period && sp.period !== "month") || (sp.month && sp.month !== thisMonth);
+  const filtered = Boolean(sp.ledger || sp.cat || sp.vendor || sp.client || personId || sp.q);
   // The export always carries the period, so it downloads exactly this view.
   const exportQuery = new URLSearchParams(
     Object.entries({ period: "month", month: monthKey, ...sp }).filter(([, value]) => value != null && value !== "") as [string, string][]
@@ -138,14 +152,20 @@ export default function ExpenseFilters({
                 key={value}
                 type="button"
                 className={`chip !h-8 ${on ? "chip-on" : ""}`}
-                onClick={() =>
+                onClick={() => {
+                  const customFrom = from || `${thisMonth}-01`;
+                  const customTo = to || today;
+                  if (value === "custom") {
+                    setFrom(customFrom);
+                    setTo(customTo);
+                  }
                   apply({
                     period: value === "month" ? null : value,
                     month: null,
-                    from: value === "custom" ? from || `${thisMonth}-01` : null,
-                    to: value === "custom" ? to || today : null,
-                  })
-                }
+                    from: value === "custom" ? customFrom : null,
+                    to: value === "custom" ? customTo : null,
+                  });
+                }}
               >
                 {label}
               </button>
@@ -170,10 +190,7 @@ export default function ExpenseFilters({
                 type="date"
                 value={from}
                 max={to || undefined}
-                onChange={(event) => {
-                  setFrom(event.target.value);
-                  apply({ period: "custom", from: event.target.value || null });
-                }}
+                onChange={(event) => setFrom(event.target.value)}
               />
             </label>
             <label className="date-field">
@@ -182,19 +199,22 @@ export default function ExpenseFilters({
                 type="date"
                 value={to}
                 min={from || undefined}
-                onChange={(event) => {
-                  setTo(event.target.value);
-                  apply({ period: "custom", to: event.target.value || null });
-                }}
+                onChange={(event) => setTo(event.target.value)}
               />
             </label>
           </div>
         )}
         <div className="ml-auto flex items-center gap-2">
           {pending && <span className="text-[12.5px] muted">Updating…</span>}
-          <a href={`/api/export${exportQuery ? `?${exportQuery}` : ""}`} className="btn btn-sm">
-            <Icon name="download" size={14} /> Export CSV
-          </a>
+          <ExportMenu
+            choices={[
+              { label: "What's on screen", hint: filtered ? `${periodLabel} · with your filters` : periodLabel, href: `/api/export?${exportQuery}` },
+              { label: "This month", hint: `${monthLabel(thisMonth)} · all expenses`, href: `/api/export?period=month&month=${thisMonth}` },
+              { label: "Last month", hint: `${monthLabel(shiftMonth(thisMonth, -1))} · all expenses`, href: "/api/export?period=last" },
+              { label: "This year", hint: `${today.slice(0, 4)} · all expenses`, href: "/api/export?period=year" },
+              { label: "All time", hint: "Every expense ever", href: "/api/export?period=all" },
+            ]}
+          />
         </div>
       </div>
 

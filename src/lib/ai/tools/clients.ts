@@ -58,7 +58,7 @@ async function clientOrAsk(
 
 // ---------------------------------------------------------------------------
 
-const STATUSES = ["active", "pending", "paused", "completed", "cancelled", "all"] as const;
+const STATUSES = ["active", "pending", "paused", "completed", "cancelled", "churned", "all"] as const;
 
 const listSchema = z.object({
   status: z.enum(STATUSES).optional().describe("Which clients; default active"),
@@ -71,7 +71,7 @@ export const listClients: ReadTool = {
   kind: "read",
   permission: "member",
   description:
-    "List clients (active by default) with their services, money collected, amount due now and next due date. Use for 'active clients', 'who are our clients', 'paused clients'.",
+    "List clients (active by default) with their services, money collected, amount due now and next due date. Use for 'active clients', 'who are our clients', 'paused clients', 'churned clients' (clients who left; nothing they owe is due).",
   schema: listSchema,
   async run(raw, ctx) {
     const parsed = listSchema.safeParse(clean(raw));
@@ -517,7 +517,7 @@ export const getUpcomingPayments: ReadTool = {
     const inWindow = (date: string | null | undefined): date is string =>
       Boolean(date) && date! >= ctx.today && date! <= until;
     for (const agreement of agreements) {
-      if (agreement.status === "cancelled" || agreement.status === "completed") continue;
+      if (agreement.status === "cancelled" || agreement.status === "completed" || agreement.status === "churned") continue;
       const summary = summaries.get(agreement.id)!;
       const push = (what: string, due: string, amount: number) =>
         items.push({ client: agreement.client_name, what, due, amount, currency: agreement.currency });

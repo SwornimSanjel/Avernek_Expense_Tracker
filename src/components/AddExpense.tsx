@@ -3,36 +3,18 @@
 import { useEffect, useState, useTransition } from "react";
 import { addExpense } from "@/app/(app)/expenses/actions";
 import { npr, rateLabel } from "@/lib/format";
-import type {
-  AppUser,
-  Category,
-  ExpenseFundingSource,
-  MoneyAccount,
-  Vendor,
-} from "@/lib/types";
+import type { ExpenseFundingSource } from "@/lib/types";
 import ShareAllocationFields from "./ShareAllocationFields";
-import { BillDocuments } from "./DocumentSections";
+import ExpenseBillFields, { type BillAnswer } from "./ExpenseBillFields";
+import { useExpenseFormData } from "./ExpenseFormData";
 import Icon from "./Icons";
 import { nepalToday } from "@/lib/dates";
 import { pickerPeople } from "@/lib/people";
 
 const today = () => nepalToday();
 
-export default function AddExpense({
-  categories,
-  vendors,
-  users,
-  moneyAccounts,
-  clients,
-  meId,
-}: {
-  categories: Category[];
-  vendors: Vendor[];
-  users: AppUser[];
-  moneyAccounts: MoneyAccount[];
-  clients: string[];
-  meId: string;
-}) {
+export default function AddExpense({ meId }: { meId: string }) {
+  const { categories, vendors, users, moneyAccounts, clients } = useExpenseFormData();
   const [open, setOpen] = useState(false);
   const [currency, setCurrency] = useState<"NPR" | "USD">("NPR");
   const [date, setDate] = useState(today());
@@ -47,6 +29,9 @@ export default function AddExpense({
   const [rateLoading, setRateLoading] = useState(false);
   const [pending, startTransition] = useTransition();
   const [filesBusy, setFilesBusy] = useState(false);
+  const [billAnswer, setBillAnswer] = useState<BillAnswer>("");
+  const [billPhotos, setBillPhotos] = useState(0);
+  const [billError, setBillError] = useState<string | null>(null);
   const people = pickerPeople(users);
   const defaultPayer =
     people.find((person) => person.id === meId)?.id ??
@@ -86,6 +71,24 @@ export default function AddExpense({
   const isNprAccountPayingUsd =
     currency === "USD" && selectedMoneyAccount?.currency === "NPR";
 
+  /** The bill question must be answered; a "Yes" needs its photo too. */
+  function billProblem(): string | null {
+    if (billAnswer === "") return "Choose No bill or Yes.";
+    if (billAnswer === "yes" && billPhotos === 0) return "Add a photo of the bill.";
+    return null;
+  }
+
+  // Checked in onSubmit, not in the action: React resets a form after every
+  // action call, which would wipe what was typed whenever the check fails.
+  function checkBill(event: React.FormEvent<HTMLFormElement>) {
+    const problem = billProblem();
+    setBillError(problem);
+    if (problem) {
+      event.preventDefault();
+      document.getElementById("expense-bill")?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }
+
   function submit(formData: FormData) {
     startTransition(async () => {
       try {
@@ -110,7 +113,17 @@ export default function AddExpense({
 
   if (!open) {
     return (
-      <button onClick={() => { setDate(today()); setOpen(true); }} className="btn btn-primary">
+      <button
+        onClick={() => {
+          setDate(today());
+          // The form remounts empty, so the bill answer starts unanswered too.
+          setBillAnswer("");
+          setBillPhotos(0);
+          setBillError(null);
+          setOpen(true);
+        }}
+        className="btn btn-primary"
+      >
         <Icon name="plus" size={16} strokeWidth={2.2} /> Add expense
       </button>
     );
@@ -120,6 +133,7 @@ export default function AddExpense({
     <div className="modal-backdrop">
       <form
         action={submit}
+        onSubmit={checkBill}
         className="modal-panel md:max-w-lg p-5 md:p-6 space-y-4"
       >
         <div className="modal-header">
@@ -374,7 +388,19 @@ export default function AddExpense({
           <input name="note" className="input" />
         </Field>
 
-        <BillDocuments name="bills" onBusyChange={setFilesBusy} />
+        <ExpenseBillFields
+          error={billError}
+          onAnswer={(answer) => {
+            setBillAnswer(answer);
+            if (answer === "no") setBillPhotos(0);
+            setBillError(null);
+          }}
+          onPhotoCount={(count) => {
+            setBillPhotos(count);
+            if (count > 0) setBillError(null);
+          }}
+          onBusyChange={setFilesBusy}
+        />
 
         <button type="submit" disabled={pending || filesBusy} className="btn btn-primary w-full !h-12">
           {pending ? "Saving…" : filesBusy ? "Preparing photos…" : "Save expense"}

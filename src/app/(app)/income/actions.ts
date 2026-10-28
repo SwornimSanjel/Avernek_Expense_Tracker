@@ -42,6 +42,7 @@ const AGREEMENT_STATUSES: IncomeAgreementStatus[] = [
   "paused",
   "completed",
   "cancelled",
+  "churned",
 ];
 const WEBSITE_STATUSES: WebsiteStatus[] = [
   "not_started",
@@ -730,7 +731,7 @@ export async function setIncomeAgreementStatus(id: string, status: IncomeAgreeme
   }
   // service_end_date closes the recurring schedule; it is only set when work
   // actually ends, and cleared when the client becomes active again.
-  const endsService = status === "completed" || status === "cancelled";
+  const endsService = status === "completed" || status === "cancelled" || status === "churned";
   await exec(
     `update public.income_agreements
         set status = $1,

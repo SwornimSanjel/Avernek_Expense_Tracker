@@ -1,19 +1,19 @@
 "use client";
 
-import Link from "next/link";
+import Link from "@/components/AppLink";
 import { useMemo, useState } from "react";
 import Icon from "@/components/Icons";
 
 export type RailClient = {
   id: string;
   name: string;
-  group: "Active" | "Pending" | "Paused" | "Inactive";
+  group: "Active" | "Pending" | "Paused" | "Inactive" | "Churned";
   dueNow: number;
   overdue: boolean;
   recurring: boolean;
 };
 
-const ORDER: RailClient["group"][] = ["Active", "Pending", "Paused", "Inactive"];
+const ORDER: RailClient["group"][] = ["Active", "Pending", "Paused", "Inactive", "Churned"];
 
 function initials(name: string) {
   return name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase();
