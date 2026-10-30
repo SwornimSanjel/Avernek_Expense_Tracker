@@ -13,9 +13,13 @@ export default function LoginPage() {
   // there. Read from location rather than useSearchParams() to keep this page
   // statically prerenderable without a Suspense boundary.
   const [next, setNext] = useState("/");
+  const [removed, setRemoved] = useState(false);
   useEffect(() => {
-    const raw = new URLSearchParams(window.location.search).get("next");
+    const params = new URLSearchParams(window.location.search);
+    const raw = params.get("next");
     if (raw && raw.startsWith("/") && !raw.startsWith("//")) setNext(raw);
+    // Sent here by /signed-out after an administrator removed this account.
+    setRemoved(params.get("removed") === "1");
   }, []);
 
   return (
@@ -71,11 +75,15 @@ export default function LoginPage() {
           </button>
         </form>
 
-        {state.error && (
+        {state.error ? (
           <p className="alert alert-error mt-3" role="alert">
             {state.error}
           </p>
-        )}
+        ) : removed ? (
+          <p className="alert alert-warn mt-3" role="status">
+            You were signed out because this account&apos;s access was removed.
+          </p>
+        ) : null}
 
         <p className="muted text-[13px] mt-6">
           Accounts are created by an administrator. Ask them for access or a

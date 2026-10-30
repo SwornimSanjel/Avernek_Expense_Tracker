@@ -1,4 +1,4 @@
-import { requireSession } from "@/lib/auth/server";
+import { requireSection } from "@/lib/auth/server";
 import { Kpi, Money, PageHeader } from "@/components/ui";
 import StatementView from "@/components/StatementView";
 import { loadStatement } from "@/lib/statement-data";
@@ -8,7 +8,7 @@ import { formatNumber } from "@/lib/format";
 export const dynamic = "force-dynamic";
 
 export default async function StatementPage() {
-  await requireSession();
+  await requireSection("statement");
   const today = nepalToday();
   const { events, accounts, ledger } = await loadStatement();
   const held = ledger.balances.reduce((total, item) => total + item.balance, 0);

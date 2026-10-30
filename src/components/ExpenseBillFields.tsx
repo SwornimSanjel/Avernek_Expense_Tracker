@@ -14,7 +14,8 @@ export function cleanPan(value: string): string {
 
 /**
  * "Do you have a bill?" on every expense. No → nothing more to fill in.
- * Yes → the bill number, the seller's PAN / VAT number and a photo of the bill.
+ * Yes → the bill number and a photo of the bill, plus the seller's PAN / VAT
+ * number when it is printed (many bills don't show one, so it is optional).
  *
  * Posts `has_bill` ("yes" / "no" / "" when unanswered), `bill_number`,
  * `seller_pan` and the photo ids under `bills`. The server checks it all again.
@@ -60,7 +61,7 @@ export default function ExpenseBillFields({
         </span>
         <div className="min-w-0 flex-1">
           <h3>Do you have a bill?</h3>
-          <p>{answer === "yes" ? "Bill number, PAN and a photo." : "A VAT or PAN bill from the seller."}</p>
+          <p>{answer === "yes" ? "Bill number and a photo. PAN if it is printed." : "A VAT or PAN bill from the seller."}</p>
         </div>
         <div className="segmented doc-section-toggle" role="radiogroup" aria-label="Do you have a bill?">
           <button type="button" role="radio" aria-checked={answer === "no"} onClick={() => choose("no")} className={answer === "no" ? "segmented-on" : ""}>
@@ -95,16 +96,15 @@ export default function ExpenseBillFields({
               />
             </label>
             <label className="block">
-              <span className="field-label">PAN / VAT number</span>
+              <span className="field-label">PAN / VAT number <span className="muted font-normal">· optional</span></span>
               <input
                 name="seller_pan"
-                required
                 inputMode="numeric"
                 pattern="[0-9]{9}"
                 title="9 digits"
                 value={pan}
                 onChange={(event) => setPan(cleanPan(event.target.value))}
-                placeholder="9 digits"
+                placeholder="If printed · 9 digits"
                 className="input tnum mt-1"
                 autoComplete="off"
               />

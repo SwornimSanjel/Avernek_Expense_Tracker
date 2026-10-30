@@ -1,5 +1,5 @@
 import { query } from "@/lib/db";
-import { requireSession } from "@/lib/auth/server";
+import { requireExpenseAccess } from "@/lib/auth/server";
 import { Avatar, EmptyState, FxBadge, Kpi, Money, PageHeader } from "@/components/ui";
 import AddExpense from "@/components/AddExpense";
 import ExpenseFilters from "@/components/ExpenseFilters";
@@ -14,7 +14,7 @@ import { ATTACHMENT_COLUMNS, attachmentUrl, type Attachment } from "@/lib/attach
 import { assignedShareNpr, assignedShareOriginal, computeIndividualSpending } from "@/lib/individual";
 import { canManageExpenses } from "@/lib/authz";
 import { USER_COLUMNS, partnersOf, personTone } from "@/lib/people";
-import { expenseWhere, withFilters, type ExpenseSearch } from "@/lib/expense-filters";
+import { expenseWhere, scopeCondition, withFilters, type ExpenseScope, type ExpenseSearch } from "@/lib/expense-filters";
 import { accountLabel } from "@/lib/statement";
 import { dayLabel, monthLabel, nepalToday } from "@/lib/dates";
 
@@ -26,23 +26,34 @@ export default async function ExpensesPage({
   searchParams: Promise<ExpenseSearch>;
 }) {
   const sp = await searchParams;
-  const session = await requireSession();
+  const session = await requireExpenseAccess();
   const canManage = canManageExpenses(session);
   const today = nepalToday();
 
-  const [categories, vendors, users, moneyAccounts, agreementClients, monthRows, futureRow] = await Promise.all([
+  const [categories, vendors, users, moneyAccounts, agreementClients, vatAccounts] = await Promise.all([
     query<Category>(`select * from public.categories order by name`),
     query<Vendor>(`select * from public.vendors order by name`),
     query<AppUser>(`select ${USER_COLUMNS} from public.users order by name`),
     query<MoneyAccount>(`select * from public.money_accounts where is_active = true order by currency, name`),
     query<{ client_name: string }>(`select distinct client_name from public.income_agreements order by client_name`),
-    query<{ month: string }>(`select distinct to_char(expense_date, 'YYYY-MM') as month from public.expenses`),
-    query<{ count: string }>(`select count(*) from public.expenses where expense_date > $1`, [today]),
+    query<{ id: string }>(`select id from public.money_accounts where kind = 'company_bank'`),
   ]);
 
-  const { where, params, range } = expenseWhere(sp, moneyAccounts.map((account) => account.id), today);
+  // Only the kinds of expenses this person may see (lib/access.ts).
+  const allowed = session.access.expenses;
+  const scope: ExpenseScope = { ledgers: allowed, vatAccountIds: vatAccounts.map((row) => row.id) };
+  const vatIds = new Set(scope.vatAccountIds);
+  const visibleAccounts = moneyAccounts.filter((account) => allowed.includes(vatIds.has(account.id) ? "vat" : "non_vat"));
+  const { where, params, range } = expenseWhere(sp, moneyAccounts.map((account) => account.id), today, scope);
+  const scoped = (extra: string, extraParams: unknown[] = []) => {
+    const values = [...extraParams];
+    const condition = scopeCondition(scope, (value) => `$${values.push(value)}`);
+    return { sql: [extra, condition].filter(Boolean).join(" and "), values };
+  };
+  const monthsWhere = scoped("");
+  const futureWhere = scoped("e.expense_date > $1", [today]);
 
-  const [expenses, shareRows, billRows] = await Promise.all([
+  const [expenses, shareRows, billRows, monthRows, futureRow] = await Promise.all([
     query<Expense>(
       `select e.* from public.expenses e
          left join public.vendors v on v.id = e.vendor_id
@@ -58,6 +69,12 @@ export default async function ExpensesPage({
         where kind = 'expense_bill'
         order by created_at`
     ),
+    query<{ month: string }>(
+      `select distinct to_char(e.expense_date, 'YYYY-MM') as month from public.expenses e
+        ${monthsWhere.sql ? `where ${monthsWhere.sql}` : ""}`,
+      monthsWhere.values
+    ),
+    query<{ count: string }>(`select count(*) from public.expenses e where ${futureWhere.sql}`, futureWhere.values),
   ]);
 
   const partners = partnersOf(users);
@@ -112,13 +129,10 @@ export default async function ExpensesPage({
     } else months.push({ key, rows: [expense], total: amountOf(expense) });
   }
 
-  const formProps = {
-    categories,
-    vendors,
-    users,
-    moneyAccounts,
-    clients: clientNames,
-  };
+  // The add / edit forms are for administrators; nobody else needs the lists.
+  const formProps = canManage
+    ? { categories, vendors, users, moneyAccounts, clients: clientNames }
+    : { categories: [], vendors: [], users: [], moneyAccounts: [], clients: [] };
 
   return (
     <ExpenseFormDataProvider value={formProps}>
@@ -136,8 +150,9 @@ export default async function ExpensesPage({
         categories={categories.map((c) => ({ value: c.id, label: c.name }))}
         vendors={vendors.map((v) => ({ value: v.id, label: v.name }))}
         clients={clientNames}
-        people={partners.map((p) => ({ value: p.id, label: p.name }))}
-        accounts={moneyAccounts.map((account) => ({ id: account.id, label: accountLabel(account) }))}
+        people={allowed.includes("founder") ? partners.map((p) => ({ value: p.id, label: p.name })) : []}
+        founder={allowed.includes("founder")}
+        accounts={visibleAccounts.map((account) => ({ id: account.id, label: accountLabel(account) }))}
         monthsWithData={monthRows.map((row) => row.month)}
         futureCount={Number(futureRow[0]?.count ?? 0)}
       />
@@ -160,7 +175,7 @@ export default async function ExpensesPage({
         />
       </div>
 
-      {sp.ledger !== "company" && !sp.ledger?.startsWith("account:") && (
+      {allowed.includes("founder") && sp.ledger !== "company" && !sp.ledger?.startsWith("account:") && (
         <div className="grid sm:grid-cols-3 gap-3 mb-5">
           {partnerTotals.map(({ partner, index, assigned, paid }) => {
             const on = selectedPersonId === partner.id;

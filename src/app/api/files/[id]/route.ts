@@ -1,5 +1,6 @@
 import { one } from "@/lib/db";
-import { getSession } from "@/lib/auth/server";
+import { getSession, type CurrentUser } from "@/lib/auth/server";
+import { canView, ledgerOf } from "@/lib/access";
 
 /**
  * GET /api/files/:id — stream one stored attachment to a signed-in user.
@@ -22,6 +23,8 @@ export async function GET(
   const { id } = await params;
   if (!UUID_RE.test(id)) return new Response("Not found", { status: 404 });
 
+  if (!(await mayOpen(session, id))) return new Response("Not found", { status: 404 });
+
   const file = await one<{ file_name: string; content_type: string; data: Buffer }>(
     `select file_name, content_type, data from public.attachments where id = $1`,
     [id]
@@ -43,4 +46,41 @@ export async function GET(
       "Cache-Control": "private, max-age=3600",
     },
   });
+}
+
+/**
+ * A file opens only for someone who may see the record it belongs to: an
+ * expense's bill for the kinds of expenses they may see, a company bill on
+ * the Bills page, an agreement or VAT bill on Income or Clients. A file not
+ * yet saved on a record opens only for the person who uploaded it.
+ */
+async function mayOpen(session: CurrentUser, id: string): Promise<boolean> {
+  if (session.access.full) return true;
+  const row = await one<{
+    kind: string;
+    uploaded_by: string | null;
+    expense_id: string | null;
+    company_bill_id: string | null;
+    agreement_id: string | null;
+    payment_id: string | null;
+    funding_source: string | null;
+    money_account_id: string | null;
+    account_kind: string | null;
+  }>(
+    `select a.kind, a.uploaded_by, a.expense_id, a.company_bill_id, a.agreement_id, a.payment_id,
+            e.funding_source, e.money_account_id, ma.kind as account_kind
+       from public.attachments a
+       left join public.expenses e on e.id = a.expense_id
+       left join public.money_accounts ma on ma.id = e.money_account_id
+      where a.id = $1`,
+    [id]
+  );
+  if (!row) return false;
+  if (row.expense_id && row.funding_source) {
+    const vat = new Set(row.account_kind === "company_bank" && row.money_account_id ? [row.money_account_id] : []);
+    return session.access.expenses.includes(ledgerOf({ funding_source: row.funding_source, money_account_id: row.money_account_id }, vat));
+  }
+  if (row.company_bill_id) return canView(session.access, "bills");
+  if (row.agreement_id || row.payment_id) return canView(session.access, "income") || canView(session.access, "clients");
+  return row.uploaded_by === session.sub;
 }

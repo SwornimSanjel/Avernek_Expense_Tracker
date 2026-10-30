@@ -1,5 +1,5 @@
 import Link from "@/components/AppLink";
-import { requireSession } from "@/lib/auth/server";
+import { requireSection } from "@/lib/auth/server";
 import { isAppOwner } from "@/lib/authz";
 import { Callout, EmptyState, Money, PageHeader, SectionHeader } from "@/components/ui";
 import Icon from "@/components/Icons";
@@ -16,7 +16,7 @@ import type { MoneyAccountBalance } from "@/lib/funds";
 export const dynamic = "force-dynamic";
 
 export default async function FundsPage() {
-  const session = await requireSession();
+  const session = await requireSection("funds");
   const canManage = isAppOwner(session);
   const today = nepalToday();
   const { ledger, events, accounts } = await loadStatement();

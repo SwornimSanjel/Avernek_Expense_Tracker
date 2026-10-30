@@ -26,6 +26,7 @@ export default function ExpenseFilters({
   clients,
   people,
   accounts,
+  founder = true,
   monthsWithData,
   futureCount,
 }: {
@@ -38,6 +39,8 @@ export default function ExpenseFilters({
   clients: string[];
   people: Option[];
   accounts: { id: string; label: string }[];
+  /** False for people who may not see founder-paid expenses. */
+  founder?: boolean;
   monthsWithData: string[];
   futureCount: number;
 }) {
@@ -226,7 +229,7 @@ export default function ExpenseFilters({
           onChange={(value) => apply({ ledger: value || null })}
           options={[
             { value: "", label: "All money" },
-            { value: "founder", label: "Founder" },
+            ...(founder ? [{ value: "founder", label: "Founder" }] : []),
             ...accounts.map((account) => ({ value: `account:${account.id}`, label: account.label.replace(" account", "") })),
           ]}
         />
@@ -235,12 +238,14 @@ export default function ExpenseFilters({
         {clients.length > 0 && (
           <FilterSelect label="Client" value={sp.client ?? ""} options={clients.map((client) => ({ value: client, label: client }))} onChange={(value) => apply({ client: value || null })} />
         )}
-        <FilterSelect
-          label="Person"
-          value={personId}
-          options={people}
-          onChange={(value) => apply({ person: value || null, payer: null, basis: value ? sp.basis ?? "share" : null })}
-        />
+        {people.length > 0 && (
+          <FilterSelect
+            label="Person"
+            value={personId}
+            options={people}
+            onChange={(value) => apply({ person: value || null, payer: null, basis: value ? sp.basis ?? "share" : null })}
+          />
+        )}
         {personId && (
           <Segmented
             size="sm"

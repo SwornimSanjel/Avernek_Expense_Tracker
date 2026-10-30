@@ -12,6 +12,8 @@ import { isAppOwner } from "@/lib/authz";
 import Icon, { type IconName } from "@/components/Icons";
 import { displayName, personTone } from "@/lib/people";
 import AiUsagePanel from "@/components/assistant/AiUsagePanel";
+import MemberAccess from "@/components/MemberAccess";
+import { describeAccess, hasEverything, resolveAccess } from "@/lib/access";
 import { isAiEnabled } from "@/lib/ai/config";
 
 export const dynamic = "force-dynamic";
@@ -21,11 +23,12 @@ export default async function SettingsPage() {
   const [categories, users, usage] = await Promise.all([
     query<Category>(`select * from public.categories order by name`),
     // Never select password_hash: these rows are handed to client components.
-    query<TeamMember>(
+    query<TeamMember & { removed: boolean; access: unknown }>(
       `select id, name, email, is_core_member, is_admin, is_partner,
-              (password_hash is not null) as can_sign_in
+              (password_hash is not null) as can_sign_in,
+              (removed_at is not null) as removed, access
          from public.users
-        order by is_partner desc, name`
+        order by (removed_at is not null), is_partner desc, name`
     ),
     query<{ category_id: string; count: string; total: string }>(
       `select category_id, count(*) as count, coalesce(sum(amount_npr), 0) as total
@@ -34,9 +37,14 @@ export default async function SettingsPage() {
   ]);
   const me = users.find((u) => u.id === session.sub);
   const canManage = isAppOwner(session);
+  // The team list and category totals show everyone's money, so people with
+  // limited access see only their own profile here.
+  const seesTeam = hasEverything(session.access);
   const usageById = new Map(usage.map((row) => [row.category_id, row]));
-  const partners = users.filter((u) => u.is_partner);
-  const others = users.filter((u) => !u.is_partner);
+  const current = users.filter((u) => !u.removed);
+  const removedCount = users.length - current.length;
+  const partners = current.filter((u) => u.is_partner);
+  const others = current.filter((u) => !u.is_partner);
 
   return (
     <>
@@ -83,16 +91,22 @@ export default async function SettingsPage() {
           <div className="card overflow-hidden rise rise-2">
             <Head icon="shield" title="Sign-in access" text="Set or replace someone's password" tone="var(--amber)" />
             <div className="p-5">
-              <SetPasswordForm members={users.map((u) => ({ id: u.id, name: u.name, email: u.email, can_sign_in: u.can_sign_in }))} />
+              <SetPasswordForm members={current.map((u) => ({ id: u.id, name: u.name, email: u.email, can_sign_in: u.can_sign_in }))} />
             </div>
           </div>
           </>
         )}
       </div>
 
+      {seesTeam && (
+      <>
       <div className="mt-4">
         <div className="card overflow-hidden rise rise-1">
-          <Head icon="users" title="Team" text={`${partners.length} partners · ${others.length} sign-in account${others.length === 1 ? "" : "s"}`} />
+          <Head
+            icon="users"
+            title="Team"
+            text={`${partners.length} partners · ${others.length} sign-in account${others.length === 1 ? "" : "s"}${removedCount ? ` · ${removedCount} removed` : ""}`}
+          />
           <div className="table-wrap">
             <table className="data-table">
               <thead>
@@ -101,11 +115,13 @@ export default async function SettingsPage() {
                   <th>Sign-in</th>
                   <th title="Partners appear in investment totals, rankings and payer / split lists">Partner</th>
                   <th title="Only used for old expenses saved without an exact split">Old default split</th>
+                  <th>Can view</th>
+                  {canManage && <th className="w-[1%]" />}
                 </tr>
               </thead>
               <tbody>
                 {users.map((u, index) => (
-                  <tr key={u.id} className={u.is_partner ? "" : "opacity-80"}>
+                  <tr key={u.id} className={u.removed ? "opacity-60" : u.is_partner ? "" : "opacity-80"}>
                     <td>
                       <div className="flex items-center gap-3">
                         <Avatar name={u.name} size={34} round color={u.is_partner ? personTone(index) : "var(--muted)"} />
@@ -116,10 +132,33 @@ export default async function SettingsPage() {
                       </div>
                     </td>
                     <td>
-                      {u.is_admin ? <span className="pill accent">Admin</span> : u.can_sign_in ? <span className="pill info">Can sign in</span> : <span className="pill">No login</span>}
+                      {u.removed ? (
+                        <span className="pill danger">Removed</span>
+                      ) : u.is_admin ? (
+                        <span className="pill accent">Admin</span>
+                      ) : u.can_sign_in ? (
+                        <span className="pill info">Can sign in</span>
+                      ) : (
+                        <span className="pill">No login</span>
+                      )}
                     </td>
                     <td>{canManage ? <PartnerToggle id={u.id} isPartner={u.is_partner} /> : <span className="pill">{u.is_partner ? "Partner" : "—"}</span>}</td>
                     <td>{canManage ? <TeamToggle id={u.id} isCore={u.is_core_member} /> : <span className="pill">{u.is_core_member ? "Included" : "—"}</span>}</td>
+                    <td className="text-[13px] max-w-[260px]">
+                      <span className={u.removed ? "muted" : ""}>{u.removed ? "Nothing · removed" : describeAccess(resolveAccess(u))}</span>
+                    </td>
+                    {canManage && (
+                      <td>
+                        <MemberAccess
+                          id={u.id}
+                          name={displayName(u.name)}
+                          isAdmin={u.is_admin}
+                          isSelf={u.id === session.sub}
+                          removed={u.removed}
+                          access={resolveAccess(u)}
+                        />
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -127,6 +166,7 @@ export default async function SettingsPage() {
           </div>
           <p className="px-5 py-3 text-[13px] muted border-t">
             Only partners are shown in investment totals, rankings and payer lists. Turning a partner off hides them — every amount they paid or were split into stays exactly as it is.
+            Removing someone only ends their sign-in: their payments, splits and investments keep counting.
           </p>
         </div>
       </div>
@@ -159,6 +199,9 @@ export default async function SettingsPage() {
           </form>
         )}
       </div>
+
+      </>
+      )}
 
       {/* AI assistant usage: administrators, when the assistant is configured */}
       {canManage && isAiEnabled() && (

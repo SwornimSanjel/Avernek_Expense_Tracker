@@ -1,6 +1,16 @@
+import { cache } from "react";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { one } from "@/lib/db";
+import {
+  FULL_ACCESS,
+  canView,
+  canViewExpenses,
+  firstAllowedHref,
+  resolveAccess,
+  type Access,
+  type SectionKey,
+} from "@/lib/access";
 import { isAuthBypassEnabled } from "./bypass";
 import {
   SESSION_COOKIE,
@@ -18,8 +28,24 @@ import {
  * matcher edit should never silently become a data leak.
  */
 
-/** The signed-in user, or null. */
-export async function getSession(): Promise<Session | null> {
+/** A signed-in person as the database sees them right now. */
+export type CurrentUser = Session & { access: Access };
+
+async function cookieSession(): Promise<Session | null> {
+  const store = await cookies();
+  return verifySession(store.get(SESSION_COOKIE)?.value);
+}
+
+/**
+ * The signed-in user, or null.
+ *
+ * The cookie proves who they are; the database says whether they still have
+ * access and what they may view. It is read on every request (once per
+ * request, through cache), so removing someone or changing what they see
+ * takes effect at once rather than when their seven-day cookie runs out. The
+ * admin flag comes from the database too, not from the cookie's copy.
+ */
+export const getSession = cache(async (): Promise<CurrentUser | null> => {
   if (isAuthBypassEnabled()) {
     const admin = await one<{
       id: string;
@@ -46,17 +72,66 @@ export async function getSession(): Promise<Session | null> {
       name: admin.name,
       isAdmin: true,
       exp: Math.floor(Date.now() / 1000) + SESSION_MAX_AGE_SECONDS,
+      access: FULL_ACCESS,
     };
   }
 
-  const store = await cookies();
-  return verifySession(store.get(SESSION_COOKIE)?.value);
+  const session = await cookieSession();
+  if (!session) return null;
+
+  const account = await readAccount(session.sub);
+  if (!account || account.removed_at) return null;
+
+  return {
+    ...session,
+    name: account.name,
+    email: account.email,
+    isAdmin: account.is_admin,
+    access: resolveAccess(account),
+  };
+});
+
+type Account = { name: string; email: string; is_admin: boolean; access: unknown; removed_at: string | null };
+
+/**
+ * access and removed_at are read through to_jsonb(u), which gives null for a
+ * column that does not exist yet. Deployed before
+ * db/migrations/20261030_user_access_and_safe_removal.sql, everyone simply
+ * keeps signing in as before (no view limits, no removals) instead of every
+ * page failing.
+ */
+function readAccount(id: string): Promise<Account | null> {
+  return one<Account>(
+    `select u.name, u.email, u.is_admin,
+            to_jsonb(u) -> 'access' as access,
+            to_jsonb(u) ->> 'removed_at' as removed_at
+       from public.users u
+      where u.id = $1`,
+    [id]
+  );
 }
 
 /** The signed-in user, or redirect to /login. */
-export async function requireSession(): Promise<Session> {
+export async function requireSession(): Promise<CurrentUser> {
   const session = await getSession();
-  if (!session) redirect("/login");
+  if (session) return session;
+  // A valid cookie for someone whose access was removed: clear it first, or
+  // the login page would send them straight back here.
+  if (await cookieSession()) redirect("/signed-out");
+  redirect("/login");
+}
+
+/** The signed-in user if they may view this page; otherwise their first page. */
+export async function requireSection(section: SectionKey): Promise<CurrentUser> {
+  const session = await requireSession();
+  if (!canView(session.access, section)) redirect(firstAllowedHref(session.access));
+  return session;
+}
+
+/** The signed-in user if they may view any expenses; otherwise their first page. */
+export async function requireExpenseAccess(): Promise<CurrentUser> {
+  const session = await requireSession();
+  if (!canViewExpenses(session.access)) redirect(firstAllowedHref(session.access));
   return session;
 }
 
@@ -66,7 +141,7 @@ export async function requireSession(): Promise<Session> {
  * Throws rather than redirects: this guards mutations, and a redirect would
  * make a rejected write look like it succeeded.
  */
-export async function requireAdmin(): Promise<Session> {
+export async function requireAdmin(): Promise<CurrentUser> {
   const session = await requireSession();
   if (!session.isAdmin) {
     throw new Error("Only an administrator can perform this action.");

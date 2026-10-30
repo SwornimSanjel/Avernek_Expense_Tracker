@@ -1,5 +1,5 @@
 import { query } from "@/lib/db";
-import { requireSession } from "@/lib/auth/server";
+import { requireSection } from "@/lib/auth/server";
 import { isAppOwner } from "@/lib/authz";
 import { Avatar, EmptyState, PageHeader } from "@/components/ui";
 import { LendMoney, MarkLoanRepaid, UndoLoanRepaid } from "@/components/LoanActions";
@@ -21,7 +21,7 @@ export const dynamic = "force-dynamic";
  * show what is really there) and returns when it is marked paid back.
  */
 export default async function LoansPage() {
-  const session = await requireSession();
+  const session = await requireSection("loans");
   const canManage = isAppOwner(session);
   const [ledger, people] = await Promise.all([
     loadLedger(),

@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { query } from "@/lib/db";
 import { getSession } from "@/lib/auth/server";
+import { canView } from "@/lib/access";
 import { resolvePeriod, type ExpenseSearch } from "@/lib/expense-filters";
 import { OTHER_INCOME_LABELS, PAYMENT_METHOD_LABELS } from "@/lib/income";
 import { accountLabel } from "@/lib/statement";
@@ -62,6 +63,13 @@ export async function GET(request: NextRequest) {
   if (!sp.period && !sp.month) sp.period = "all";
   const range = resolvePeriod(sp);
   const kind = sp.kind === "clients" || sp.kind === "other" ? sp.kind : "all";
+  // Client payments belong to the Income page; income without a client to
+  // either Income or Other income.
+  const allowed =
+    kind === "other"
+      ? canView(session.access, "income") || canView(session.access, "other_income")
+      : canView(session.access, "income");
+  if (!allowed) return new Response("Forbidden", { status: 403 });
   const between = (column: string) => {
     const conditions: string[] = [];
     const params: string[] = [];

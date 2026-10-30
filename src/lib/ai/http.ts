@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/server";
+import { hasEverything } from "@/lib/access";
 import { one } from "@/lib/db";
 import { todayIso } from "@/lib/income";
 import type { AgentDeps } from "./agent";
@@ -42,6 +43,8 @@ export async function guard(request: Request, { needsModel }: { needsModel: bool
     session.sub,
   ]);
   if (!user) return json({ error: "Your account no longer exists." }, 401);
+  // The assistant can read every table, so only people who may see everything get it.
+  if (!hasEverything(session.access)) return json({ error: "Ask AI is not available on your account." }, 403);
 
   const config = aiConfig();
   if (needsModel && !config) {

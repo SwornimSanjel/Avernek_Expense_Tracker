@@ -26,10 +26,11 @@ function n(v: FormDataEntryValue | null): number | null {
 }
 
 /**
- * "Do you have a bill?" from the expense form. A "yes" needs the bill number,
- * the seller's 9-digit PAN / VAT number and at least one photo (`photos`
- * counts the new uploads plus any already saved). New expenses must answer;
- * an older expense being edited may stay unanswered (null).
+ * "Do you have a bill?" from the expense form. A "yes" needs the bill number
+ * and at least one photo (`photos` counts the new uploads plus any already
+ * saved). The seller's PAN / VAT number is optional — many bills don't print
+ * one — but when given it must be 9 digits. New expenses must answer; an older
+ * expense being edited may stay unanswered (null).
  */
 function readBill(formData: FormData, photos: number, mustAnswer: boolean) {
   const answer = String(formData.get("has_bill") ?? "");
@@ -42,9 +43,9 @@ function readBill(formData: FormData, photos: number, mustAnswer: boolean) {
   const pan = String(formData.get("seller_pan") ?? "").replace(/[\s-]/g, "");
   if (!billNumber) throw new Error("Enter the bill number.");
   if (billNumber.length > 60) throw new Error("The bill number is too long.");
-  if (!/^\d{9}$/.test(pan)) throw new Error("The PAN / VAT number must be 9 digits.");
+  if (pan && !/^\d{9}$/.test(pan)) throw new Error("The PAN / VAT number must be 9 digits, or leave it empty.");
   if (photos < 1) throw new Error("Add a photo of the bill.");
-  return { has_bill: true, bill_number: billNumber, seller_pan: pan };
+  return { has_bill: true, bill_number: billNumber, seller_pan: pan || null };
 }
 
 /**

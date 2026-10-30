@@ -1,4 +1,4 @@
-import { requireSession } from "@/lib/auth/server";
+import { requireSection } from "@/lib/auth/server";
 import { isAppOwner } from "@/lib/authz";
 import { EmptyState, Kpi, Money, PageHeader } from "@/components/ui";
 import AddOtherIncome from "@/components/AddOtherIncome";
@@ -20,7 +20,7 @@ export const dynamic = "force-dynamic";
  * it counts in Income totals — it just has no billing schedule.
  */
 export default async function OtherIncomePage() {
-  const session = await requireSession();
+  const session = await requireSection("other_income");
   const canManage = isAppOwner(session);
   const { accounts: moneyAccounts, otherIncome } = await loadLedger();
   const accountById = new Map(moneyAccounts.map((account) => [account.id, account]));

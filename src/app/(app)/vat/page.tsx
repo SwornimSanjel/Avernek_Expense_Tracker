@@ -1,5 +1,5 @@
 import { query } from "@/lib/db";
-import { requireSession } from "@/lib/auth/server";
+import { requireSection } from "@/lib/auth/server";
 import { isAppOwner } from "@/lib/authz";
 import { EmptyState, PageHeader } from "@/components/ui";
 import PanelTabs from "@/components/PanelTabs";
@@ -43,7 +43,7 @@ type VatRow = {
  * the claimed VAT live on the Bills page.
  */
 export default async function VatPage() {
-  const session = await requireSession();
+  const session = await requireSection("vat");
   const canManage = isAppOwner(session);
   const [ledger, agreements, files, categories] = await Promise.all([
     loadLedger(),

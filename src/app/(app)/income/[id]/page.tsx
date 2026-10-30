@@ -1,7 +1,8 @@
 import Link from "@/components/AppLink";
 import { notFound } from "next/navigation";
 import { one, query } from "@/lib/db";
-import { requireSession } from "@/lib/auth/server";
+import { requireSection } from "@/lib/auth/server";
+import { canViewExpenses, ledgerOf } from "@/lib/access";
 import { isAppOwner } from "@/lib/authz";
 import { PageHeader } from "@/components/ui";
 import Icon from "@/components/Icons";
@@ -50,6 +51,7 @@ type ClientExpense = Expense & {
   category_name: string | null;
   vendor_name: string | null;
   money_account_name: string | null;
+  money_account_kind: string | null;
 };
 
 function dueTiming(date: string | null) {
@@ -66,7 +68,7 @@ export default async function ClientBillingPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const session = await requireSession();
+  const session = await requireSection("income");
   const canManage = isAppOwner(session);
   const today = todayIso();
 
@@ -76,7 +78,7 @@ export default async function ClientBillingPage({
   );
   if (!agreement) notFound();
 
-  const [payments, moneyAccounts, clientExpenses, agreementFiles, vatBills] = await Promise.all([
+  const [payments, moneyAccounts, allExpenses, agreementFiles, vatBills] = await Promise.all([
     query<IncomePayment>(
       `select * from public.income_payments
         where agreement_id = $1
@@ -87,7 +89,8 @@ export default async function ClientBillingPage({
       `select * from public.money_accounts where is_active = true order by currency, name`
     ),
     query<ClientExpense>(
-      `select e.*, c.name as category_name, v.name as vendor_name, ma.name as money_account_name
+      `select e.*, c.name as category_name, v.name as vendor_name, ma.name as money_account_name,
+              ma.kind as money_account_kind
          from public.expenses e
          left join public.categories c on c.id = e.category_id
          left join public.vendors v on v.id = e.vendor_id
@@ -111,6 +114,11 @@ export default async function ClientBillingPage({
       [id]
     ),
   ]);
+  // Only the kinds of expenses this person may see (lib/access.ts).
+  const visibleCosts = allExpenses.filter((expense) => {
+    const vat = new Set(expense.money_account_kind === "company_bank" && expense.money_account_id ? [expense.money_account_id] : []);
+    return session.access.expenses.includes(ledgerOf(expense, vat));
+  });
   const vatBillsByPayment = new Map<string, Attachment[]>();
   for (const bill of vatBills) {
     const list = vatBillsByPayment.get(bill.payment_id!) ?? [];
@@ -514,6 +522,7 @@ export default async function ClientBillingPage({
       </section>
 
       {/* ------------------------------------------------------- linked costs */}
+      {canViewExpenses(session.access) && (
       <section>
         <div className="billing-panel">
           <div className="billing-panel-head">
@@ -529,13 +538,13 @@ export default async function ClientBillingPage({
             </Link>
           </div>
           <div className="billing-panel-body">
-            {clientExpenses.length === 0 ? (
+            {visibleCosts.length === 0 ? (
               <p className="text-sm muted">
                 No expense is tagged with this client yet.
               </p>
             ) : (
               <div className="w-full space-y-2">
-                {clientExpenses.slice(0, 8).map((expense) => (
+                {visibleCosts.slice(0, 8).map((expense) => (
                   <div key={expense.id} className="flex items-center gap-3 text-sm">
                     <span className="min-w-0 flex-1 truncate">
                       {expense.note || expense.vendor_name || expense.category_name || "Client expense"}
@@ -551,6 +560,7 @@ export default async function ClientBillingPage({
           </div>
         </div>
       </section>
+      )}
 
       {agreement.notes && (
         <section>

@@ -1,4 +1,5 @@
 import { monthLabel, monthRange, nepalToday, shiftMonth } from "@/lib/dates";
+import { EXPENSE_LEDGERS, type ExpenseLedger } from "@/lib/access";
 
 /**
  * The expense filters as they live in the URL. One parser serves the page and
@@ -65,10 +66,36 @@ function shiftDay(date: string, days: number) {
 }
 
 /**
- * WHERE clause for public.expenses aliased as `e` (vendors `v`, categories `c`
- * joined). Every value goes through a $n placeholder.
+ * Which expenses a person may see: the kinds they are allowed, and the VAT
+ * accounts (money_accounts.kind = 'company_bank', active or not) that tell
+ * the VAT account apart from the personal / non-VAT ones. See lib/access.ts.
  */
-export function expenseWhere(sp: ExpenseSearch, accountIds: string[], today = nepalToday()) {
+export type ExpenseScope = { ledgers: ExpenseLedger[]; vatAccountIds: string[] };
+
+/**
+ * SQL condition limiting public.expenses `e` to a scope, or null when the scope
+ * is every kind. `push` adds a $n parameter.
+ */
+export function scopeCondition(scope: ExpenseScope | undefined, push: (value: unknown) => string): string | null {
+  if (!scope || EXPENSE_LEDGERS.every((ledger) => scope.ledgers.includes(ledger))) return null;
+  const parts: string[] = [];
+  if (scope.ledgers.includes("founder")) parts.push(`e.funding_source <> 'company_funds'`);
+  if (scope.ledgers.includes("vat") || scope.ledgers.includes("non_vat")) {
+    const vat = push(scope.vatAccountIds);
+    if (scope.ledgers.includes("vat")) parts.push(`(e.funding_source = 'company_funds' and e.money_account_id = any(${vat}::uuid[]))`);
+    if (scope.ledgers.includes("non_vat")) {
+      parts.push(`(e.funding_source = 'company_funds' and not coalesce(e.money_account_id = any(${vat}::uuid[]), false))`);
+    }
+  }
+  return parts.length ? `(${parts.join(" or ")})` : "false";
+}
+
+/**
+ * WHERE clause for public.expenses aliased as `e` (vendors `v`, categories `c`
+ * joined). Every value goes through a $n placeholder. `scope` limits it to
+ * the expenses the person may see.
+ */
+export function expenseWhere(sp: ExpenseSearch, accountIds: string[], today = nepalToday(), scope?: ExpenseScope) {
   const conditions: string[] = [];
   const params: unknown[] = [];
   const range = resolvePeriod(sp, today);
@@ -76,6 +103,9 @@ export function expenseWhere(sp: ExpenseSearch, accountIds: string[], today = ne
     params.push(value);
     return `$${params.length}`;
   };
+
+  const limited = scopeCondition(scope, push);
+  if (limited) conditions.push(limited);
 
   if (range.from) conditions.push(`e.expense_date >= ${push(range.from)}`);
   if (range.to) conditions.push(`e.expense_date <= ${push(range.to)}`);

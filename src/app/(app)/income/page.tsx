@@ -1,6 +1,7 @@
 import Link from "@/components/AppLink";
 import { query } from "@/lib/db";
-import { requireSession } from "@/lib/auth/server";
+import { requireSection } from "@/lib/auth/server";
+import { canView } from "@/lib/access";
 import { isAppOwner } from "@/lib/authz";
 import { Avatar, Delta, EmptyState, Kpi, Money, PageHeader, SectionHeader } from "@/components/ui";
 import Icon from "@/components/Icons";
@@ -55,7 +56,7 @@ export default async function IncomePage({
 }: {
   searchParams: Promise<Filters>;
 }) {
-  const session = await requireSession();
+  const session = await requireSection("income");
   const canManage = isAppOwner(session);
   const filters = await searchParams;
   const today = todayIso();
@@ -169,7 +170,7 @@ export default async function IncomePage({
         <Kpi label="Monthly recurring" icon="subscription" tone="blue" value={<Money value={recurring} />} foot={`${activeCount} active client${activeCount === 1 ? "" : "s"}`} />
       </div>
 
-      {otherIncome.length > 0 && (
+      {otherIncome.length > 0 && canView(session.access, "other_income") && (
         <Link href="/other-income" className="income-other-link mt-4">
           <Icon name="sparkles" size={16} />
           <span>

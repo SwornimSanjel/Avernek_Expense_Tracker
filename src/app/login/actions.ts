@@ -11,6 +11,7 @@ type UserRow = {
   email: string;
   password_hash: string | null;
   is_admin: boolean;
+  removed_at: string | null;
 };
 
 export type LoginState = { error: string | null };
@@ -37,8 +38,11 @@ export async function signIn(
   let user: UserRow | null;
   try {
     user = await one<UserRow>(
-      `select id, name, email, password_hash, is_admin
-         from public.users
+      // removed_at through to_jsonb(u): null, not an error, if the column
+      // does not exist yet (see readAccount in lib/auth/server.ts).
+      `select id, name, email, password_hash, is_admin,
+              to_jsonb(u) ->> 'removed_at' as removed_at
+         from public.users u
         where lower(email) = $1
         limit 1`,
       [email]
@@ -59,6 +63,10 @@ export async function signIn(
   // One message for both cases, for the same reason.
   if (!user || !valid) {
     return { error: "Incorrect email or password." };
+  }
+  // Said only after the password matched, so it reveals nothing to a guesser.
+  if (user.removed_at) {
+    return { error: "This account's access was removed. Ask an administrator." };
   }
 
   await setSessionCookie({

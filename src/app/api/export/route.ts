@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { query } from "@/lib/db";
 import { getSession } from "@/lib/auth/server";
+import { canViewExpenses } from "@/lib/access";
 import type { AppUser, Category, Expense, MoneyAccount, Vendor } from "@/lib/types";
 import { expenseWhere, type ExpenseSearch } from "@/lib/expense-filters";
 import { assignedShareNpr } from "@/lib/individual";
@@ -9,16 +10,21 @@ import { accountLabel } from "@/lib/statement";
 import { csvMoney, csvResponse, fileSlug, type CsvCell } from "@/lib/csv";
 
 // GET /api/export?<expense filters> -> expenses CSV, exactly what the Expenses
-// page shows, with plain column names and a total at the bottom.
+// page shows (only the kinds of expenses this person may see), with plain
+// column names and a total at the bottom.
 export async function GET(request: NextRequest) {
   const session = await getSession();
   if (!session) return new Response("Unauthorized", { status: 401 });
+  if (!canViewExpenses(session.access)) return new Response("Forbidden", { status: 403 });
 
   const sp = Object.fromEntries(request.nextUrl.searchParams.entries()) as ExpenseSearch;
   // An export link without filters keeps its old meaning: everything.
   if (![...request.nextUrl.searchParams.keys()].length) sp.period = "all";
-  const accountRows = await query<{ id: string }>(`select id from public.money_accounts`);
-  const { where, params, range } = expenseWhere(sp, accountRows.map((row) => row.id));
+  const accountRows = await query<{ id: string; kind: string }>(`select id, kind from public.money_accounts`);
+  const { where, params, range } = expenseWhere(sp, accountRows.map((row) => row.id), undefined, {
+    ledgers: session.access.expenses,
+    vatAccountIds: accountRows.filter((row) => row.kind === "company_bank").map((row) => row.id),
+  });
 
   const [expenses, shareRows, categories, vendors, users, accounts, billCounts] = await Promise.all([
     query<Expense>(

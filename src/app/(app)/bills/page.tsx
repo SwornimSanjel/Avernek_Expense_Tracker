@@ -1,6 +1,6 @@
 import Link from "@/components/AppLink";
 import { query } from "@/lib/db";
-import { requireSession } from "@/lib/auth/server";
+import { requireSection } from "@/lib/auth/server";
 import { isAppOwner } from "@/lib/authz";
 import { EmptyState, PageHeader } from "@/components/ui";
 import { AddCompanyBill, ConfirmDelete, ReimburseBill } from "@/components/VatBillsActions";
@@ -61,7 +61,7 @@ export default async function BillsPage({
 }: {
   searchParams: Promise<{ type?: string; vendor?: string }>;
 }) {
-  const session = await requireSession();
+  const session = await requireSection("bills");
   const canManage = isAppOwner(session);
   const filters = await searchParams;
   const [ledger, files, categories, people, receipts, linked, matchRows, copies, mergeRows] = await Promise.all([

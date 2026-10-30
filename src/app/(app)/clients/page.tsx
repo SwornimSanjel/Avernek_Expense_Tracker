@@ -6,7 +6,7 @@ import ClientStatusControl from "@/components/ClientStatusControl";
 import IncomeAgreementControls from "@/components/IncomeAgreementControls";
 import ClientRail, { type RailClient } from "@/components/ClientRail";
 import { Avatar, EmptyState, Kpi, Money, PageHeader, SectionHeader } from "@/components/ui";
-import { requireSession } from "@/lib/auth/server";
+import { requireSection } from "@/lib/auth/server";
 import { isAppOwner } from "@/lib/authz";
 import { query } from "@/lib/db";
 import ServiceBadges from "@/components/ServiceBadges";
@@ -65,7 +65,7 @@ export default async function ClientsPage({
 }: {
   searchParams: Promise<{ client?: string }>;
 }) {
-  const session = await requireSession();
+  const session = await requireSection("clients");
   const canManage = isAppOwner(session);
   const today = todayIso();
   const { client: selectedId } = await searchParams;

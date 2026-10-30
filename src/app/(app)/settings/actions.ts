@@ -5,6 +5,7 @@ import { exec, one } from "@/lib/db";
 import { requireSession } from "@/lib/auth/server";
 import { assertAppOwner } from "@/lib/authz";
 import { hashPassword, validatePassword } from "@/lib/auth/password";
+import { EXPENSE_LEDGERS, SECTIONS, storedAccess, type ExpenseLedger, type SectionKey } from "@/lib/access";
 
 /**
  * Every mutation re-checks admin rights. With the RLS policies gone these
@@ -200,4 +201,71 @@ export async function setMemberPassword(
     error: null,
     ok: `Password set. ${member.name} signs in as ${member.email}.`,
   };
+}
+
+/** Every page whose content depends on who is looking. */
+function revalidateAccess() {
+  revalidatePath("/", "layout");
+}
+
+/**
+ * What one person may view: the pages they may open and which kinds of
+ * expenses they see (lib/access.ts). Everything ticked is stored as null, the
+ * same as never having been limited. Administrators always see everything.
+ */
+export async function setMemberAccess(id: string, sections: string[], expenses: string[]): Promise<MemberState> {
+  await requireOwner();
+
+  const member = await one<{ name: string; is_admin: boolean }>(
+    `select name, is_admin from public.users where id = $1`,
+    [id]
+  );
+  if (!member) return { error: "That person no longer exists.", ok: null };
+  if (member.is_admin) return { error: "Administrators always see everything.", ok: null };
+
+  const pages = SECTIONS.map((section) => section.key).filter((key): key is SectionKey => sections.includes(key));
+  const ledgers = EXPENSE_LEDGERS.filter((key): key is ExpenseLedger => expenses.includes(key));
+  const access = storedAccess(pages, ledgers);
+
+  await exec(`update public.users set access = $1::jsonb where id = $2`, [access ? JSON.stringify(access) : null, id]);
+  revalidateAccess();
+  return { error: null, ok: `Saved. ${member.name} now sees only what is ticked.` };
+}
+
+/**
+ * Remove someone: they can no longer sign in, and an open session ends on its
+ * next page load. Nothing else changes — their row stays, so every expense
+ * they paid, every split, contribution and investment that names them still
+ * counts exactly as before. Deleting the row is refused by the database for
+ * anyone with history (db/migrations/20261030_user_access_and_safe_removal.sql).
+ */
+export async function removeMember(id: string): Promise<MemberState> {
+  const session = await requireOwner();
+  if (id === session.sub) return { error: "You cannot remove yourself.", ok: null };
+
+  const member = await one<{ name: string }>(
+    `update public.users set removed_at = coalesce(removed_at, now()) where id = $1 returning name`,
+    [id]
+  );
+  if (!member) return { error: "That person no longer exists.", ok: null };
+
+  revalidateAccess();
+  return {
+    error: null,
+    ok: `${member.name} can no longer sign in. Everything they paid, invested or were split into stays as it is.`,
+  };
+}
+
+/** Give a removed person their sign-in back, with the same password and view limits as before. */
+export async function restoreMember(id: string): Promise<MemberState> {
+  await requireOwner();
+
+  const member = await one<{ name: string }>(
+    `update public.users set removed_at = null where id = $1 returning name`,
+    [id]
+  );
+  if (!member) return { error: "That person no longer exists.", ok: null };
+
+  revalidateAccess();
+  return { error: null, ok: `${member.name} can sign in again.` };
 }

@@ -10,6 +10,7 @@ import Icon, { type IconName } from "@/components/Icons";
 import { LogoMark } from "@/components/Logo";
 import ThemeToggle from "@/components/ThemeToggle";
 import { displayName, initialsOf } from "@/lib/people";
+import { SECTIONS, canView, canViewExpenses, type Access } from "@/lib/access";
 
 type Item = { href: string; label: string; short: string; icon: IconName };
 
@@ -51,12 +52,21 @@ const groups: { label: string | null; items: Item[] }[] = [
 const activityItem: Item = { href: "/activity", label: "Activity log", short: "Activity", icon: "clock" };
 const settingsItem: Item = { href: "/settings", label: "Settings", short: "Settings", icon: "settings" };
 
-export default function Nav({ name, isAdmin }: { name: string; isAdmin: boolean }) {
+export default function Nav({ name, isAdmin, access }: { name: string; isAdmin: boolean; access: Access }) {
   const path = usePathname();
   const active = (href: string) => (href === "/" ? path === "/" : path.startsWith(href));
   const shown = displayName(name);
+  // Only the pages this person may open (see lib/access.ts).
+  const allowed = (item: Item) => {
+    if (item.href === "/expenses") return canViewExpenses(access);
+    const section = SECTIONS.find((entry) => entry.href === item.href);
+    return section ? canView(access, section.key) : true;
+  };
+  const visibleGroups = groups
+    .map((group) => ({ ...group, items: group.items.filter(allowed) }))
+    .filter((group) => group.items.length > 0);
   // The activity log is for administrators only.
-  const allItems = [...groups.flatMap((group) => group.items), ...(isAdmin ? [activityItem] : []), settingsItem];
+  const allItems = [...visibleGroups.flatMap((group) => group.items), ...(isAdmin ? [activityItem] : []), settingsItem];
   const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
@@ -111,7 +121,7 @@ export default function Nav({ name, isAdmin }: { name: string; isAdmin: boolean 
         </div>
 
         <nav className="sb-scroll">
-          {groups.map((group, index) => (
+          {visibleGroups.map((group, index) => (
             <div key={index} className="sb-group">
               {group.label && <div className="sb-group-label">{group.label}</div>}
               {group.items.map((item) => (

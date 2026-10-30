@@ -1,5 +1,5 @@
 import { query } from "@/lib/db";
-import { requireSession } from "@/lib/auth/server";
+import { requireSection } from "@/lib/auth/server";
 import { EmptyState, Kpi, Money, PageHeader } from "@/components/ui";
 import AddRecurring from "@/components/AddRecurring";
 import RecurringRow from "@/components/RecurringRow";
@@ -17,7 +17,7 @@ import { getCachedUsdSellRate } from "@/lib/fx";
 export const dynamic = "force-dynamic";
 
 export default async function SubscriptionsPage() {
-  const session = await requireSession();
+  const session = await requireSection("subscriptions");
   const canManage = isAppOwner(session);
   const today = nepalToday();
 

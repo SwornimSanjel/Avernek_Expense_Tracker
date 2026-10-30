@@ -1,5 +1,6 @@
 import Link from "@/components/AppLink";
 import { query } from "@/lib/db";
+import { requireSection } from "@/lib/auth/server";
 import { Avatar, Kpi, Money, PageHeader, SectionHeader } from "@/components/ui";
 import Icon from "@/components/Icons";
 import { formatNumber } from "@/lib/format";
@@ -11,6 +12,7 @@ import { monthLabel, nepalToday } from "@/lib/dates";
 export const dynamic = "force-dynamic";
 
 export default async function SettlementsPage() {
+  await requireSection("settlements");
   const today = nepalToday();
   const [users, exp, shareRows, categories] = await Promise.all([
     query<AppUser>(`select ${USER_COLUMNS} from public.users order by name`),

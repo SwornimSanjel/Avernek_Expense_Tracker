@@ -1,6 +1,6 @@
 import Link from "@/components/AppLink";
 import { one, query } from "@/lib/db";
-import { requireSession } from "@/lib/auth/server";
+import { requireSection } from "@/lib/auth/server";
 import { Avatar, Callout, Delta, Kpi, Money, PageHeader, SectionHeader } from "@/components/ui";
 import Icon from "@/components/Icons";
 import StatementView from "@/components/StatementView";
@@ -22,7 +22,7 @@ import { dayLabel, longDate, monthLabel, monthName, monthRange, nepalToday, shif
 export const dynamic = "force-dynamic";
 
 export default async function Dashboard() {
-  const session = await requireSession();
+  const session = await requireSection("overview");
   const today = nepalToday();
   const thisMonth = today.slice(0, 7);
   const lastMonth = shiftMonth(thisMonth, -1);
