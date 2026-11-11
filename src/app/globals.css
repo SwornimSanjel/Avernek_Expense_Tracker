@@ -1251,6 +1251,53 @@ section + section > .bills-month { border-top: 1px solid var(--line); }
 }
 .cycle-row + .cycle-row { border-top: 1px solid var(--line); }
 
+/* ----- monthly fee changes -------------------------------------------------------- */
+.fee-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+  padding: 8px 8px 8px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  font-size: 14px;
+  color: var(--muted);
+}
+.fee-line strong { margin-left: 4px; color: var(--ink); font-size: 15px; }
+.fee-preview {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  font-size: 14px;
+}
+.fee-preview strong { font-size: 16px; }
+.fee-history { border-top: 1px solid var(--line); }
+.fee-history-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 20px 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.fee-history-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 20px;
+  font-size: 14px;
+}
+.fee-history-row .fee-history-note { flex: 1; min-width: 0; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 .payment-table { border-top: 1px solid var(--line); }
 .payment-table-head,
 .payment-table-row {

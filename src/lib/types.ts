@@ -50,6 +50,17 @@ export type AutomationStatus =
 export type RecurringBillingMode = "combined" | "separate";
 /** Which recurring fee a payment settles. Combined = ads + automation as one. */
 export type BillingStream = "combined" | "ads" | "automation";
+
+/** One change to a client's monthly fee, effective from a billing month. */
+export interface RecurringFeeChange {
+  stream: BillingStream;
+  /** First billing month (its start date) charged at the new fee. */
+  from: string;
+  amount: number;
+  note: string | null;
+  /** The day the change was entered. */
+  changed_on: string;
+}
 export type SetupPaymentTerms = "full_upfront" | "half_advance" | "custom";
 export type IncomePaymentFor = "setup" | "recurring" | "website";
 export type IncomePaymentMethod =
@@ -265,8 +276,13 @@ export interface IncomeAgreement {
   automation_notes: string | null;
 
   recurring_billing_mode: RecurringBillingMode;
-  /** Combined-mode monthly fee. */
+  /** Combined-mode monthly fee — the STARTING fee, before any fee change. */
   recurring_amount: number;
+  /**
+   * "From this month the fee is X" — newest wins per stream. Months before a
+   * change keep their old price. Missing until the migration has run.
+   */
+  recurring_fee_changes?: RecurringFeeChange[] | null;
   recurring_billing_start_date: string | null;
   setup_covers_first_cycle: boolean;
   recurring_due_days_before: number;

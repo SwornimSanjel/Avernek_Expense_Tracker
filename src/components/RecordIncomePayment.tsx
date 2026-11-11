@@ -17,6 +17,7 @@ import {
 import { accountShortName } from "@/lib/funds";
 import type { IncomeAgreement, IncomePaymentFor, MoneyAccount } from "@/lib/types";
 import TaxBreakdownFields from "./TaxBreakdownFields";
+import ChangeMonthlyFee from "./ChangeMonthlyFee";
 import { VatBillDocuments } from "./DocumentSections";
 
 const initialState: IncomeFormState = { error: null, ok: null };
@@ -85,6 +86,7 @@ export default function RecordIncomePayment({
   );
   const [state, action, pending] = useActionState(guardRequest(recordIncomePayment), initialState);
   const [filesBusy, setFilesBusy] = useState(false);
+  const [feeOpen, setFeeOpen] = useState(false);
 
   const selectedPeriod = useMemo(
     () => activeStream?.periods.find((period) => period.periodStart === periodStart) ?? null,
@@ -154,25 +156,38 @@ export default function RecordIncomePayment({
         </div>
 
         {paymentFor === "recurring" && (
-          <label className="block">
-            <span className="field-label">Which month</span>
-            <select
-              name="billing_period_start"
-              value={periodStart}
-              onChange={(event) => setPeriodStart(event.target.value)}
-              required
-              className="input mt-1"
-            >
-              {(activeStream?.periods ?? []).map((period, index) => (
-                <option key={period.periodStart} value={period.periodStart}>
-                  Month {index + (agreement.setup_covers_first_cycle ? 2 : 1)} · {periodLabel(period)} ·{" "}
-                  {period.remaining > 0
-                    ? `${formatIncomeMoney(period.remaining, agreement.currency)} left`
-                    : "paid"}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div>
+            <label className="block">
+              <span className="field-label">Which month</span>
+              <select
+                name="billing_period_start"
+                value={periodStart}
+                onChange={(event) => setPeriodStart(event.target.value)}
+                required
+                className="input mt-1"
+              >
+                {(activeStream?.periods ?? []).map((period, index) => (
+                  <option key={period.periodStart} value={period.periodStart}>
+                    Month {index + (agreement.setup_covers_first_cycle ? 2 : 1)} · {periodLabel(period)} ·{" "}
+                    {period.remaining > 0
+                      ? `${formatIncomeMoney(period.remaining, agreement.currency)} left`
+                      : "paid"}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {selectedPeriod && (
+              <div className="fee-line">
+                <span>
+                  Fee for this month{" "}
+                  <strong className="tnum">{formatIncomeMoney(selectedPeriod.agreed, agreement.currency)}</strong>
+                </span>
+                <button type="button" onClick={() => setFeeOpen(true)} className="btn btn-sm">
+                  <Icon name="edit" size={14} /> Change fee
+                </button>
+              </div>
+            )}
+          </div>
         )}
 
         <div>
@@ -197,7 +212,7 @@ export default function RecordIncomePayment({
           <span className="field-label">3 · How much?</span>
           <div className="mt-2">
             <TaxBreakdownFields
-              key={`${paymentFor}-${periodStart}`}
+              key={`${paymentFor}-${periodStart}-${remaining}`}
               currency={agreement.currency}
               vatSuggested={account?.kind === "company_bank"}
               tdsSuggested={agreement.deducts_tds}
@@ -240,6 +255,18 @@ export default function RecordIncomePayment({
           {pending ? "Recording…" : filesBusy ? "Preparing photos…" : "Record payment"}
         </button>
       </form>
+      {activeStream && (
+        <ChangeMonthlyFee
+          agreementId={agreement.id}
+          clientName={agreement.client_name}
+          currency={agreement.currency}
+          stream={activeStream}
+          setupCoversFirstCycle={agreement.setup_covers_first_cycle}
+          defaultFrom={periodStart}
+          open={feeOpen}
+          onClose={() => setFeeOpen(false)}
+        />
+      )}
     </div>
   );
 }

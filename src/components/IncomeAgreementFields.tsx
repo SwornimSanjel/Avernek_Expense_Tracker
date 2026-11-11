@@ -14,6 +14,7 @@ import {
   WEBSITE_STATUS_LABELS,
   addCalendarDays,
   addCalendarMonths,
+  feeChangesFor,
   formatIncomeMoney,
   formatServiceDate,
   goLiveDate,
@@ -119,6 +120,8 @@ export default function IncomeAgreementFields({
   const [monthlyAmount, setMonthlyAmount] = useState(
     agreement && Number(agreement.recurring_amount) > 0 ? String(Number(agreement.recurring_amount)) : ""
   );
+  // Fee changes live on the client page; this box is the fee it started at.
+  const latestFeeChange = agreement ? feeChangesFor(agreement, "combined").at(-1) ?? null : null;
   const originalDayOne = agreement ? goLiveDate(agreement) ?? "" : "";
   const [dayOne, setDayOne] = useState(originalDayOne);
   const [websiteAmount, setWebsiteAmount] = useState(
@@ -318,7 +321,7 @@ export default function IncomeAgreementFields({
                   className="input tnum"
                 />
               </Field>
-              <Field label="Monthly fee · month 2 onwards">
+              <Field label={latestFeeChange ? "Starting monthly fee" : "Monthly fee · month 2 onwards"}>
                 <input
                   name="recurring_amount"
                   type="number"
@@ -329,6 +332,12 @@ export default function IncomeAgreementFields({
                   placeholder="0"
                   className="input tnum"
                 />
+                {latestFeeChange && (
+                  <p className="field-help">
+                    Now {formatIncomeMoney(latestFeeChange.amount, currency)} from{" "}
+                    {formatServiceDate(latestFeeChange.from)}. Use “Change fee” on the client page.
+                  </p>
+                )}
               </Field>
               <Field label="Day 1 · launched on">
                 <input

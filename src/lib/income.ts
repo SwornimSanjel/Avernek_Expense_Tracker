@@ -9,6 +9,7 @@ import type {
   IncomePaymentMethod,
   IncomeServiceType,
   OtherIncomeCategory,
+  RecurringFeeChange,
   ServiceKey,
   WebsiteStatus,
 } from "@/lib/types";
@@ -418,7 +419,14 @@ export type RecurringPeriod = {
 export type RecurringStreamSummary = {
   key: BillingStream;
   label: string;
+  /** The fee charged for the current month (after any fee change). */
   monthlyAmount: number;
+  /** The fee the contract started with, before any change. */
+  startingAmount: number;
+  /** Every fee change on this stream, oldest first. */
+  feeChanges: RecurringFeeChange[];
+  /** A change that has not reached the current month yet. */
+  nextFeeChange: RecurringFeeChange | null;
   /** The anchor every cycle counts from. Null until the admin sets it. */
   billingStartDate: string | null;
   started: boolean;
@@ -472,6 +480,51 @@ export type IncomeAgreementSummary = {
   unpaidWhenLeft: number;
 };
 
+/**
+ * The fee changes recorded for one stream, oldest first. Rows that do not
+ * parse are skipped rather than breaking every balance on the page.
+ */
+export function feeChangesFor(
+  agreement: Pick<IncomeAgreement, "recurring_fee_changes">,
+  stream: BillingStream
+): RecurringFeeChange[] {
+  const raw = Array.isArray(agreement.recurring_fee_changes) ? agreement.recurring_fee_changes : [];
+  return raw
+    .filter(
+      (change) =>
+        change &&
+        (change.stream ?? "combined") === stream &&
+        isValidDate(change.from) &&
+        Number.isFinite(Number(change.amount)) &&
+        Number(change.amount) >= 0
+    )
+    .map((change) => ({
+      stream,
+      from: change.from,
+      amount: Number(change.amount),
+      note: change.note ?? null,
+      changed_on: change.changed_on ?? change.from,
+    }))
+    .sort((a, b) => a.from.localeCompare(b.from));
+}
+
+/**
+ * The fee for the billing month starting on `periodStart`: the latest change
+ * that has started by then, otherwise the starting fee.
+ */
+export function feeForPeriod(
+  startingAmount: number,
+  changes: RecurringFeeChange[],
+  periodStart: string
+): number {
+  let fee = startingAmount;
+  for (const change of changes) {
+    if (change.from <= periodStart) fee = change.amount;
+    else break;
+  }
+  return fee;
+}
+
 function streamLabel(key: BillingStream): string {
   if (key === "ads") return "Ads / Marketing";
   if (key === "automation") return "AI Automation";
@@ -494,12 +547,13 @@ function streamLabel(key: BillingStream): string {
  */
 function summarizeStream(
   key: BillingStream,
-  monthlyAmount: number,
+  startingAmount: number,
   billingStartDate: string | null,
   agreement: IncomeAgreement,
   payments: IncomePayment[],
   today: string
 ): RecurringStreamSummary {
+  const feeChanges = feeChangesFor(agreement, key);
   const streamPayments = payments.filter(
     (payment) =>
       payment.payment_for === "recurring" &&
@@ -522,7 +576,10 @@ function summarizeStream(
     return {
       key,
       label: streamLabel(key),
-      monthlyAmount,
+      monthlyAmount: startingAmount,
+      startingAmount,
+      feeChanges,
+      nextFeeChange: null,
       billingStartDate: null,
       started: false,
       currentPeriodStart: null,
@@ -578,16 +635,17 @@ function summarizeStream(
     if (!isDue && periodStart > latestPaidPeriod) upcomingIncluded += 1;
 
     const periodPaid = paidByPeriod.get(periodStart) ?? 0;
+    const periodFee = feeForPeriod(startingAmount, feeChanges, periodStart);
     periods.push({
       stream: key,
       periodStart,
       periodEnd: addCalendarDays(addCalendarMonths(periodStart, 1), -1),
       dueDate,
-      agreed: monthlyAmount,
+      agreed: periodFee,
       paid: periodPaid,
-      remaining: Math.max(0, monthlyAmount - periodPaid),
+      remaining: Math.max(0, periodFee - periodPaid),
       isDue,
-      status: billingStatus(monthlyAmount, periodPaid, dueDate, today),
+      status: billingStatus(periodFee, periodPaid, dueDate, today),
     });
 
     const stoppedBilling =
@@ -599,11 +657,16 @@ function summarizeStream(
   }
 
   const duePeriods = periods.filter((period) => period.isDue && period.remaining > 0);
+  // "The fee now" is the one for today's month (or Day 1 before launch).
+  const feeReference = currentPeriodStart ?? anchor;
 
   return {
     key,
     label: streamLabel(key),
-    monthlyAmount,
+    monthlyAmount: feeForPeriod(startingAmount, feeChanges, feeReference),
+    startingAmount,
+    feeChanges,
+    nextFeeChange: feeChanges.find((change) => change.from > feeReference) ?? null,
     billingStartDate: anchor,
     started,
     currentPeriodStart,

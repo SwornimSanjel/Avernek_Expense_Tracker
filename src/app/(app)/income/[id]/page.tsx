@@ -15,6 +15,7 @@ import DeleteIncomePayment from "@/components/DeleteIncomePayment";
 import BulkSelect, { SelectBox, SelectToggle } from "@/components/BulkSelect";
 import { deleteIncomePayments } from "../actions";
 import MarkServiceLive from "@/components/MarkServiceLive";
+import ChangeMonthlyFee, { UndoFeeChange } from "@/components/ChangeMonthlyFee";
 import AgreementUploadPanel from "@/components/AgreementUploadPanel";
 import ClientVatBillsPanel from "@/components/ClientVatBillsPanel";
 import { ATTACHMENT_COLUMNS, attachmentUrl, type Attachment } from "@/lib/attachments";
@@ -297,7 +298,7 @@ export default async function ClientBillingPage({
                   ...(monthly
                     ? [
                         { label: "Setup · month 1", amount: Number(agreement.setup_amount) },
-                        { label: "Monthly fee", amount: Number(agreement.recurring_amount) },
+                        { label: "Monthly fee", amount: summary.recurring.monthlyTotal },
                       ]
                     : []),
                   ...(agreement.has_website ? [{ label: "Website", amount: Number(agreement.website_amount) }] : []),
@@ -394,6 +395,9 @@ export default async function ClientBillingPage({
                   currency={currency}
                   showLabel={summary.recurring.streams.length > 1}
                   setupCoversFirstCycle={agreement.setup_covers_first_cycle}
+                  agreementId={agreement.id}
+                  clientName={agreement.client_name}
+                  canManage={canManage}
                 />
               ))
             )}
@@ -637,19 +641,37 @@ function StreamBlock({
   currency,
   showLabel,
   setupCoversFirstCycle,
+  agreementId,
+  clientName,
+  canManage,
 }: {
   stream: RecurringStreamSummary;
   currency: string;
   showLabel: boolean;
   setupCoversFirstCycle: boolean;
+  agreementId: string;
+  clientName: string;
+  canManage: boolean;
 }) {
   const recent = [...stream.periods].filter((period) => period.isDue).slice(-4).reverse();
   const upcoming = stream.periods.filter((period) => !period.isDue).slice(0, 2);
+  const feeSub = stream.nextFeeChange
+    ? `${formatIncomeMoney(stream.nextFeeChange.amount, currency)} from ${formatServiceDate(stream.nextFeeChange.from)}`
+    : stream.feeChanges.length > 0
+      ? `Started at ${formatIncomeMoney(stream.startingAmount, currency)}`
+      : undefined;
+  // Each change, with the fee it replaced, newest first.
+  const history = stream.feeChanges
+    .map((change, index) => ({
+      change,
+      previous: index === 0 ? stream.startingAmount : stream.feeChanges[index - 1].amount,
+    }))
+    .reverse();
   return (
     <div className="stream-block">
       {showLabel && <div className="stream-block-title">{stream.label}</div>}
       <div className="billing-panel-body !border-t-0">
-        <Fact label="Monthly fee" value={formatIncomeMoney(stream.monthlyAmount, currency)} />
+        <Fact label="Monthly fee" value={formatIncomeMoney(stream.monthlyAmount, currency)} sub={feeSub} />
         <Fact
           label="Day 1"
           value={formatServiceDate(stream.billingStartDate, "Not launched")}
@@ -680,6 +702,46 @@ function StreamBlock({
           tone="var(--green)"
         />
       </div>
+
+      {(canManage || history.length > 0) && stream.periods.length > 0 && (
+        <div className="fee-history">
+          <div className="fee-history-head">
+            <span>{history.length > 0 ? "Fee changes" : "Fee lowered or raised?"}</span>
+            {canManage && (
+              <ChangeMonthlyFee
+                agreementId={agreementId}
+                clientName={clientName}
+                currency={currency}
+                stream={stream}
+                setupCoversFirstCycle={setupCoversFirstCycle}
+              />
+            )}
+          </div>
+          {history.length === 0 ? (
+            <p className="px-5 pb-3 text-[13px] muted">Set a new fee from any month — earlier months keep their price.</p>
+          ) : (
+            history.map(({ change, previous }) => (
+              <div key={change.from} className="fee-history-row">
+                <span className="tnum whitespace-nowrap">
+                  {formatIncomeMoney(previous, currency)} → <strong>{formatIncomeMoney(change.amount, currency)}</strong>
+                </span>
+                <span className="fee-history-note">
+                  from {formatServiceDate(change.from)}
+                  {change.note ? ` · ${change.note}` : ""}
+                </span>
+                {canManage && (
+                  <UndoFeeChange
+                    agreementId={agreementId}
+                    stream={stream.key}
+                    from={change.from}
+                    label={formatServiceDate(change.from)}
+                  />
+                )}
+              </div>
+            ))
+          )}
+        </div>
+      )}
 
       {(recent.length > 0 || upcoming.length > 0) && (
         <div className="cycle-list">

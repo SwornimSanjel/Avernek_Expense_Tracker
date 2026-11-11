@@ -14,7 +14,16 @@ import {
   type AttachmentOwner,
   type FileUpload,
 } from "@/lib/attachments.server";
-import { addCalendarDays, addCalendarMonths, isValidDate, legacyServiceType, todayIso } from "@/lib/income";
+import {
+  addCalendarDays,
+  addCalendarMonths,
+  feeChangesFor,
+  feeForPeriod,
+  formatServiceDate,
+  isValidDate,
+  legacyServiceType,
+  todayIso,
+} from "@/lib/income";
 import type {
   AdsStatus,
   AutomationStatus,
@@ -26,6 +35,7 @@ import type {
   IncomePaymentMethod,
   OtherIncomeCategory,
   RecurringBillingMode,
+  RecurringFeeChange,
   WebsiteStatus,
 } from "@/lib/types";
 
@@ -761,6 +771,199 @@ export async function deleteIncomeAgreement(id: string) {
 }
 
 // -----------------------------------------------------------------------------
+// Monthly fee changes
+// -----------------------------------------------------------------------------
+
+type FeeAmounts = {
+  recurring_amount: number | string;
+  ads_monthly_amount: number | string | null;
+  automation_monthly_amount: number | string | null;
+};
+
+/** The fee a stream started with, before any change. */
+function startingFee(agreement: FeeAmounts, key: BillingStream) {
+  return key === "ads"
+    ? Number(agreement.ads_monthly_amount ?? agreement.recurring_amount)
+    : key === "automation"
+      ? Number(agreement.automation_monthly_amount ?? agreement.recurring_amount)
+      : Number(agreement.recurring_amount);
+}
+
+/**
+ * Set (or with `amount: null`, remove) the monthly fee from one billing month
+ * onwards. Earlier months keep their price. Refused when a month the change
+ * reaches already holds more money than its new fee, so no payment is ever
+ * left pointing at a month it overpays.
+ */
+async function applyFeeChange(input: {
+  agreementId: string;
+  stream: string;
+  from: string;
+  amount: number | null;
+  note: string | null;
+}): Promise<IncomeFormState> {
+  if (!input.agreementId) return { error: "Client not found.", ok: null };
+  if (!isValidDate(input.from)) return { error: "Choose the month the new fee starts.", ok: null };
+
+  return transaction(async (client) => {
+    const { rows } = await client.query<
+      FeeAmounts & {
+        client_name: string;
+        currency: Currency;
+        has_ads: boolean;
+        has_automation: boolean;
+        recurring_billing_mode: RecurringBillingMode;
+        recurring_billing_start_date: string | null;
+        ads_billing_start_date: string | null;
+        automation_billing_start_date: string | null;
+        setup_covers_first_cycle: boolean;
+        recurring_fee_changes: RecurringFeeChange[] | null;
+      }
+    >(
+      `select client_name, currency, has_ads, has_automation, recurring_billing_mode,
+              recurring_amount, ads_monthly_amount, automation_monthly_amount,
+              recurring_billing_start_date, ads_billing_start_date, automation_billing_start_date,
+              setup_covers_first_cycle, recurring_fee_changes
+         from public.income_agreements where id = $1 for update`,
+      [input.agreementId]
+    );
+    const agreement = rows[0];
+    if (!agreement) return { error: "Client no longer exists.", ok: null };
+    if (!agreement.has_ads && !agreement.has_automation) {
+      return { error: "This client has no monthly service.", ok: null };
+    }
+
+    const separate = agreement.recurring_billing_mode === "separate";
+    const stream = (separate ? input.stream : "combined") as BillingStream;
+    if (
+      separate &&
+      !((stream === "ads" && agreement.has_ads) || (stream === "automation" && agreement.has_automation))
+    ) {
+      return { error: "Choose whether the fee change is for ads or AI automation.", ok: null };
+    }
+    const anchor = separate
+      ? (stream === "ads" ? agreement.ads_billing_start_date : agreement.automation_billing_start_date) ??
+        agreement.recurring_billing_start_date
+      : agreement.recurring_billing_start_date;
+    if (!isValidDate(anchor)) {
+      return { error: "Set Day 1 (launch date) first — the monthly fee starts from it.", ok: null };
+    }
+    const base = startingFee(agreement, stream);
+    const before = feeChangesFor(agreement, stream);
+    const existingChange = before.find((change) => change.from === input.from);
+    if (
+      !existingChange &&
+      !isAnchoredPeriod(anchor, input.from, agreement.setup_covers_first_cycle ? 1 : 0)
+    ) {
+      return { error: "Pick one of the billing months in the list.", ok: null };
+    }
+
+    const others = before.filter((change) => change.from !== input.from);
+    const inherited = feeForPeriod(base, others, input.from);
+    const when = formatServiceDate(input.from);
+
+    let after: RecurringFeeChange[];
+    if (input.amount == null) {
+      if (!existingChange) return { error: "That fee change was already removed.", ok: null };
+      after = others;
+    } else if (Math.abs(input.amount - inherited) < 0.005) {
+      // Same as the fee already running into that month: nothing to record.
+      if (!existingChange) {
+        return { error: `The fee from ${when} is already ${money(inherited, agreement.currency)}.`, ok: null };
+      }
+      after = others;
+    } else {
+      after = [
+        ...others,
+        {
+          stream,
+          from: input.from,
+          amount: input.amount,
+          note: input.note,
+          changed_on: todayIso(),
+        },
+      ].sort((a, b) => a.from.localeCompare(b.from));
+    }
+
+    // No month may end up holding more money than its (new) fee.
+    const paidRows = await client.query<{ period: string; paid: string }>(
+      `select billing_period_start as period, sum(amount) as paid
+         from public.income_payments
+        where agreement_id = $1 and payment_for = 'recurring'
+          and coalesce(billing_stream, 'combined') = $2
+          and billing_period_start is not null
+        group by billing_period_start
+        order by billing_period_start`,
+      [input.agreementId, stream]
+    );
+    for (const row of paidRows.rows) {
+      const paid = Number(row.paid);
+      const oldFee = feeForPeriod(base, before, row.period);
+      const newFee = feeForPeriod(base, after, row.period);
+      if (newFee < oldFee - 0.005 && paid > newFee + 0.005) {
+        return {
+          error: `The month from ${formatServiceDate(row.period)} already has ${money(paid, agreement.currency)} paid — more than ${money(newFee, agreement.currency)}. Start the new fee from a later month, or correct that payment first.`,
+          ok: null,
+        };
+      }
+    }
+
+    // Keep the other streams' changes exactly as they were.
+    const untouched = (Array.isArray(agreement.recurring_fee_changes) ? agreement.recurring_fee_changes : []).filter(
+      (change) => (change?.stream ?? "combined") !== stream
+    );
+    await client.query(
+      `update public.income_agreements
+          set recurring_fee_changes = $1::jsonb, updated_at = now()
+        where id = $2`,
+      [JSON.stringify([...untouched, ...after]), input.agreementId]
+    );
+
+    const nowFee = feeForPeriod(base, after, input.from);
+    return {
+      error: null,
+      ok:
+        input.amount == null || after.length < before.length
+          ? `Fee change removed. From ${when} the fee is ${money(nowFee, agreement.currency)} again.`
+          : `Monthly fee is now ${money(nowFee, agreement.currency)} from ${when}.`,
+    };
+  });
+}
+
+async function changeMonthlyFeeUnguarded(
+  _previous: IncomeFormState,
+  formData: FormData
+): Promise<IncomeFormState> {
+  await requireIncomeAdmin();
+  const amount = optionalAmount(formData, "amount");
+  if (amount === null) return { error: "Enter the new monthly fee.", ok: null };
+  if (amount === undefined) return { error: "The monthly fee must be zero or more.", ok: null };
+  const result = await applyFeeChange({
+    agreementId: stringValue(formData, "agreement_id"),
+    stream: stringValue(formData, "billing_stream"),
+    from: stringValue(formData, "from"),
+    amount,
+    note: stringValue(formData, "note").slice(0, 200) || null,
+  });
+  if (result.ok) revalidateIncome();
+  return result;
+}
+
+/** Undo one fee change: that month and later go back to the earlier fee. */
+export async function removeMonthlyFeeChange(
+  agreementId: string,
+  stream: BillingStream,
+  from: string
+): Promise<IncomeFormState> {
+  return guardSave(async () => {
+    await requireIncomeAdmin();
+    const result = await applyFeeChange({ agreementId, stream, from, amount: null, note: null });
+    if (result.ok) revalidateIncome();
+    return result;
+  });
+}
+
+// -----------------------------------------------------------------------------
 // Payments
 // -----------------------------------------------------------------------------
 
@@ -806,13 +1009,14 @@ async function resolvePaymentTarget(
     ads_billing_start_date: string | null;
     automation_billing_start_date: string | null;
     setup_covers_first_cycle: boolean;
+    recurring_fee_changes: RecurringFeeChange[] | null;
   }>(
     `select client_name, currency, has_website, has_ads, has_automation,
             setup_amount, website_amount, recurring_amount,
             ads_monthly_amount, automation_monthly_amount,
             recurring_billing_mode, recurring_billing_start_date,
             ads_billing_start_date, automation_billing_start_date,
-            setup_covers_first_cycle
+            setup_covers_first_cycle, recurring_fee_changes
        from public.income_agreements where id = $1`,
     [agreementId]
   );
@@ -853,12 +1057,10 @@ async function resolvePaymentTarget(
 
   const separate = agreement.recurring_billing_mode === "separate";
   const stream = (streamInput || (separate ? "" : "combined")) as BillingStream;
-  const monthlyFor = (key: BillingStream) =>
-    key === "ads"
-      ? Number(agreement.ads_monthly_amount ?? agreement.recurring_amount)
-      : key === "automation"
-        ? Number(agreement.automation_monthly_amount ?? agreement.recurring_amount)
-        : Number(agreement.recurring_amount);
+  // Each month is capped at its own fee: a fee change only moves the months
+  // from the day it starts.
+  const monthlyFor = (key: BillingStream, period: string) =>
+    feeForPeriod(startingFee(agreement, key), feeChangesFor(agreement, key), period);
 
   const streamIsBilled = separate
     ? (stream === "ads" && agreement.has_ads) ||
@@ -916,7 +1118,7 @@ async function resolvePaymentTarget(
           paymentFor,
           period: existing.period,
           stream: existing.stream ?? stream,
-          agreed: monthlyFor(stream),
+          agreed: monthlyFor(stream, existing.period),
         },
       };
     }
@@ -924,7 +1126,7 @@ async function resolvePaymentTarget(
   }
 
   return {
-    target: { ...base, paymentFor, period: periodInput, stream, agreed: monthlyFor(stream) },
+    target: { ...base, paymentFor, period: periodInput, stream, agreed: monthlyFor(stream, periodInput) },
   };
 }
 
@@ -1330,4 +1532,8 @@ export async function recordIncomePayment(previous: IncomeFormState, formData: F
 
 export async function updateIncomePayment(previous: IncomeFormState, formData: FormData): Promise<IncomeFormState> {
   return guardSave(() => updateIncomePaymentUnguarded(previous, formData));
+}
+
+export async function changeMonthlyFee(previous: IncomeFormState, formData: FormData): Promise<IncomeFormState> {
+  return guardSave(() => changeMonthlyFeeUnguarded(previous, formData));
 }
