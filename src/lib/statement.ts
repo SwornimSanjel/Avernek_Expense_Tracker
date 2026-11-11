@@ -2,7 +2,7 @@ import type { Ledger } from "@/lib/ledger";
 import { expenseAmountFromAccount } from "@/lib/funds";
 import { CAPITAL_INFLOW_LABELS, OTHER_INCOME_LABELS } from "@/lib/income";
 import { bankAmount } from "@/lib/tax";
-import type { Expense, MoneyAccount } from "@/lib/types";
+import type { CapitalInflow, Expense, MoneyAccount, OtherIncome } from "@/lib/types";
 
 /**
  * One line on a bank-style statement. Every movement of money — a client
@@ -45,6 +45,8 @@ export type StatementEvent = {
   /** Transfers between two company accounts cancel out on an all-accounts view. */
   internal?: boolean;
   href?: string;
+  /** The stored row, for lines that can be edited or deleted right on the statement. */
+  record?: { kind: "capital"; row: CapitalInflow } | { kind: "other_income"; row: OtherIncome };
 };
 
 export type StatementAccount = {
@@ -130,6 +132,7 @@ export function buildStatementEvents({
       currency: accountById.get(row.money_account_id)?.currency ?? "NPR",
       vat: Number(row.vat_amount ?? 0),
       client: row.source_name,
+      record: { kind: "other_income", row },
     });
   }
 
@@ -145,6 +148,7 @@ export function buildStatementEvents({
       detail: `${inflow.source_name ? `From ${inflow.source_name} · ` : ""}Not revenue`,
       amount: Number(inflow.amount),
       currency: accountById.get(inflow.money_account_id)?.currency ?? "NPR",
+      record: { kind: "capital", row: inflow },
     });
   }
 

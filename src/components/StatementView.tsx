@@ -4,11 +4,14 @@ import { useMemo, useState } from "react";
 import Link from "@/components/AppLink";
 import Icon, { type IconName } from "@/components/Icons";
 import { Money } from "@/components/ui";
+import AddAccountFunds from "@/components/AddAccountFunds";
+import AddOtherIncome from "@/components/AddOtherIncome";
 import { Segmented, Tabs } from "@/components/controls";
 import PeriodPicker, { describePeriod, initialPeriod, periodRange, type Period } from "@/components/PeriodPicker";
 import { dayLabel, monthLabel, monthRange } from "@/lib/dates";
 import { formatNumber } from "@/lib/format";
 import type { StatementAccount, StatementEvent, StatementKind } from "@/lib/statement";
+import type { MoneyAccount } from "@/lib/types";
 
 const KIND_META: Record<StatementKind, { icon: IconName; tone: string; soft: string; label: string }> = {
   client: { icon: "income", tone: "var(--green)", soft: "var(--green-soft)", label: "Client payment" },
@@ -32,10 +35,13 @@ export default function StatementView({
   scope = "all",
   initialAccount = "all",
   compact = false,
+  moneyAccounts,
 }: {
   events: StatementEvent[];
   accounts: StatementAccount[];
   today: string;
+  /** Pass to let the owner edit or delete capital and other-income lines in place. */
+  moneyAccounts?: MoneyAccount[];
   /** "company" hides the founder ledger (Company money page). */
   scope?: "all" | "company";
   initialAccount?: string;
@@ -380,6 +386,18 @@ export default function StatementView({
                       </div>
                     </>
                   );
+                  if (moneyAccounts && event.record) {
+                    return (
+                      <div key={event.id} className="row-item">
+                        {body}
+                        {event.record.kind === "capital" ? (
+                          <AddAccountFunds accounts={moneyAccounts} record={event.record.row} />
+                        ) : (
+                          <AddOtherIncome accounts={moneyAccounts} record={event.record.row} />
+                        )}
+                      </div>
+                    );
+                  }
                   return event.href ? (
                     <Link key={event.id} href={event.href} className="row-item">{body}</Link>
                   ) : (

@@ -107,7 +107,13 @@ export default async function FundsPage() {
           title="Activity"
           subtitle="Pick a month or any dates. Each line shows the balance after it, like a bank statement."
         />
-        <StatementView events={events} accounts={accounts} today={today} scope="company" />
+        <StatementView
+          events={events}
+          accounts={accounts}
+          today={today}
+          scope="company"
+          moneyAccounts={canManage ? ledger.accounts : undefined}
+        />
       </section>
     </>
   );

@@ -1,4 +1,5 @@
 import { requireSection } from "@/lib/auth/server";
+import { isAppOwner } from "@/lib/authz";
 import { Kpi, Money, PageHeader } from "@/components/ui";
 import StatementView from "@/components/StatementView";
 import { loadStatement } from "@/lib/statement-data";
@@ -8,7 +9,7 @@ import { formatNumber } from "@/lib/format";
 export const dynamic = "force-dynamic";
 
 export default async function StatementPage() {
-  await requireSection("statement");
+  const session = await requireSection("statement");
   const today = nepalToday();
   const { events, accounts, ledger } = await loadStatement();
   const held = ledger.balances.reduce((total, item) => total + item.balance, 0);
@@ -30,7 +31,12 @@ export default async function StatementPage() {
         <Kpi label="Lent out" icon="arrowUpRight" tone="blue" value={<Money value={openLoans} />} foot={openLoans > 0 ? `Not paid back yet` : "No open loans"} />
       </div>
 
-      <StatementView events={events} accounts={accounts} today={today} />
+      <StatementView
+        events={events}
+        accounts={accounts}
+        today={today}
+        moneyAccounts={isAppOwner(session) ? ledger.accounts : undefined}
+      />
       <p className="mt-3 text-[13px] muted">
         Founder-paid expenses show on the statement but never change an account balance. Moving money between the VAT and
         non-VAT accounts is shown on both sides and nets to zero on “All”. Totals use NPR {formatNumber(1)} = NPR 1; USD bills
