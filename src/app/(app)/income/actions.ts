@@ -1160,12 +1160,14 @@ async function recordIncomePaymentUnguarded(
   const paymentFor = stringValue(formData, "payment_for") as IncomePaymentFor;
   const amount = Number(formData.get("amount"));
   const paidOn = stringValue(formData, "paid_on");
+  const dueOn = optionalDate(formData, "due_on");
   const moneyAccountId = stringValue(formData, "money_account_id");
   const method = stringValue(formData, "method") as IncomePaymentMethod | "";
   const reference = stringValue(formData, "reference") || null;
   const note = stringValue(formData, "note") || null;
 
   if (!agreementId) return { error: "Agreement not found.", ok: null };
+  if (stringValue(formData, "due_on") && !dueOn) return { error: "Enter a real due date, or leave it empty.", ok: null };
   if (!(["setup", "recurring", "website"] as string[]).includes(paymentFor)) {
     return { error: "Choose what this payment is for.", ok: null };
   }
@@ -1219,8 +1221,8 @@ async function recordIncomePaymentUnguarded(
     `insert into public.income_payments
        (agreement_id, payment_for, billing_period_start, billing_stream, amount, vat_amount,
         tds_amount, paid_on, received_in, money_account_id, account_name, method, reference,
-        note, recorded_by)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+        note, recorded_by, due_on)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
      returning id`,
     [
       agreementId,
@@ -1238,6 +1240,7 @@ async function recordIncomePaymentUnguarded(
       reference,
       note,
       session.sub,
+      dueOn,
     ]
     );
     await insertAttachments(
@@ -1260,12 +1263,14 @@ async function updateIncomePaymentUnguarded(
   const paymentId = stringValue(formData, "payment_id");
   const amount = Number(formData.get("amount"));
   const paidOn = stringValue(formData, "paid_on");
+  const dueOn = optionalDate(formData, "due_on");
   const moneyAccountId = stringValue(formData, "money_account_id");
   const method = stringValue(formData, "method") as IncomePaymentMethod | "";
   const reference = stringValue(formData, "reference") || null;
   const note = stringValue(formData, "note") || null;
 
   if (!paymentId) return { error: "Payment not found.", ok: null };
+  if (stringValue(formData, "due_on") && !dueOn) return { error: "Enter a real due date, or leave it empty.", ok: null };
   if (!Number.isFinite(amount) || amount <= 0) {
     return { error: "The payment amount must be greater than zero.", ok: null };
   }
@@ -1334,6 +1339,7 @@ async function updateIncomePaymentUnguarded(
         set amount = $1, paid_on = $2, received_in = $3, money_account_id = $4,
             account_name = $5, method = $6, reference = $7, note = $8,
             billing_period_start = $9, updated_by = $10, vat_amount = $12, tds_amount = $13,
+            due_on = case when $14::boolean then $15::date else due_on end,
             updated_at = now()
       where id = $11`,
     [
@@ -1350,6 +1356,9 @@ async function updateIncomePaymentUnguarded(
       paymentId,
       tax.vat,
       tax.tds,
+      // Only forms that show the due date may change it (the AI edit does not).
+      formData.has("due_on"),
+      dueOn,
     ]
     );
     if (!result.rowCount) return 0;

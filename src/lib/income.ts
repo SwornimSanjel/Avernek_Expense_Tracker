@@ -570,6 +570,14 @@ function summarizeStream(
   }
   const lastPaymentDate =
     streamPayments.map((payment) => payment.paid_on).sort().at(-1) ?? null;
+  // A due date typed on a payment replaces that month's calendar due date
+  // (the earliest one wins when several payments carry one).
+  const dueByPeriod = new Map<string, string>();
+  for (const payment of streamPayments) {
+    if (!payment.billing_period_start || !isValidDate(payment.due_on)) continue;
+    const current = dueByPeriod.get(payment.billing_period_start);
+    if (!current || payment.due_on < current) dueByPeriod.set(payment.billing_period_start, payment.due_on);
+  }
 
   const anchor = isValidDate(billingStartDate) ? billingStartDate : null;
   if (!anchor) {
@@ -630,7 +638,9 @@ function summarizeStream(
     ) {
       break;
     }
-    const dueDate = dueDaysBefore > 0 ? addCalendarDays(periodStart, -dueDaysBefore) : periodStart;
+    const dueDate =
+      dueByPeriod.get(periodStart) ??
+      (dueDaysBefore > 0 ? addCalendarDays(periodStart, -dueDaysBefore) : periodStart);
     const isDue = dueDate <= today;
     if (!isDue && periodStart > latestPaidPeriod) upcomingIncluded += 1;
 
@@ -926,6 +936,25 @@ function setupDueDate(
     return isValidDate(liveDate) ? liveDate : agreement.setup_due_date ?? null;
   }
   return agreement.setup_due_date ?? null;
+}
+
+/**
+ * Days between when a payment was due and when it arrived: positive = late,
+ * negative = early, null when no due date was entered.
+ */
+export function paymentDelayDays(
+  dueOn: string | null | undefined,
+  paidOn: string | null | undefined
+): number | null {
+  if (!isValidDate(dueOn) || !isValidDate(paidOn)) return null;
+  return daysBetween(dueOn, paidOn);
+}
+
+/** "15 days late", "On time", "3 days early". */
+export function paymentDelayLabel(days: number): string {
+  if (days === 0) return "On time";
+  const count = Math.abs(days);
+  return `${count} day${count === 1 ? "" : "s"} ${days > 0 ? "late" : "early"}`;
 }
 
 export function periodLabel(period: Pick<RecurringPeriod, "periodStart" | "periodEnd">) {

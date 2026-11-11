@@ -11,6 +11,7 @@ import type { Currency, IncomePayment, MoneyAccount } from "@/lib/types";
 import Icon from "./Icons";
 import TaxBreakdownFields from "./TaxBreakdownFields";
 import { VatBillDocuments } from "./DocumentSections";
+import { PaymentDates } from "./RecordIncomePayment";
 import type { Attachment } from "@/lib/attachments";
 
 const initialState: IncomeFormState = { error: null, ok: null };
@@ -38,6 +39,8 @@ export default function EditIncomePayment({
   const [state, action, pending] = useActionState(guardRequest(updateIncomePayment), initialState);
   const [accountId, setAccountId] = useState(payment.money_account_id ?? "");
   const [filesBusy, setFilesBusy] = useState(false);
+  const [dueOn, setDueOn] = useState(payment.due_on ?? "");
+  const [paidOn, setPaidOn] = useState(payment.paid_on);
   const matchingAccounts = moneyAccounts.filter(
     (account) => account.is_active && account.currency === currency
   );
@@ -53,7 +56,11 @@ export default function EditIncomePayment({
     <>
       <button
         type="button"
-        onClick={() => setOpen(true)}
+        onClick={() => {
+          setDueOn(payment.due_on ?? "");
+          setPaidOn(payment.paid_on);
+          setOpen(true);
+        }}
         className="icon-btn !w-8 !h-8"
         aria-label="Edit this payment"
       >
@@ -89,16 +96,7 @@ export default function EditIncomePayment({
               }}
             />
 
-            <label className="block">
-              <span className="field-label">Date received</span>
-              <input
-                name="paid_on"
-                type="date"
-                required
-                defaultValue={payment.paid_on}
-                className="input mt-1"
-              />
-            </label>
+            <PaymentDates dueOn={dueOn} paidOn={paidOn} onDueChange={setDueOn} onPaidChange={setPaidOn} />
 
             {payment.payment_for === "recurring" && streamPeriods.length > 0 && (
               <label className="block">

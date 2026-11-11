@@ -31,6 +31,8 @@ import {
   goLiveDate,
   hasRecurringService,
   keyDates,
+  paymentDelayDays,
+  paymentDelayLabel,
   periodLabel,
   recurringFromDate,
   summarizeIncomeAgreement,
@@ -449,11 +451,22 @@ export default async function ClientBillingPage({
                 const account = payment.money_account_id
                   ? accountById.get(payment.money_account_id)
                   : null;
+                const delay = paymentDelayDays(payment.due_on, payment.paid_on);
                 return (
                   <div key={payment.id} className="payment-table-row">
                     <span data-label="Payment received" className="inline-flex items-center">
                       <SelectBox id={payment.id} label={`the payment on ${formatServiceDate(payment.paid_on)}`} />
-                      {formatServiceDate(payment.paid_on)}
+                      <span>
+                        {formatServiceDate(payment.paid_on)}
+                        {delay != null && (
+                          <small className="block text-[12.5px] mt-0.5" title={`Due ${formatServiceDate(payment.due_on ?? null)}`}>
+                            <strong style={{ color: delay > 0 ? "var(--red)" : "var(--green)" }}>
+                              {paymentDelayLabel(delay)}
+                            </strong>
+                            <span className="muted block">due {formatServiceDate(payment.due_on ?? null)}</span>
+                          </small>
+                        )}
+                      </span>
                     </span>
                     <span data-label="For">
                       {payment.payment_for === "setup"

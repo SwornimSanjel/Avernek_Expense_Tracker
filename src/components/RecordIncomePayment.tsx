@@ -10,6 +10,9 @@ import {
 import {
   PAYMENT_METHOD_LABELS,
   formatIncomeMoney,
+  formatServiceDate,
+  paymentDelayDays,
+  paymentDelayLabel,
   periodLabel,
   todayIso,
   type IncomeAgreementSummary,
@@ -87,6 +90,8 @@ export default function RecordIncomePayment({
   const [state, action, pending] = useActionState(guardRequest(recordIncomePayment), initialState);
   const [filesBusy, setFilesBusy] = useState(false);
   const [feeOpen, setFeeOpen] = useState(false);
+  const [dueOn, setDueOn] = useState("");
+  const [paidOn, setPaidOn] = useState(todayIso());
 
   const selectedPeriod = useMemo(
     () => activeStream?.periods.find((period) => period.periodStart === periodStart) ?? null,
@@ -101,7 +106,11 @@ export default function RecordIncomePayment({
   if (!open) {
     return (
       <button
-        onClick={() => setOpen(true)}
+        onClick={() => {
+          setDueOn("");
+          setPaidOn(todayIso());
+          setOpen(true);
+        }}
         className={`btn btn-primary ${compact ? "btn-sm" : ""}`}
         title="Record a payment from this client"
       >
@@ -222,11 +231,19 @@ export default function RecordIncomePayment({
           </div>
         </div>
 
+        <PaymentDates
+          dueOn={dueOn}
+          paidOn={paidOn}
+          onDueChange={setDueOn}
+          onPaidChange={setPaidOn}
+          hint={
+            paymentFor === "recurring" && selectedPeriod
+              ? `Optional. This month started ${formatServiceDate(selectedPeriod.periodStart)}.`
+              : undefined
+          }
+        />
+
         <div className="grid grid-cols-2 gap-2">
-          <label className="block">
-            <span className="field-label">Date received</span>
-            <input name="paid_on" type="date" required defaultValue={todayIso()} className="input mt-1" />
-          </label>
           <label className="block">
             <span className="field-label">Method (optional)</span>
             <select name="method" defaultValue="bank_transfer" className="input mt-1">
@@ -242,7 +259,7 @@ export default function RecordIncomePayment({
             <span className="field-label">Reference / VAT bill no. (optional)</span>
             <input name="reference" placeholder="Transaction or bill no." className="input mt-1" />
           </label>
-          <label className="block">
+          <label className="block col-span-2">
             <span className="field-label">Note (optional)</span>
             <input name="note" placeholder="Advance, second instalment…" className="input mt-1" />
           </label>
@@ -266,6 +283,68 @@ export default function RecordIncomePayment({
           open={feeOpen}
           onClose={() => setFeeOpen(false)}
         />
+      )}
+    </div>
+  );
+}
+
+/**
+ * When the payment was due and when it arrived, side by side. Both are typed
+ * dates; the due date is optional and can be added or fixed later.
+ */
+export function PaymentDates({
+  dueOn,
+  paidOn,
+  onDueChange,
+  onPaidChange,
+  hint,
+}: {
+  dueOn: string;
+  paidOn: string;
+  onDueChange: (value: string) => void;
+  onPaidChange: (value: string) => void;
+  hint?: string;
+}) {
+  const delay = paymentDelayDays(dueOn, paidOn);
+  return (
+    <div>
+      <div className="grid grid-cols-2 gap-2">
+        <label className="block">
+          <span className="field-label">Due date (optional)</span>
+          <input
+            name="due_on"
+            type="date"
+            value={dueOn}
+            onChange={(event) => onDueChange(event.target.value)}
+            className="input mt-1"
+          />
+        </label>
+        <label className="block">
+          <span className="field-label">Paid on</span>
+          <input
+            name="paid_on"
+            type="date"
+            required
+            value={paidOn}
+            onChange={(event) => onPaidChange(event.target.value)}
+            className="input mt-1"
+          />
+        </label>
+      </div>
+      {delay != null ? (
+        <p className="field-help">
+          <strong style={{ color: delay > 0 ? "var(--red)" : "var(--green)" }}>{paymentDelayLabel(delay)}</strong>
+          {dueOn ? (
+            <>
+              {" "}· due {formatServiceDate(dueOn)}{" "}
+              <button type="button" onClick={() => onDueChange("")} className="underline">
+                clear
+              </button>
+            </>
+          ) : null}
+        </p>
+      ) : (
+        <p className="field-help">{hint ?? "Optional. You can add or change it later."}</p>
       )}
     </div>
   );

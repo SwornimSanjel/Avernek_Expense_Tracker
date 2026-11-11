@@ -314,6 +314,8 @@ export interface IncomePayment {
   /** TDS the client withheld. Never reached the bank; claimable as a tax credit. */
   tds_amount: number;
   paid_on: string;
+  /** Optional: when it should have been paid. Missing until the migration has run. */
+  due_on?: string | null;
   received_in: IncomeAccountType;
   money_account_id: string | null;
   account_name: string | null;
